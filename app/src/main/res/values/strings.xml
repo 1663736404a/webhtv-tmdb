@@ -640,6 +640,9 @@
     <string name="setting_proxy_rules_hint">Raw JSON: {&quot;proxy&quot;:[{&quot;hosts&quot;:[&quot;example.com&quot;],&quot;urls&quot;:[&quot;socks5://127.0.0.1:1080&quot;]}]}</string>
     <string name="setting_proxy_default_url">Default proxy URL</string>
     <string name="setting_proxy_rule_url">Proxy URL</string>
+    <string name="setting_proxy_edit_rule">Edit rule %1$d</string>
+    <string name="setting_proxy_rule_use_default">Default proxy · %1$s</string>
+    <string name="setting_proxy_rule_use_default_empty">Uses default proxy (not set)</string>
     <string name="setting_proxy_text_mode">Text</string>
     <string name="setting_proxy_ui_mode">Edit</string>
     <string name="setting_proxy_add_rule">Add rule</string>

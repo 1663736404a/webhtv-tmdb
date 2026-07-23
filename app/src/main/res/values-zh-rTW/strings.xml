@@ -627,6 +627,9 @@
     <string name="setting_proxy_rules_hint">Raw JSON：{&quot;proxy&quot;:[{&quot;hosts&quot;:[&quot;example.com&quot;],&quot;urls&quot;:[&quot;socks5://127.0.0.1:1080&quot;]}]}</string>
     <string name="setting_proxy_default_url">預設代理位址</string>
     <string name="setting_proxy_rule_url">代理位址</string>
+    <string name="setting_proxy_edit_rule">編輯規則 %1$d</string>
+    <string name="setting_proxy_rule_use_default">預設代理 · %1$s</string>
+    <string name="setting_proxy_rule_use_default_empty">使用預設代理（未設定）</string>
     <string name="setting_proxy_text_mode">文字</string>
     <string name="setting_proxy_ui_mode">編輯</string>
     <string name="setting_proxy_add_rule">新增規則</string>
