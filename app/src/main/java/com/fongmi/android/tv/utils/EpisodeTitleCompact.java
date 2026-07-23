@@ -27,9 +27,24 @@ public final class EpisodeTitleCompact {
     private static final Pattern COLLECTION_HEADER = Pattern.compile("^\\s*[\\[【]\\s*([0-9]{1,3})\\s*[._-]\\s*((?:19|20)[0-9]{2})\\s+([^\\]】]+)[\\]】]\\s*(.*)$");
     private static final Pattern CHINESE_SEASON = Pattern.compile("第\\s*[0-9一二三四五六七八九十百]+\\s*季");
     private static final Pattern ENGLISH_SEASON = Pattern.compile("(?i)(?:SEASON\\s*|S)([0-9]{1,2})(?=$|\\D)");
+    private static final Pattern COLLECTION_PART = Pattern.compile("(?:动画|動畫)(?:版)?\\s*(第\\s*[0-9一二三四五六七八九十百]+\\s*部)");
     private static final Pattern COLLECTION_SPECIAL = Pattern.compile("(?i)(特别篇|特別篇|剧场版|劇場版|(?<![A-Z0-9])(?:OVA?|OAD|SP)(?![A-Z0-9]))(?:\\s*[:：._-]?\\s*)(.*)");
+    private static final Pattern COLLECTION_STAGE = Pattern.compile("(?:舞台剧|舞台劇)\\s*(.*)");
+    private static final Pattern COLLECTION_SIDE_STORY = Pattern.compile("(?:番外篇|番外)\\s*(.*)");
+    private static final Pattern COLLECTION_SPIN_OFF = Pattern.compile("(?:外传|外傳)\\s*(.*)");
+    private static final Pattern COLLECTION_MEMORIAL = Pattern.compile("(?:纪念作|紀念作)\\s*(.*)");
+    private static final Pattern COLLECTION_CHAPTER = Pattern.compile("([白黑]之章|(?:前|后|後|上|下)(?:篇|章))");
+    private static final Pattern NESTED_COLLECTION_HEADER = Pattern.compile("^\\s*\\[\\[(.*?)\\]\\]\\s*(.*)$");
+    private static final Pattern CATEGORY_HEADER = Pattern.compile("(?i)^\\s*\\[(PV|其他|番外|花絮|舞台剧|舞台劇)\\]\\s*(.*)$");
+    private static final Pattern BARE_STRUCTURED_HEADER = Pattern.compile("(?i)^\\s*\\[(?:DBD-Raws|[^\\]]*(?:字幕组|字幕組|字幕团|字幕團))\\]");
+    private static final Pattern INLINE_EPISODE = Pattern.compile("(?i)(?<![0-9])([0-9]{1,3}(?:\\.[0-9]+)?(?:SP)?)[\\s._-]*([\\p{IsHan}々〆〇ヶ]+(?:[（(][^）)]{1,16}[）)])?)");
+    private static final Pattern BRACKET_EPISODE = Pattern.compile("(?i)(?:SP[0-9]{1,3}|[0-9]{1,3}(?:[.·][0-9]+)?(?:SP)?)");
+    private static final Pattern PROMO_TOKEN = Pattern.compile("(?i)^PV\\s*([0-9]{1,3})$");
+    private static final Pattern STAGE_TITLE = Pattern.compile("(觉醒|覺醒|転生|转生)");
     private static final Pattern BRACKET_TOKEN = Pattern.compile("[\\[【(（]\\s*([^\\]】)）]+?)\\s*[\\]】)）]");
     private static final Pattern TECHNICAL_BRACKET = Pattern.compile("(?i)(?:[0-9]{3,4}\\s*[x×]\\s*[0-9]{3,4}|(?:4320|2160|1080|720)P|[48]K|HDR10(?:\\+|⁺)?|HDR|SDR|DV|DOLBY|HEVC|H[.]?26[45]|X26[45]|AVC|AV1|AAC|FLAC|WEB-?DL|WEBRIP|BLU-?RAY|BDRIP|BD|MP4|MKV|AVI|TS|[A-F0-9]{8,32}|(?:简|繁|中|日|英|国|粤).*(?:字幕|双语|中字))");
+    private static final Pattern TECHNICAL_DETAIL = Pattern.compile("(?i).*(?:[0-9]{3,4}\\s*[x×]\\s*[0-9]{3,4}|(?:4320|2160|1080|720|576|480)P(?:60P)?|HI[0-9]+P|HDR10|HDR|SDR|DOLBY|HEVC|AVC|X26[45]|H[.]?26[45]|DIVX|AAC|AC3|EAC3|DDP|PCM|FLAC|DTS|TRUEHD|WEB-?DL|WEBRIP|BLU-?RAY|BDRIP|TVRIP|DVDRIP|HDRIP|MP4|MKV|AVI|M2TS).*");
+    private static final Pattern LANGUAGE_DETAIL = Pattern.compile("(?i)(?:(?:GB|CHS|CHT|BIG5)(?:[·._\\s-]*(?:CN|JAP|JP|CHS|CHT))*|.*(?:字幕|双语|中字|外挂|内嵌|简繁|繁中|简中).*)");
     private static final Pattern COLLECTION_VARIANT_TOKEN = Pattern.compile("(?i)(?:4320|2160|1080|720)P|[48]K|HDR10(?:\\+|⁺)?|HDR|SDR|DV|HEVC|H[.]?265|X265|AVC|H[.]?264|X264|AV1");
     private static final Pattern EPISODE_START = Pattern.compile("(?i)^(?:S\\s*[0-9]{1,2}\\s*E\\s*[0-9]{1,4}(?:\\s*(?:E|[-~—–])\\s*[0-9]{1,4})?|[0-9]{1,2}\\s*x\\s*[0-9]{1,4}(?:\\s*[-~—–]\\s*[0-9]{1,4})?|第\\s*[0-9一二三四五六七八九十百]+\\s*(?:集|话|話|期|章|回)|[0-9]{1,4}\\s*(?:集|话|話|期|章|回)|(?:EP|E)\\s*[0-9]{1,4}(?:\\s*[-~—–]\\s*[0-9]{1,4})?|[0-9]{4}[-._][0-9]{1,2}[-._][0-9]{1,2}|[0-9]{1,4}(?:\\D|$)|[上下](?:集|部)?|前篇|后篇|後篇|正片|预告|預告|花絮)");
     private static final Pattern VARIANT_TOKEN = Pattern.compile("(?i)(?:^|[\\s._\\-·|/\\\\:：,，;；\\[\\]()（）【】《》])((?:4320|2160|1080|720)P|[48]K|HQ|HD|HDR10(?:\\+|⁺)?|HDR|SDR|DV|60FPS|50FPS|30FPS|25FPS|24FPS|10BITS|8BITS|HEVC|H265|H\\.265|AVC|H264|H\\.264|AV1|DDP\\s*2[.·]?0|AAC\\s*2[.·]?0)(?=$|[\\s._\\-·|/\\\\:：,，;；\\[\\]()（）【】《》])");
@@ -73,7 +88,8 @@ public final class EpisodeTitleCompact {
         }
         if (rawNames.size() < 2) {
             List<String> result = new ArrayList<>();
-            result.add(appendSize(names.get(0), sizes.get(0)));
+            String structured = findCollectionDisplay(rawNames.get(0));
+            result.add(appendSize(isEmpty(structured) ? names.get(0) : structured, sizes.get(0)));
             return result;
         }
         int prefix = findPrefix(names);
@@ -107,11 +123,15 @@ public final class EpisodeTitleCompact {
     }
 
     private static String cleanFileNoise(String value) {
+        return cleanupEdge(stripFileNoise(value));
+    }
+
+    private static String stripFileNoise(String value) {
         String text = isEmpty(value) ? "" : value.trim();
         text = cleanEdgeNoise(text);
         text = EXTENSION.matcher(text).replaceFirst("");
         text = cleanEdgeNoise(text);
-        return cleanupEdge(text);
+        return text.trim();
     }
 
     private static String extractSize(String value) {
@@ -250,21 +270,154 @@ public final class EpisodeTitleCompact {
     private static String findCollectionDisplay(String text) {
         if (isEmpty(text)) return "";
         Matcher header = COLLECTION_HEADER.matcher(text);
-        if (!header.matches()) return "";
+        if (header.matches()) return findNumberedCollectionDisplay(header);
+        Matcher nested = NESTED_COLLECTION_HEADER.matcher(text);
+        if (nested.matches()) return findNestedCollectionDisplay(nested.group(2));
+        Matcher category = CATEGORY_HEADER.matcher(text);
+        if (category.matches()) return findCategoryDisplay(category.group(1), category.group(2));
+        if (BARE_STRUCTURED_HEADER.matcher(text).find()) return findNestedCollectionDisplay(text);
+        return "";
+    }
+
+    private static String findNumberedCollectionDisplay(Matcher header) {
         String descriptor = header.group(3).trim();
-        String remainder = cleanFileNoise(header.group(4));
-        String season = findSeasonLabel(descriptor);
-        if (!isEmpty(season)) {
-            String episode = findEpisodeToken(remainder);
+        String remainder = stripFileNoise(header.group(4));
+        String seriesLabel = findSeasonLabel(descriptor);
+        if (isEmpty(seriesLabel)) seriesLabel = findPartLabel(descriptor);
+        if (!isEmpty(seriesLabel)) {
+            String episode = findStructuredEpisodeToken(remainder);
             if (isEmpty(episode)) return "";
-            String title = findBracketedEpisodeTitle(remainder, episode);
-            return season + " " + episode + (isEmpty(title) ? "" : " " + title);
+            String title = findStructuredEpisodeTitle(remainder, episode);
+            return seriesLabel + " " + episode + (isEmpty(title) ? "" : " " + title);
         }
         Matcher special = COLLECTION_SPECIAL.matcher(descriptor);
-        if (!special.find()) return "";
-        String type = normalizeSpecialLabel(special.group(1));
-        String title = cleanupEdge(special.group(2));
-        return type + (isEmpty(title) ? "" : " " + title);
+        if (special.find()) {
+            String type = normalizeSpecialLabel(special.group(1));
+            String title = normalizeDisplayText(special.group(2));
+            String chapter = findChapterLabel(remainder);
+            if (!isEmpty(chapter)) title = firstTitleWord(title) + " " + chapter;
+            return type + (isEmpty(title) ? "" : " " + normalizeDisplayText(title));
+        }
+        Matcher stage = COLLECTION_STAGE.matcher(descriptor);
+        if (stage.find()) {
+            String title = normalizeDisplayText(stage.group(1));
+            return "舞台剧" + (isEmpty(title) ? "" : " " + title);
+        }
+        Matcher sideStory = COLLECTION_SIDE_STORY.matcher(descriptor);
+        if (sideStory.find()) {
+            String title = normalizeDisplayText(sideStory.group(1));
+            return "番外篇" + (isEmpty(title) ? "" : " " + title);
+        }
+        String episode = findStructuredEpisodeToken(remainder);
+        if (isEmpty(episode)) return "";
+        String episodeTitle = findStructuredEpisodeTitle(remainder, episode);
+        Matcher spinOff = COLLECTION_SPIN_OFF.matcher(descriptor);
+        if (spinOff.find()) {
+            String title = firstTitleWord(spinOff.group(1));
+            String label = isEmpty(title) ? "外传" : title + "外传";
+            return label + " " + episode + (isEmpty(episodeTitle) ? "" : " " + episodeTitle);
+        }
+        Matcher memorial = COLLECTION_MEMORIAL.matcher(descriptor);
+        if (!memorial.find()) return "";
+        String title = normalizeDisplayText(memorial.group(1));
+        return title + " " + episode + (isEmpty(episodeTitle) ? "" : " " + episodeTitle);
+    }
+
+    private static String findNestedCollectionDisplay(String value) {
+        String remainder = stripFileNoise(value);
+        String episode = findStructuredEpisodeToken(remainder);
+        if (!isEmpty(episode)) {
+            String title = findStructuredEpisodeTitle(remainder, episode);
+            return episode + (isEmpty(title) ? "" : " " + title);
+        }
+        return findLastMeaningfulBracketToken(remainder);
+    }
+
+    private static String findCategoryDisplay(String category, String value) {
+        String remainder = stripFileNoise(value);
+        List<String> candidates = findMeaningfulBracketTokens(remainder);
+        if (category.matches("舞台剧|舞台劇")) {
+            String episode = findBracketEpisodeToken(remainder);
+            if (!isEmpty(episode)) return "舞台剧 " + episode;
+            String label = candidates.isEmpty() ? cleanFileNoise(remainder) : candidates.get(candidates.size() - 1);
+            Matcher title = STAGE_TITLE.matcher(label);
+            if (title.find()) {
+                label = normalizeStageTitle(title.group(1));
+            } else {
+                title = STAGE_TITLE.matcher(remainder);
+                if (title.find()) label = normalizeStageTitle(title.group(1));
+            }
+            return "舞台剧" + (isEmpty(label) ? "" : " " + normalizeDisplayText(label));
+        }
+        if (category.equalsIgnoreCase("PV")) {
+            String label = candidates.isEmpty() ? cleanFileNoise(remainder) : candidates.get(candidates.size() - 1);
+            Matcher promo = PROMO_TOKEN.matcher(label);
+            return promo.matches() ? "PV" + promo.group(1) : "PV" + (isEmpty(label) ? "" : " " + label);
+        }
+        if (category.equals("番外")) {
+            for (int i = 0; i < candidates.size(); i++) {
+                if (!candidates.get(i).matches("番外篇|番外")) continue;
+                String title = i + 1 < candidates.size() ? candidates.get(i + 1) : "";
+                return "番外篇" + (isEmpty(title) ? "" : " " + title);
+            }
+            String title = candidates.isEmpty() ? cleanFileNoise(remainder) : candidates.get(candidates.size() - 1);
+            return "番外" + (isEmpty(title) ? "" : " " + title);
+        }
+        String label = candidates.isEmpty() ? cleanFileNoise(remainder) : candidates.get(candidates.size() - 1);
+        return label;
+    }
+
+    private static String findStructuredEpisodeToken(String text) {
+        Matcher inline = INLINE_EPISODE.matcher(text);
+        if (inline.find()) return normalizeEpisodeToken(inline.group(1));
+        String bracketEpisode = findBracketEpisodeToken(text);
+        if (!isEmpty(bracketEpisode)) return bracketEpisode;
+        return findEpisodeToken(text);
+    }
+
+    private static String findBracketEpisodeToken(String text) {
+        Matcher bracket = BRACKET_TOKEN.matcher(text);
+        while (bracket.find()) {
+            String value = cleanupEdge(bracket.group(1));
+            if (BRACKET_EPISODE.matcher(value).matches()) return normalizeEpisodeToken(value);
+        }
+        return "";
+    }
+
+    private static String findStructuredEpisodeTitle(String text, String episode) {
+        String title = findBracketedEpisodeTitle(text, episode);
+        if (!isEmpty(title)) return title;
+        Matcher inline = INLINE_EPISODE.matcher(text);
+        while (inline.find()) {
+            if (normalizeEpisodeToken(inline.group(1)).equals(normalizeEpisodeToken(episode))) return inline.group(2).trim();
+        }
+        return "";
+    }
+
+    private static String findPartLabel(String descriptor) {
+        Matcher part = COLLECTION_PART.matcher(descriptor);
+        if (!part.find()) return "";
+        return "动画" + part.group(1).replaceAll("\\s+", "");
+    }
+
+    private static String findChapterLabel(String text) {
+        Matcher chapter = COLLECTION_CHAPTER.matcher(text);
+        return chapter.find() ? chapter.group(1) : "";
+    }
+
+    private static String firstTitleWord(String title) {
+        String value = normalizeDisplayText(title);
+        int split = value.indexOf(' ');
+        return split <= 0 ? value : value.substring(0, split);
+    }
+
+    private static String normalizeDisplayText(String value) {
+        return cleanupEdge(value).replaceAll("\\s+", " ");
+    }
+
+    private static String normalizeStageTitle(String value) {
+        if (value.equals("覺醒")) return "觉醒";
+        return value;
     }
 
     private static String findSeasonLabel(String descriptor) {
@@ -307,8 +460,31 @@ public final class EpisodeTitleCompact {
 
     private static boolean isEpisodeTitleCandidate(String value) {
         if (isEmpty(value) || RESOLUTION_TOKEN.matcher(value).matches()) return false;
-        if (TECHNICAL_BRACKET.matcher(value).matches()) return false;
-        return !value.matches("(?i)(?:EP?|S[0-9]{1,2}E)?[0-9]{1,4}");
+        if (isTechnicalToken(value)) return false;
+        return !value.matches("(?i)(?:(?:EP?|S[0-9]{1,2}E|SP)?[0-9]{1,4}|[0-9]{1,3}(?:[.·][0-9]+)?(?:SP)?)");
+    }
+
+    private static boolean isTechnicalToken(String value) {
+        String token = cleanupEdge(value);
+        if (TECHNICAL_BRACKET.matcher(token).matches()) return true;
+        if (TECHNICAL_DETAIL.matcher(token).matches()) return true;
+        if (LANGUAGE_DETAIL.matcher(token).matches()) return true;
+        return token.matches("(?i)(?:END|V[0-9]+|(?:HI)?10-?BIT|8-?BIT)");
+    }
+
+    private static String findLastMeaningfulBracketToken(String text) {
+        List<String> values = findMeaningfulBracketTokens(text);
+        return values.isEmpty() ? "" : values.get(values.size() - 1);
+    }
+
+    private static List<String> findMeaningfulBracketTokens(String text) {
+        List<String> values = new ArrayList<>();
+        Matcher matcher = BRACKET_TOKEN.matcher(text);
+        while (matcher.find()) {
+            String value = cleanupEdge(matcher.group(1));
+            if (isEpisodeTitleCandidate(value)) values.add(value);
+        }
+        return values;
     }
 
     private static List<String> resolveCollectionVariants(List<String> names, List<String> displays) {
@@ -465,7 +641,7 @@ public final class EpisodeTitleCompact {
 
     private static String normalizeEpisodeToken(String token) {
         if (token == null) return "";
-        String value = token.replaceAll("\\s+", "").toUpperCase(Locale.ROOT);
+        String value = token.replaceAll("\\s+", "").replace('·', '.').toUpperCase(Locale.ROOT);
         if (value.matches("[0-9]{4}[-._][0-9]{1,2}[-._][0-9]{1,2}")) value = value.replace('.', '-').replace('_', '-');
         return value;
     }

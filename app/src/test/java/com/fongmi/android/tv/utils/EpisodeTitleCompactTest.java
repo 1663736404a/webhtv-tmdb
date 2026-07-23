@@ -2,9 +2,17 @@ package com.fongmi.android.tv.utils;
 
 import org.junit.Test;
 
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
 public class EpisodeTitleCompactTest {
 
@@ -86,5 +94,224 @@ public class EpisodeTitleCompactTest {
         );
 
         assertEquals(List.of("01", "02"), EpisodeTitleCompact.compact(names));
+    }
+
+    @Test
+    public void animationCollectionsUsePartAndActualEpisodeInsteadOfArchiveNumber() {
+        List<String> names = List.of(
+                "[11.2014 牙狼 动画版 第一部 炎之刻印] 牙狼GARO 炎之刻印 01业火 HELL FIRE.mp4 [284.67MB]",
+                "[11.2014 牙狼 动画版 第一部 炎之刻印] 牙狼GARO 炎之刻印 12.5SP 飨応（相应） DAYBREAK.mp4 [284.43MB]",
+                "[11.2014 牙狼 动画版 第一部 炎之刻印] 牙狼GARO 炎之刻印 19黑翼TEMPEST.mkv [284.29MB]",
+                "[14.2015 牙狼 动画版 第二部 红莲之月] [光の影字幕组][牙狼-紅蓮之月][01][陰陽][x264·AAC][720p][TVrip][MKV].mkv [297.34MB]",
+                "[20.2017 牙狼 动画版 第三部 死亡线] [光の影字幕組][牙狼-VANISHING LINE-][01][SWORD][TVRip][720p][x264·AAC][Hi10p].mkv [288.99MB]",
+                "[20.2017 牙狼 动画版 第三部 死亡线] [JYFanSub][GARO-VANISHING·LINE-][13][GB·CN][X264·AAC][720p](779A85A4).mp4 [183.83MB]",
+                "[28.2024 牙狼 第十季 钢之继承者] [XK SPIRITS][GARO-Hagane wo Tsugu Mono-][01][CHS·JAP][1080P][TVrip][MP4].mp4 [697.72MB]"
+        );
+
+        assertEquals(List.of(
+                "动画第一部 01 业火 [284.67MB]",
+                "动画第一部 12.5SP 飨応（相应） [284.43MB]",
+                "动画第一部 19 黑翼 [284.29MB]",
+                "动画第二部 01 陰陽 [297.34MB]",
+                "动画第三部 01 SWORD [288.99MB]",
+                "动画第三部 13 [183.83MB]",
+                "第十季 01 [697.72MB]"
+        ), EpisodeTitleCompact.compact(names));
+    }
+
+    @Test
+    public void nestedFolderMetadataDoesNotOverrideActualEpisodeOrTitle() {
+        List<String> names = List.of(
+                "[[0-12][光の影字幕組][720P]] [光の影字幕組][神之牙-JINGA-][00][TVRip][720p][x264·AAC][Hi10p].mp4 [340.49MB]",
+                "[[5-12][银梦字幕组][1080P60帧]] 【银梦字幕组】神之牙-JINGA-EP 05[1080P60P].mp4 [415.77MB]",
+                "[[DBD-Raws][牙狼：神之牙][1080P][BDRip][HEVC-10bit][简繁外挂][FLAC][MKV]] [DBD-Raws][牙狼：神之牙][1080P][BDRip][HEVC-10bit][FLAC].mkv [8.05GB]",
+                "[[魔星字幕团][牙狼_GARO][中日双语字幕][HDRip][720P][MKV][重制校译版]] [魔星字幕团][牙狼·GARO][01][绘本][中日双语字幕][HDRip][720P][MKV][重制校译版].mkv [600.78MB]"
+        );
+
+        assertEquals(List.of(
+                "00 [340.49MB]",
+                "EP05 [415.77MB]",
+                "牙狼：神之牙 [8.05GB]",
+                "01 绘本 [600.78MB]"
+        ), EpisodeTitleCompact.compact(names));
+    }
+
+    @Test
+    public void promosExtrasAndSideStoriesKeepMeaningfulLabels() {
+        List<String> names = List.of(
+                "[PV] [DBD-Raws][牙狼：神之牙][PV1][1080P][BDRip][HEVC-10bit][FLAC].mkv [43.93MB]",
+                "[其他] CM.mkv [90.85MB]",
+                "[其他] CR集.mkv [724.72MB]",
+                "[其他] [RCRAW][牙狼 -月虹ノ旅人-][予告編集][BDrip][1080p][x265·PCM][HEVC-Main10]..mkv [430.56MB]",
+                "[其他] [RCRAW][牙狼 -月虹ノ旅人-][Event映像集][DVDrip][480p][x265·AC3][HEVC-Main10]..mkv [79.17MB]",
+                "[其他] [RCRAW][牙狼 -月虹ノ旅人-][Visual Commentary][DVDrip][480p][x265·AC3][HEVC-Main10]..mkv [1.32GB]",
+                "[其他] [RCRAW][牙狼 -月虹ノ旅人-][ファンタジア国際映画祭][DVDrip][480p][x265·AC3][HEVC-Main10]..mkv [44.99MB]",
+                "[番外] [RC個人字幕組][牙狼][番外篇][笑顔][繁中字幕][DVDrip][640x480][DivX AAC][MP4].mp4 [376.15MB]"
+        );
+
+        assertEquals(List.of(
+                "PV1 [43.93MB]",
+                "CM [90.85MB]",
+                "CR集 [724.72MB]",
+                "予告編集 [430.56MB]",
+                "Event映像集 [79.17MB]",
+                "Visual Commentary [1.32GB]",
+                "ファンタジア国際映画祭 [44.99MB]",
+                "番外篇 笑顔 [376.15MB]"
+        ), EpisodeTitleCompact.compact(names));
+    }
+
+    @Test
+    public void collectionMoviesAndStageProductionsKeepSemanticVariants() {
+        List<String> names = List.of(
+                "[09.2014 牙狼 剧场版 绝狼 漆黑的血液] [光の影字幕组][絕狼ZERO - Black Blood -白之章-][x265·FLAC][1080p][BDrip][HEVC].mkv [2.17GB]",
+                "[09.2014 牙狼 剧场版 绝狼 漆黑的血液] [光の影字幕组][絕狼ZERO - Black Blood -黑之章-][x265·FLAC][1080p][BDrip][HEVC].mkv [2.23GB]",
+                "[16.2016 牙狼 炎之刻印 剧场版 牙狼-DIVINE FLAME-] [光の影字幕组][剧场版 牙狼 神圣之焰].mkv [1.06GB]",
+                "[21.2017 牙狼 舞台剧 觉醒] 【银梦字幕组】舞台剧『牙狼GARO 神之牙』 觉醒中日(1080p).mp4 [6.76GB]",
+                "[24.2018 牙狼 红莲之月 剧场版 薄墨樱  牙狼] 【Black·Sun·Sub】GAROUsuzumizakura BD1080P.mp4 [2.43GB]"
+        );
+
+        assertEquals(List.of(
+                "剧场版 绝狼 白之章 [2.17GB]",
+                "剧场版 绝狼 黑之章 [2.23GB]",
+                "剧场版 牙狼-DIVINE FLAME [1.06GB]",
+                "舞台剧 觉醒 [6.76GB]",
+                "剧场版 薄墨樱 牙狼 [2.43GB]"
+        ), EpisodeTitleCompact.compact(names));
+    }
+
+    @Test
+    public void capturedGaroSamplesNeverFallBackToArchiveOrTechnicalNoise() throws Exception {
+        List<String> names = loadFixture("/garo-short-display-regression-081-210.txt");
+        List<String> displays = EpisodeTitleCompact.compact(names);
+        assertEquals(130, names.size());
+        assertEquals(names.size(), displays.size());
+        for (int i = 0; i < names.size(); i++) {
+            String raw = names.get(i);
+            String display = displays.get(i);
+            boolean recognized = true;
+            if (raw.startsWith("[09.")) {
+                assertTrue(raw + " -> " + display, display.startsWith("剧场版 绝狼 "));
+            } else if (raw.startsWith("[11.")) {
+                assertTrue(raw + " -> " + display, display.startsWith("动画第一部 "));
+            } else if (raw.startsWith("[14.")) {
+                assertTrue(raw + " -> " + display, display.startsWith("动画第二部 "));
+            } else if (raw.startsWith("[16.")) {
+                assertTrue(raw + " -> " + display, display.startsWith("剧场版 "));
+            } else if (raw.startsWith("[20.")) {
+                assertTrue(raw + " -> " + display, display.startsWith("动画第三部 "));
+            } else if (raw.startsWith("[21.")) {
+                assertTrue(raw + " -> " + display, display.startsWith("舞台剧 "));
+            } else if (raw.startsWith("[24.")) {
+                assertTrue(raw + " -> " + display, display.startsWith("剧场版 "));
+            } else if (raw.startsWith("[28.")) {
+                assertTrue(raw + " -> " + display, display.startsWith("第十季 "));
+            } else if (raw.startsWith("[PV]")) {
+                assertTrue(raw + " -> " + display, display.startsWith("PV"));
+            } else if (raw.startsWith("[[0-12]")) {
+                assertTrue(raw + " -> " + display, display.matches("^[0-9]{2}\\s.*"));
+            } else if (raw.startsWith("[[5-12]")) {
+                assertTrue(raw + " -> " + display, display.matches("^EP[0-9]{2}\\s.*"));
+            } else if (raw.startsWith("[[DBD-Raws]")) {
+                assertTrue(raw + " -> " + display, display.startsWith("牙狼：神之牙 "));
+            } else if (raw.startsWith("[[魔星字幕团]")) {
+                assertTrue(raw + " -> " + display, display.matches("^[0-9]{2}\\s.*"));
+            } else if (raw.startsWith("[其他]")) {
+                assertFalse(raw + " -> " + display, display.startsWith("其他"));
+                assertFalse(raw + " -> " + display, display.matches("^(?:1080|720|480|265|HEVC|BDRip).*"));
+            } else if (raw.startsWith("[番外]")) {
+                assertTrue(raw + " -> " + display, display.startsWith("番外篇 笑顔 "));
+            } else {
+                recognized = false;
+            }
+            assertTrue("Unhandled captured filename: " + raw, recognized);
+        }
+    }
+
+    @Test
+    public void spinOffAndAnniversaryCollectionsUseTheirSemanticSeriesLabels() {
+        List<String> names = List.of(
+                "[19.2017 牙狼 外传 绝狼 龙之血] [絕狼-DRAGON BLOOD][01][銀狼][x264_AAC][720p][TVrip][Hi10p][MKV].mkv[524.75MB]",
+                "[19.2017 牙狼 外传 绝狼 龙之血] [絕狼-DRAGON BLOOD][13][世界][x264_AAC][720p][TVrip][Hi10p][MKV].mkv[515.72MB]",
+                "[27.2020 牙狼 十五周年纪念作 对阵之路][XKsub][GARO-VERSUS ROAD-][01][CHS_JAP][720P][TVrip][MP4].mp4[485.85MB]",
+                "[27.2020 牙狼 十五周年纪念作 对阵之路][XKsub][GARO-VERSUS ROAD-][6·5][CHS_JAP][720P][TVrip][MP4].mp4[393.39MB]"
+        );
+
+        assertEquals(List.of(
+                "绝狼外传 01 銀狼 [524.75MB]",
+                "绝狼外传 13 世界 [515.72MB]",
+                "对阵之路 01 [485.85MB]",
+                "对阵之路 6.5 [393.39MB]"
+        ), EpisodeTitleCompact.compact(names));
+    }
+
+    @Test
+    public void bareReleaseFoldersAndStageCategoriesKeepUsefulTitles() {
+        List<String> names = List.of(
+                "[DBD-Raws][牙狼：神之牙][1080P][BDRip][HEVC-10bit][FLAC].mkv[8.05GB]",
+                "[PV][DBD-Raws][牙狼：神之牙][PV1][1080P][BDRip][HEVC-10bit][FLAC].mkv[43.93MB]",
+                "[光の影字幕組][神之牙-JINGA-][00][TVRip][720p][x264_AAC][Hi10p].mp4[340.49MB]",
+                "[舞台剧][FatCatRAW][神ノ牙-JINGA- 転生][1080P][BDRIP][HEVC-YUV420P10 FLAC] [19B1598D] .mkv[2.81GB]",
+                "[舞台剧][FatCatRAW][神ノ牙-JINGA- 転生][SP01][1080P][BDRIP][HEVC-YUV420P10 FLAC] [9A2CE8AA] .mkv[164.87MB]",
+                "[舞台剧]舞台剧-『牙狼GARO 神之牙』 觉醒1080p（中文字幕） - 1·『牙狼GARO 神之牙』 觉醒中日1080p(Av59576952,P1).mp4[1.39GB]"
+        );
+
+        assertEquals(List.of(
+                "牙狼：神之牙 [8.05GB]",
+                "PV1 [43.93MB]",
+                "00 [340.49MB]",
+                "舞台剧 転生 [2.81GB]",
+                "舞台剧 SP01 [164.87MB]",
+                "舞台剧 觉醒 [1.39GB]"
+        ), EpisodeTitleCompact.compact(names));
+    }
+
+    @Test
+    public void capturedQuarkRangeNeverUsesCollectionSequenceAsEpisode() throws Exception {
+        List<String> names = loadFixture("/garo-quark-short-display-regression-161-264.txt");
+        List<String> displays = EpisodeTitleCompact.compact(names);
+        assertEquals(84, names.size());
+        assertEquals(names.size(), displays.size());
+        for (int i = 0; i < names.size(); i++) {
+            String raw = names.get(i);
+            String display = displays.get(i);
+            boolean recognized = true;
+            if (raw.startsWith("[19.")) {
+                assertTrue(raw + " -> " + display, display.startsWith("绝狼外传 "));
+            } else if (raw.startsWith("[20.")) {
+                assertTrue(raw + " -> " + display, display.startsWith("动画第三部 "));
+            } else if (raw.startsWith("[21.")) {
+                assertTrue(raw + " -> " + display, display.startsWith("舞台剧 "));
+            } else if (raw.startsWith("[22.") || raw.startsWith("[24.") || raw.startsWith("[26.")) {
+                assertTrue(raw + " -> " + display, display.startsWith("剧场版 "));
+            } else if (raw.startsWith("[27.")) {
+                assertTrue(raw + " -> " + display, display.startsWith("对阵之路 "));
+            } else if (raw.startsWith("[DBD-Raws]")) {
+                assertTrue(raw + " -> " + display, display.startsWith("牙狼：神之牙 "));
+            } else if (raw.startsWith("[PV]")) {
+                assertTrue(raw + " -> " + display, display.startsWith("PV"));
+            } else if (raw.startsWith("[光の影字幕組]")) {
+                assertTrue(raw + " -> " + display, display.matches("^[0-9]{2}\\s.*"));
+            } else if (raw.startsWith("[其他]")) {
+                assertFalse(raw + " -> " + display, display.startsWith("其他"));
+                assertFalse(raw + " -> " + display, display.matches("^(?:1080|720|480|265|HEVC|BDRip).*"));
+            } else if (raw.startsWith("[舞台剧]")) {
+                assertTrue(raw + " -> " + display, display.startsWith("舞台剧 "));
+            } else {
+                recognized = false;
+            }
+            assertTrue("Unhandled captured filename: " + raw, recognized);
+        }
+    }
+
+    private List<String> loadFixture(String resource) throws Exception {
+        InputStream stream = getClass().getResourceAsStream(resource);
+        assertNotNull(stream);
+        List<String> names = new ArrayList<>();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) if (!line.isEmpty()) names.add(line);
+        }
+        return names;
     }
 }
