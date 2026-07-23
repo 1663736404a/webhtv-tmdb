@@ -87,6 +87,27 @@ public class EpisodeTitleCompactTest {
     }
 
     @Test
+    public void summaryDirectionsIgnoreFolderMetadataAndRepeatedSeriesLabelsStayReadable() {
+        List<String> names = List.of(
+                "[总结篇上 下集]总集篇上 4K .mp4[878.51MB]",
+                "[总结篇上 下集]总集篇下 4K .mp4[1.11GB]",
+                "[缘起]缘起01 4K.mp4[923.75MB]",
+                "[缘起]缘起02 4K.mp4[397.02MB]",
+                "[缘起]缘起03 4K.mp4[781.86MB]",
+                "斗破苍穹·S05E001·2160p·WEB-DL·H265·10bit·DDP2·0.mp4[395.33MB]"
+        );
+
+        assertEquals(List.of(
+                "上 [878.51MB]",
+                "下 [1.11GB]",
+                "缘起 01 [923.75MB]",
+                "缘起 02 [397.02MB]",
+                "缘起 03 [781.86MB]",
+                "S05E001 [395.33MB]"
+        ), EpisodeTitleCompact.compact(names));
+    }
+
+    @Test
     public void unrecognizedCollectionHeadersFallBackToExistingRules() {
         List<String> names = List.of(
                 "[01.2020 Space Documentary] Part Alpha 1080p WEB-DL.mkv",
