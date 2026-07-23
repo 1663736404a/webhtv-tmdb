@@ -310,12 +310,7 @@ public class PlaybackPerformanceSetting {
 
     public static String getSummary() {
         ensureInitialized();
-        String preload = PreloadSetting.isPreload() ? "预载开" : "预载关";
-        return switch (PlayerSetting.getPlayer()) {
-            case PlayerSetting.IJK -> getProfileName() + " · IJK · " + preload;
-            case PlayerSetting.MPV -> getProfileName() + " · MPV · " + MpvPerformanceSetting.getOptionPriorityText() + " · " + preload;
-            default -> getProfileName() + " · " + (isTrackLimitEnabled() ? "轨道限制" : "不限轨道") + " · " + preload;
-        };
+        return getProfileName();
     }
 
     public static String getDetail() {

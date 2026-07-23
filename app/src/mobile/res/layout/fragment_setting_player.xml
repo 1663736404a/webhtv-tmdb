@@ -132,7 +132,9 @@
                     android:id="@+id/exo4kCompatText"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:ellipsize="end"
                     android:gravity="end"
+                    android:singleLine="true"
                     android:textColor="@color/white"
                     android:textSize="16sp"
                     tools:text="关" />
