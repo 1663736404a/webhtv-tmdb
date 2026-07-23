@@ -808,8 +808,6 @@
     <string name="player_scale">縮放比例</string>
     <string name="player_lut">LUT 調色</string>
     <string name="player_mpv_config">MPV 設定管理</string>
-    <string name="player_mpv_render">MPV 渲染後端</string>
-    <string name="mpv_render_native_unavailable">目前不可用</string>
     <string name="mpv_config_target">%1$s · %2$s</string>
     <string name="mpv_config_default">預設</string>
     <string name="mpv_config_local">本機 mpv.conf</string>
@@ -1068,10 +1066,6 @@
         <item>EXO</item>
         <item>IJK</item>
         <item>MPV</item>
-    </string-array>
-    <string-array name="select_mpv_render">
-        <item>OpenGL</item>
-        <item>Vulkan</item>
     </string-array>
     <string-array name="select_buffer_bytes">
         <item>自動</item>

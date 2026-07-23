@@ -826,8 +826,6 @@
     <string name="player_scale">Scale</string>
     <string name="player_lut">LUT color</string>
     <string name="player_mpv_config">MPV config manager</string>
-    <string name="player_mpv_render">MPV renderer</string>
-    <string name="mpv_render_native_unavailable">Unavailable</string>
     <string name="mpv_config_target">%1$s · %2$s</string>
     <string name="mpv_config_default">Default</string>
     <string name="mpv_config_local">Local mpv.conf</string>
@@ -1092,10 +1090,6 @@
         <item>EXO</item>
         <item>IJK</item>
         <item>MPV</item>
-    </string-array>
-    <string-array name="select_mpv_render">
-        <item>OpenGL</item>
-        <item>Vulkan</item>
     </string-array>
     <string-array name="select_buffer_bytes">
         <item>Auto</item>

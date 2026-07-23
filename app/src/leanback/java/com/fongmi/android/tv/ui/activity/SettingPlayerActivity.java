@@ -34,8 +34,6 @@ import com.fongmi.android.tv.utils.ResUtil;
 
 import java.text.DecimalFormat;
 
-import is.xyz.mpv.MPVLib;
-
 public class SettingPlayerActivity extends BaseActivity implements UaListener, BufferListener, SpeedListener {
 
     private ActivitySettingPlayerBinding mBinding;
@@ -44,7 +42,6 @@ public class SettingPlayerActivity extends BaseActivity implements UaListener, B
     private String[] bufferBytes;
     private String[] caption;
     private String[] kernel;
-    private String[] mpvRender;
     private String[] playCache;
     private String[] render;
     private String[] scale;
@@ -89,7 +86,6 @@ public class SettingPlayerActivity extends BaseActivity implements UaListener, B
         mBinding.videoDecodeText.setText(getSwitch(PlayerSetting.isVideoPrefer()));
         mBinding.osdText.setText(getOsdText(osd = ResUtil.getStringArray(R.array.select_player_osd)));
         mBinding.kernelText.setText((kernel = ResUtil.getStringArray(R.array.select_player_kernel))[PlayerSetting.getPlayer()]);
-        mpvRender = ResUtil.getStringArray(R.array.select_mpv_render);
         mBinding.scaleText.setText((scale = ResUtil.getStringArray(R.array.select_scale))[PlayerSetting.getScale()]);
         mBinding.lutText.setText(LutSetting.getSummary());
         setMpvRows();
@@ -106,7 +102,6 @@ public class SettingPlayerActivity extends BaseActivity implements UaListener, B
         mBinding.scale.setOnClickListener(this::setScale);
         mBinding.lut.setOnClickListener(this::onLut);
         mBinding.mpvConfig.setOnClickListener(view -> MpvConfigDialog.show(this, () -> mBinding.mpvConfigText.setText(MpvConfigStore.summary())));
-        mBinding.mpvRender.setOnClickListener(this::setMpvRender);
         mBinding.osd.setOnClickListener(this::onOsd);
         mBinding.playerButtons.setOnClickListener(view -> PlayerButtonConfigDialog.show(this, this::setPlayerButtonsText));
         mBinding.speed.setOnClickListener(this::onSpeed);
@@ -175,24 +170,7 @@ public class SettingPlayerActivity extends BaseActivity implements UaListener, B
     private void setMpvRows() {
         boolean visible = PlayerSetting.getPlayer() == PlayerSetting.MPV;
         mBinding.mpvConfig.setVisibility(visible ? View.VISIBLE : View.GONE);
-        mBinding.mpvRender.setVisibility(visible ? View.VISIBLE : View.GONE);
         mBinding.mpvConfigText.setText(MpvConfigStore.summary());
-        mBinding.mpvRenderText.setText(getMpvRenderText());
-    }
-
-    private void setMpvRender(View view) {
-        int index = (PlayerSetting.getMpvRender() + 1) % mpvRender.length;
-        PlayerSetting.putMpvRender(index);
-        mBinding.mpvRenderText.setText(getMpvRenderText());
-    }
-
-    private String getMpvRenderText() {
-        int render = PlayerSetting.getMpvRender();
-        String text = mpvRender[render];
-        if (render == PlayerSetting.MPV_RENDER_VULKAN && !MPVLib.isVulkanRendererAvailable(this)) {
-            text += " (" + getString(R.string.mpv_render_native_unavailable) + ")";
-        }
-        return text;
     }
 
     private void onOsd(View view) {
