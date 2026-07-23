@@ -402,8 +402,8 @@
     <string name="playback_remote_sync_startup">Sync on startup</string>
     <string name="playback_remote_sync_now">Sync</string>
     <string name="playback_remote_sync_saved">Remote sync saved</string>
-    <string name="playback_remote_sync_done">Applied %1$d · Skipped %2$d · Failed %3$d</string>
-    <string name="playback_remote_sync_result">Fetched %1$d · Applied %2$d · Skipped %3$d · Failed %4$d</string>
+    <string name="playback_remote_sync_done">Processed %1$d · Deleted %2$d · Skipped %3$d · Failed %4$d</string>
+    <string name="playback_remote_sync_result">Fetched %1$d · Processed %2$d · Deleted %3$d · Skipped %4$d · Failed %5$d</string>
     <string name="playback_remote_sync_last_at">Last %1$s</string>
     <string name="playback_remote_sync_last_error">Error: %1$s</string>
     <string name="playback_remote_sync_never">Never synced</string>
@@ -448,7 +448,7 @@
     <string name="playback_webhook_delete_message">Delete %1$s?</string>
     <string name="playback_webhook_url_invalid">Endpoint URL must start with http</string>
     <string name="playback_webhook_privacy_title">Viewing record sync privacy notice</string>
-    <string name="playback_webhook_privacy_message">Webhook reporting sends your viewing record, including title and progress, to the server you configure.\n\nThe app does not collect or forward this data to other parties. You can disable or delete endpoints at any time. If a server token is set, it is sent in the X-WebHTV-Token header so your server can group and verify reports.</string>
+    <string name="playback_webhook_privacy_message">Webhook reporting sends your viewing record, including title, progress, and history deletion operations, to the server you configure.\n\nThe app does not collect or forward this data to other parties. You can disable or delete endpoints at any time. If a server token is set, it is sent in the X-WebHTV-Token header so your server can group and verify reports.</string>
     <string-array name="playback_webhook_field_descriptions">
         <item>Local vod configuration id. Not stable across devices.</item>
         <item>Stable vod configuration key, used to separate different interfaces.</item>

@@ -400,8 +400,8 @@
     <string name="playback_remote_sync_startup">启动时同步</string>
     <string name="playback_remote_sync_now">同步</string>
     <string name="playback_remote_sync_saved">远端同步已保存</string>
-    <string name="playback_remote_sync_done">写入 %1$d · 跳过 %2$d · 失败 %3$d</string>
-    <string name="playback_remote_sync_result">拉取 %1$d · 写入 %2$d · 跳过 %3$d · 失败 %4$d</string>
+    <string name="playback_remote_sync_done">处理 %1$d · 删除 %2$d · 跳过 %3$d · 失败 %4$d</string>
+    <string name="playback_remote_sync_result">拉取 %1$d · 处理 %2$d · 删除 %3$d · 跳过 %4$d · 失败 %5$d</string>
     <string name="playback_remote_sync_last_at">最近 %1$s</string>
     <string name="playback_remote_sync_last_error">错误：%1$s</string>
     <string name="playback_remote_sync_never">从未同步</string>
@@ -446,7 +446,7 @@
     <string name="playback_webhook_delete_message">删除 %1$s？</string>
     <string name="playback_webhook_url_invalid">端点 URL 必须以 http 开头</string>
     <string name="playback_webhook_privacy_title">观影记录同步隐私声明</string>
-    <string name="playback_webhook_privacy_message">Webhook 上报会把您的观影记录（包括影片名称、播放进度）发送到您配置的服务器。\n\nApp 不会收集或转发给第三方；您可以随时停用或删除端点。填写服务端 Token 后会通过 X-WebHTV-Token 请求头发送，方便您的服务器分组和校验上报。</string>
+    <string name="playback_webhook_privacy_message">Webhook 上报会把您的观影记录（包括影片名称、播放进度和历史删除操作）发送到您配置的服务器。\n\nApp 不会收集或转发给第三方；您可以随时停用或删除端点。填写服务端 Token 后会通过 X-WebHTV-Token 请求头发送，方便您的服务器分组和校验上报。</string>
     <string-array name="playback_webhook_field_descriptions">
         <item>本地点播配置 id，跨设备不稳定。</item>
         <item>点播接口稳定 key，用于区分不同接口。</item>
