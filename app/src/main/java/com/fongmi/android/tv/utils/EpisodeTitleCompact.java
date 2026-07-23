@@ -1,15 +1,15 @@
 package com.fongmi.android.tv.utils;
 
-import android.text.TextUtils;
-
 import com.fongmi.android.tv.bean.Episode;
 import com.fongmi.android.tv.setting.Setting;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -22,12 +22,21 @@ public final class EpisodeTitleCompact {
     private static final Pattern SIZE_PREFIX = Pattern.compile("(?i)^\\s*[\\[\\(（【]?\\s*" + SIZE_TEXT + "\\s*[\\]\\)）】]?\\s*");
     private static final Pattern SIZE_SUFFIX = Pattern.compile("(?i)\\s*[\\[\\(（【]?\\s*" + SIZE_TEXT + "\\s*[\\]\\)）】]?\\s*$");
     private static final Pattern HASH_SUFFIX = Pattern.compile("(?i)\\s*[\\[\\(（【]\\s*[A-F0-9]{8,32}\\s*[\\]\\)）】]\\s*$");
+    private static final Pattern RESOLUTION_START = Pattern.compile("(?i)^\\s*[0-9]{3,4}\\s*[x×]\\s*[0-9]{3,4}(?=$|\\D)");
+    private static final Pattern RESOLUTION_TOKEN = Pattern.compile("(?i)(?<![0-9])[0-9]{3,4}\\s*[x×]\\s*[0-9]{3,4}(?![0-9])");
+    private static final Pattern COLLECTION_HEADER = Pattern.compile("^\\s*[\\[【]\\s*([0-9]{1,3})\\s*[._-]\\s*((?:19|20)[0-9]{2})\\s+([^\\]】]+)[\\]】]\\s*(.*)$");
+    private static final Pattern CHINESE_SEASON = Pattern.compile("第\\s*[0-9一二三四五六七八九十百]+\\s*季");
+    private static final Pattern ENGLISH_SEASON = Pattern.compile("(?i)(?:SEASON\\s*|S)([0-9]{1,2})(?=$|\\D)");
+    private static final Pattern COLLECTION_SPECIAL = Pattern.compile("(?i)(特别篇|特別篇|剧场版|劇場版|(?<![A-Z0-9])(?:OVA?|OAD|SP)(?![A-Z0-9]))(?:\\s*[:：._-]?\\s*)(.*)");
+    private static final Pattern BRACKET_TOKEN = Pattern.compile("[\\[【(（]\\s*([^\\]】)）]+?)\\s*[\\]】)）]");
+    private static final Pattern TECHNICAL_BRACKET = Pattern.compile("(?i)(?:[0-9]{3,4}\\s*[x×]\\s*[0-9]{3,4}|(?:4320|2160|1080|720)P|[48]K|HDR10(?:\\+|⁺)?|HDR|SDR|DV|DOLBY|HEVC|H[.]?26[45]|X26[45]|AVC|AV1|AAC|FLAC|WEB-?DL|WEBRIP|BLU-?RAY|BDRIP|BD|MP4|MKV|AVI|TS|[A-F0-9]{8,32}|(?:简|繁|中|日|英|国|粤).*(?:字幕|双语|中字))");
+    private static final Pattern COLLECTION_VARIANT_TOKEN = Pattern.compile("(?i)(?:4320|2160|1080|720)P|[48]K|HDR10(?:\\+|⁺)?|HDR|SDR|DV|HEVC|H[.]?265|X265|AVC|H[.]?264|X264|AV1");
     private static final Pattern EPISODE_START = Pattern.compile("(?i)^(?:S\\s*[0-9]{1,2}\\s*E\\s*[0-9]{1,4}(?:\\s*(?:E|[-~—–])\\s*[0-9]{1,4})?|[0-9]{1,2}\\s*x\\s*[0-9]{1,4}(?:\\s*[-~—–]\\s*[0-9]{1,4})?|第\\s*[0-9一二三四五六七八九十百]+\\s*(?:集|话|話|期|章|回)|[0-9]{1,4}\\s*(?:集|话|話|期|章|回)|(?:EP|E)\\s*[0-9]{1,4}(?:\\s*[-~—–]\\s*[0-9]{1,4})?|[0-9]{4}[-._][0-9]{1,2}[-._][0-9]{1,2}|[0-9]{1,4}(?:\\D|$)|[上下](?:集|部)?|前篇|后篇|後篇|正片|预告|預告|花絮)");
     private static final Pattern VARIANT_TOKEN = Pattern.compile("(?i)(?:^|[\\s._\\-·|/\\\\:：,，;；\\[\\]()（）【】《》])((?:4320|2160|1080|720)P|[48]K|HQ|HD|HDR10(?:\\+|⁺)?|HDR|SDR|DV|60FPS|50FPS|30FPS|25FPS|24FPS|10BITS|8BITS|HEVC|H265|H\\.265|AVC|H264|H\\.264|AV1|DDP\\s*2[.·]?0|AAC\\s*2[.·]?0)(?=$|[\\s._\\-·|/\\\\:：,，;；\\[\\]()（）【】《》])");
     private static final Pattern TAIL_CODE = Pattern.compile("(?i)[._\\-·]([0-9]{8,})$");
     private static final Pattern[] EPISODE_TOKENS = {
             Pattern.compile("(?i)S\\s*[0-9]{1,2}\\s*E\\s*[0-9]{1,4}(?:\\s*(?:E|[-~—–])\\s*[0-9]{1,4})?"),
-            Pattern.compile("(?i)[0-9]{1,2}\\s*x\\s*[0-9]{1,4}(?:\\s*[-~—–]\\s*[0-9]{1,4})?"),
+            Pattern.compile("(?i)(?<![0-9])[0-9]{1,2}\\s*[x×]\\s*[0-9]{1,4}(?:\\s*[-~—–]\\s*[0-9]{1,4})?(?![0-9])"),
             Pattern.compile("(?i)第\\s*[0-9一二三四五六七八九十百]+\\s*(?:集|话|話|期|章|回)"),
             Pattern.compile("(?i)[0-9]{1,4}\\s*(?:集|话|話|期|章|回)"),
             Pattern.compile("(?i)(?:EP|E)\\s*[0-9]{1,4}(?:\\s*[-~—–]\\s*[0-9]{1,4})?"),
@@ -48,41 +57,57 @@ public final class EpisodeTitleCompact {
             for (Episode episode : episodes) episode.setDisplayName(null);
             return;
         }
+        List<String> rawNames = new ArrayList<>();
+        for (Episode episode : episodes) rawNames.add(episode.getRawDisplayName());
+        List<String> displayNames = compact(rawNames);
+        for (int i = 0; i < episodes.size(); i++) episodes.get(i).setDisplayName(displayNames.get(i));
+    }
+
+    static List<String> compact(List<String> rawNames) {
+        if (rawNames == null || rawNames.isEmpty()) return new ArrayList<>();
         List<String> names = new ArrayList<>();
         List<String> sizes = new ArrayList<>();
-        for (Episode episode : episodes) {
-            String raw = episode.getRawDisplayName();
+        for (String raw : rawNames) {
             names.add(cleanFileNoise(raw));
             sizes.add(extractSize(raw));
         }
-        if (episodes.size() < 2) {
-            for (int i = 0; i < episodes.size(); i++) episodes.get(i).setDisplayName(appendSize(names.get(i), sizes.get(i)));
-            return;
+        if (rawNames.size() < 2) {
+            List<String> result = new ArrayList<>();
+            result.add(appendSize(names.get(0), sizes.get(0)));
+            return result;
         }
         int prefix = findPrefix(names);
         int suffix = findSuffix(names, prefix);
-        List<String> compacted = new ArrayList<>();
         List<String> fallback = new ArrayList<>();
+        List<String> detectedTokens = new ArrayList<>();
+        List<String> collectionDisplays = new ArrayList<>();
+        for (int i = 0; i < names.size(); i++) {
+            String name = names.get(i);
+            String compact = cleanupEdge(name.substring(Math.min(prefix, name.length()), Math.max(Math.min(name.length() - suffix, name.length()), Math.min(prefix, name.length()))));
+            if (isEmpty(compact)) compact = name;
+            fallback.add(compact);
+            detectedTokens.add(findEpisodeToken(name));
+            collectionDisplays.add(findCollectionDisplay(rawNames.get(i)));
+        }
+        collectionDisplays = resolveCollectionVariants(rawNames, collectionDisplays);
+        List<String> compacted = new ArrayList<>();
         List<String> tokens = new ArrayList<>();
         Map<String, Integer> count = new HashMap<>();
-        for (String name : names) {
-            String compact = cleanupEdge(name.substring(Math.min(prefix, name.length()), Math.max(Math.min(name.length() - suffix, name.length()), Math.min(prefix, name.length()))));
-            if (TextUtils.isEmpty(compact)) compact = name;
-            String token = findEpisodeToken(name);
-            String display = appendSize(preferEpisodeToken(token, compact), sizes.get(compacted.size()));
+        for (int i = 0; i < names.size(); i++) {
+            String collectionDisplay = collectionDisplays.get(i);
+            String token = isEmpty(collectionDisplay) ? detectedTokens.get(i) : collectionDisplay;
+            String base = isEmpty(collectionDisplay) ? preferEpisodeToken(token, fallback.get(i)) : collectionDisplay;
+            String display = appendSize(base, sizes.get(i));
             compacted.add(display);
-            fallback.add(compact);
             tokens.add(token);
             count.put(display, count.getOrDefault(display, 0) + 1);
         }
         compacted = resolveDuplicates(names, compacted, fallback, tokens, sizes, count);
-        for (int i = 0; i < episodes.size(); i++) {
-            episodes.get(i).setDisplayName(compacted.get(i));
-        }
+        return compacted;
     }
 
     private static String cleanFileNoise(String value) {
-        String text = TextUtils.isEmpty(value) ? "" : value.trim();
+        String text = isEmpty(value) ? "" : value.trim();
         text = cleanEdgeNoise(text);
         text = EXTENSION.matcher(text).replaceFirst("");
         text = cleanEdgeNoise(text);
@@ -90,10 +115,10 @@ public final class EpisodeTitleCompact {
     }
 
     private static String extractSize(String value) {
-        if (TextUtils.isEmpty(value)) return "";
+        if (isEmpty(value)) return "";
         String text = EXTENSION.matcher(value.trim()).replaceFirst("");
         String size = extractSize(SIZE_SUFFIX.matcher(text));
-        return TextUtils.isEmpty(size) ? extractSize(SIZE_PREFIX.matcher(text)) : size;
+        return isEmpty(size) ? extractSize(SIZE_PREFIX.matcher(text)) : size;
     }
 
     private static String extractSize(Matcher matcher) {
@@ -107,8 +132,8 @@ public final class EpisodeTitleCompact {
     }
 
     private static String appendSize(String display, String size) {
-        if (TextUtils.isEmpty(size)) return display;
-        if (TextUtils.isEmpty(display)) return "[" + size + "]";
+        if (isEmpty(size)) return display;
+        if (isEmpty(display)) return "[" + size + "]";
         return display + " [" + size + "]";
     }
 
@@ -146,7 +171,7 @@ public final class EpisodeTitleCompact {
         for (String name : names) {
             if (index > name.length()) return false;
             String rest = cleanupEdge(name.substring(index));
-            if (TextUtils.isEmpty(rest)) return false;
+            if (isEmpty(rest)) return false;
             if (!isBoundary(name, index) && !canStartEpisodeAfterPrefix(name, index, rest)) return false;
         }
         return index >= 6 || allRestStartsEpisode(names, index);
@@ -187,7 +212,7 @@ public final class EpisodeTitleCompact {
         for (String name : names) {
             int start = name.length() - suffix;
             if (start <= prefix || !isBoundary(name, start)) return false;
-            if (TextUtils.isEmpty(cleanupEdge(name.substring(prefix, start)))) return false;
+            if (isEmpty(cleanupEdge(name.substring(prefix, start)))) return false;
         }
         String removed = names.get(0).substring(names.get(0).length() - suffix);
         return suffix >= 6 || TECH_SUFFIX.matcher(removed.toUpperCase(Locale.ROOT)).matches();
@@ -203,6 +228,7 @@ public final class EpisodeTitleCompact {
     }
 
     private static boolean startsEpisode(String text) {
+        if (RESOLUTION_START.matcher(text).find()) return false;
         return EPISODE_START.matcher(text).find();
     }
 
@@ -218,7 +244,119 @@ public final class EpisodeTitleCompact {
 
     private static String preferEpisodeToken(String token, String compact) {
         if (compact.length() <= MAX_COMPACT_LENGTH) return compact;
-        return TextUtils.isEmpty(token) ? compact : token;
+        return isEmpty(token) ? compact : token;
+    }
+
+    private static String findCollectionDisplay(String text) {
+        if (isEmpty(text)) return "";
+        Matcher header = COLLECTION_HEADER.matcher(text);
+        if (!header.matches()) return "";
+        String descriptor = header.group(3).trim();
+        String remainder = cleanFileNoise(header.group(4));
+        String season = findSeasonLabel(descriptor);
+        if (!isEmpty(season)) {
+            String episode = findEpisodeToken(remainder);
+            if (isEmpty(episode)) return "";
+            String title = findBracketedEpisodeTitle(remainder, episode);
+            return season + " " + episode + (isEmpty(title) ? "" : " " + title);
+        }
+        Matcher special = COLLECTION_SPECIAL.matcher(descriptor);
+        if (!special.find()) return "";
+        String type = normalizeSpecialLabel(special.group(1));
+        String title = cleanupEdge(special.group(2));
+        return type + (isEmpty(title) ? "" : " " + title);
+    }
+
+    private static String findSeasonLabel(String descriptor) {
+        Matcher chinese = CHINESE_SEASON.matcher(descriptor);
+        if (chinese.find()) return chinese.group().replaceAll("\\s+", "");
+        Matcher english = ENGLISH_SEASON.matcher(descriptor);
+        if (!english.find()) return "";
+        int season = Integer.parseInt(english.group(1));
+        return String.format(Locale.ROOT, "S%02d", season);
+    }
+
+    private static String normalizeSpecialLabel(String value) {
+        String label = value.toUpperCase(Locale.ROOT);
+        if (label.equals("特別篇")) return "特别篇";
+        if (label.equals("劇場版")) return "剧场版";
+        return label;
+    }
+
+    private static String findBracketedEpisodeTitle(String text, String episode) {
+        Matcher matcher = BRACKET_TOKEN.matcher(text);
+        boolean episodeFound = false;
+        while (matcher.find()) {
+            String value = cleanupEdge(matcher.group(1));
+            if (!episodeFound) {
+                episodeFound = isSameEpisodeToken(value, episode);
+            } else if (isEpisodeTitleCandidate(value)) {
+                return value;
+            }
+        }
+        return "";
+    }
+
+    private static boolean isSameEpisodeToken(String value, String episode) {
+        String left = normalizeEpisodeToken(value);
+        String right = normalizeEpisodeToken(episode);
+        if (left.equals(right)) return true;
+        if (!left.matches("[0-9]{1,4}") || !right.matches("[0-9]{1,4}")) return false;
+        return Integer.parseInt(left) == Integer.parseInt(right);
+    }
+
+    private static boolean isEpisodeTitleCandidate(String value) {
+        if (isEmpty(value) || RESOLUTION_TOKEN.matcher(value).matches()) return false;
+        if (TECHNICAL_BRACKET.matcher(value).matches()) return false;
+        return !value.matches("(?i)(?:EP?|S[0-9]{1,2}E)?[0-9]{1,4}");
+    }
+
+    private static List<String> resolveCollectionVariants(List<String> names, List<String> displays) {
+        List<String> result = new ArrayList<>(displays);
+        Map<String, List<Integer>> groups = new HashMap<>();
+        for (int i = 0; i < displays.size(); i++) {
+            String display = displays.get(i);
+            if (isEmpty(display)) continue;
+            groups.computeIfAbsent(display, key -> new ArrayList<>()).add(i);
+        }
+        for (Map.Entry<String, List<Integer>> entry : groups.entrySet()) {
+            List<Integer> indexes = entry.getValue();
+            if (indexes.size() < 2) continue;
+            List<List<String>> hints = new ArrayList<>();
+            Set<String> common = null;
+            for (int index : indexes) {
+                List<String> values = findCollectionVariantHints(names.get(index));
+                hints.add(values);
+                if (common == null) common = new HashSet<>(values);
+                else common.retainAll(values);
+            }
+            List<String> candidates = buildCollectionVariantCandidates(entry.getKey(), hints, common == null ? new HashSet<>() : common);
+            if (!allDistinct(candidates)) continue;
+            for (int i = 0; i < indexes.size(); i++) result.set(indexes.get(i), candidates.get(i));
+        }
+        return result;
+    }
+
+    private static List<String> findCollectionVariantHints(String text) {
+        List<String> hints = new ArrayList<>();
+        Matcher matcher = COLLECTION_VARIANT_TOKEN.matcher(text);
+        while (matcher.find()) addHint(hints, normalizeVariantToken(matcher.group()));
+        return hints;
+    }
+
+    private static List<String> buildCollectionVariantCandidates(String display, List<List<String>> hints, Set<String> common) {
+        List<String> result = new ArrayList<>();
+        for (List<String> values : hints) {
+            StringBuilder builder = new StringBuilder(display);
+            int added = 0;
+            for (String value : values) {
+                if (common.contains(value)) continue;
+                builder.append(' ').append(value);
+                if (++added == 2) break;
+            }
+            result.add(builder.toString());
+        }
+        return result;
     }
 
     private static List<String> resolveDuplicates(List<String> names, List<String> compacted, List<String> fallback, List<String> tokens, List<String> sizes, Map<String, Integer> count) {
@@ -250,7 +388,7 @@ public final class EpisodeTitleCompact {
     }
 
     private static String buildVariantDisplay(String name, String token, String fallback, int level) {
-        if (TextUtils.isEmpty(token)) return fallback;
+        if (isEmpty(token)) return fallback;
         List<String> hints = findVariantHints(name);
         if (hints.isEmpty()) return token;
         StringBuilder builder = new StringBuilder(token);
@@ -268,7 +406,7 @@ public final class EpisodeTitleCompact {
     }
 
     private static void addHint(List<String> hints, String hint) {
-        if (TextUtils.isEmpty(hint) || hints.contains(hint)) return;
+        if (isEmpty(hint) || hints.contains(hint)) return;
         hints.add(hint);
     }
 
@@ -276,8 +414,10 @@ public final class EpisodeTitleCompact {
         String value = token.replaceAll("\\s+", "").replace('⁺', '+').replace('·', '.').toUpperCase(Locale.ROOT);
         if (value.equals("H265")) return "HEVC";
         if (value.equals("H.265")) return "HEVC";
+        if (value.equals("X265")) return "HEVC";
         if (value.equals("H264")) return "AVC";
         if (value.equals("H.264")) return "AVC";
+        if (value.equals("X264")) return "AVC";
         if (value.matches("[0-9]{3,4}P")) return value.substring(0, value.length() - 1) + "p";
         if (value.matches("[0-9]{2}FPS")) return value.substring(0, value.length() - 3) + "fps";
         if (value.matches("[0-9]{1,2}BITS")) return value.substring(0, value.length() - 4) + "bits";
@@ -338,5 +478,9 @@ public final class EpisodeTitleCompact {
 
     private static String cleanupEdge(String text) {
         return EDGE_SEPARATORS.matcher(text == null ? "" : text.trim()).replaceAll("");
+    }
+
+    private static boolean isEmpty(String value) {
+        return value == null || value.isEmpty();
     }
 }
