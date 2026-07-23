@@ -1363,6 +1363,16 @@ X-WebHTV-Limit: <App 配置的单次最大条数>
 
 `X-WebHTV-Token` 可选，由用户服务端统一提供，用于鉴权和用户空间分组。App 不生成 token，也不把 token 写入本地历史主键或 `dedupeKey`。同一个远端 URL 下，同一 token 且同一 `configKey` 才表示同一套观影记录；同一 token 下不同 `configKey` 必须分别存储。
 
+仓库内置的五种远程托管服务端都实现了同一套观影同步协议：Cloudflare 使用独立 `PLAYBACK_DO` + SQLite，Deno 使用 Deno KV，Vercel 使用 Vercel KV/Upstash Redis REST，Go 与 Rust 使用本地原子 JSON 文件。对应目录分别是 `serverless/webhtv-remote-cloudflare`、`serverless/webhtv-remote-deno`、`serverless/webhtv-remote-vercel`、`serverless/webhtv-remote-go` 和 `serverless/webhtv-remote-rust`。
+
+部署后在“远端同步”和“Webhook 上报”中填写同一个地址和 token：
+
+```text
+https://<你的服务域名>/api/playback/sync
+```
+
+该地址通过 `POST` 接收进度、完播和删除 Webhook，通过 `GET` 返回 `{ changes, nextSince, hasMore }` 增量结果。内置服务端强制要求 `X-WebHTV-Token` 和 `X-WebHTV-Config-Key`；多台设备需要使用同一 token，不同用户或不同数据空间应使用不同 token。Webhook 字段预设应选“基础”“标准”或“完整”，匿名预设以及缺少核心影片字段的自定义预设不能形成完整的同步记录。各版本都保留 90 天删除墓碑，且只有显式 `scope=all` 才允许生成全量删除。Vercel 必须先配置 Redis；Go/Rust 的本地文件只适合单写实例。具体部署和备份边界见各目录下的 `README.md`。
+
 远端响应示例：
 
 ```json
