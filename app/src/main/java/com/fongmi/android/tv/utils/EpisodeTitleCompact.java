@@ -37,6 +37,7 @@ public final class EpisodeTitleCompact {
     private static final Pattern NESTED_COLLECTION_HEADER = Pattern.compile("^\\s*\\[\\[(.*?)\\]\\]\\s*(.*)$");
     private static final Pattern CATEGORY_HEADER = Pattern.compile("(?i)^\\s*\\[(PV|其他|番外|花絮|舞台剧|舞台劇)\\]\\s*(.*)$");
     private static final Pattern REPEATED_BRACKET_SERIES = Pattern.compile("(?i)^\\s*[\\[【]\\s*([^\\]】]{1,24}?)\\s*[\\]】]\\s*\\1\\s*((?:S\\s*[0-9]{1,2}\\s*E\\s*[0-9]{1,4}|EP?\\s*[0-9]{1,4}|SP\\s*[0-9]{1,4}|[0-9]{1,4}(?:[.·][0-9]+)?))(?=$|[\\s._\\-·|/\\\\:：,，;；\\[\\]()（）【】《》])");
+    private static final Pattern LEADING_BRACKET_GROUP = Pattern.compile("^\\s*[\\[【][^\\]】]+[\\]】]\\s*(.+)$");
     private static final Pattern BARE_STRUCTURED_HEADER = Pattern.compile("(?i)^\\s*\\[(?:DBD-Raws|[^\\]]*(?:字幕组|字幕組|字幕团|字幕團))\\]");
     private static final Pattern INLINE_EPISODE = Pattern.compile("(?i)(?<![0-9])([0-9]{1,3}(?:\\.[0-9]+)?(?:SP)?)[\\s._-]*([\\p{IsHan}々〆〇ヶ]+(?:[（(][^）)]{1,16}[）)])?)");
     private static final Pattern BRACKET_EPISODE = Pattern.compile("(?i)(?:SP[0-9]{1,3}|[0-9]{1,3}(?:[.·][0-9]+)?(?:SP)?)");
@@ -61,6 +62,7 @@ public final class EpisodeTitleCompact {
             Pattern.compile("(?i)(?:^|[\\s._\\-·|/\\\\:：,，;；\\[\\]()（）【】《》])([0-9]{1,4}v[0-9]+|[0-9]{1,3})(?=$|[\\s._\\-·|/\\\\:：,，;；\\[\\]()（）【】《》])")
     };
     private static final Pattern TECH_SUFFIX = Pattern.compile("(?i)^[\\s._\\-\\[\\]()（）【】]+(?:4K|8K|2160P|1080P|720P|HDR|HDR10|DV|DOLBY|HEVC|H265|H\\.265|H264|H\\.264|AV1|AAC|FLAC|WEB-DL|WEBRIP|BLURAY|BD|HD|国语|国配|粤语|中字|中英双字|简中|繁中|内嵌字幕|无字)(?:[\\s._\\-\\[\\]()（）【】]+(?:4K|8K|2160P|1080P|720P|HDR|HDR10|DV|DOLBY|HEVC|H265|H\\.265|H264|H\\.264|AV1|AAC|FLAC|WEB-DL|WEBRIP|BLURAY|BD|HD|国语|国配|粤语|中字|中英双字|简中|繁中|内嵌字幕|无字))*[\\s._\\-\\[\\]()（）【】]*$");
+    private static final Pattern FILE_EDGE_SEPARATORS = Pattern.compile("^[\\s._\\-·|/\\\\:：,，;；]+|[\\s._\\-·|/\\\\:：,，;；]+$");
     private static final Pattern EDGE_SEPARATORS = Pattern.compile("^[\\s._\\-·|/\\\\:：,，;；\\[\\]()（）【】《》]+|[\\s._\\-·|/\\\\:：,，;；\\[\\]()（）【】《》]+$");
     private static final int MAX_COMPACT_LENGTH = 14;
 
@@ -100,7 +102,10 @@ public final class EpisodeTitleCompact {
         List<String> collectionDisplays = new ArrayList<>();
         for (int i = 0; i < names.size(); i++) {
             String name = names.get(i);
-            String compact = cleanupEdge(name.substring(Math.min(prefix, name.length()), Math.max(Math.min(name.length() - suffix, name.length()), Math.min(prefix, name.length()))));
+            int start = Math.min(prefix, name.length());
+            int end = Math.max(Math.min(name.length() - suffix, name.length()), start);
+            String slice = name.substring(start, end);
+            String compact = start == 0 && end == name.length() ? cleanupFileEdge(slice) : cleanupEdge(slice);
             if (isEmpty(compact)) compact = name;
             fallback.add(compact);
             detectedTokens.add(findEpisodeToken(stripFileNoise(rawNames.get(i))));
@@ -124,7 +129,38 @@ public final class EpisodeTitleCompact {
     }
 
     private static String cleanFileNoise(String value) {
-        return cleanupEdge(stripFileNoise(value));
+        return cleanupFileEdge(stripFileNoise(value));
+    }
+
+    private static String cleanupFileEdge(String text) {
+        String value = FILE_EDGE_SEPARATORS.matcher(text == null ? "" : text.trim()).replaceAll("");
+        while (hasEntireBracketWrapper(value)) {
+            value = FILE_EDGE_SEPARATORS.matcher(value.substring(1, value.length() - 1).trim()).replaceAll("");
+        }
+        return value;
+    }
+
+    private static boolean hasEntireBracketWrapper(String value) {
+        if (value.length() < 2) return false;
+        char open = value.charAt(0);
+        char close = matchingBracket(open);
+        if (close == 0 || value.charAt(value.length() - 1) != close) return false;
+        int depth = 0;
+        for (int i = 0; i < value.length(); i++) {
+            char current = value.charAt(i);
+            if (current == open) depth++;
+            if (current == close && --depth == 0 && i < value.length() - 1) return false;
+        }
+        return depth == 0;
+    }
+
+    private static char matchingBracket(char open) {
+        if (open == '[') return ']';
+        if (open == '【') return '】';
+        if (open == '(') return ')';
+        if (open == '（') return '）';
+        if (open == '《') return '》';
+        return 0;
     }
 
     private static String stripFileNoise(String value) {
@@ -279,6 +315,8 @@ public final class EpisodeTitleCompact {
         String repeated = findRepeatedBracketSeriesDisplay(text);
         if (!isEmpty(repeated)) return repeated;
         if (BARE_STRUCTURED_HEADER.matcher(text).find()) return findNestedCollectionDisplay(text);
+        String leadingEpisode = findLeadingBracketEpisodeDisplay(text);
+        if (!isEmpty(leadingEpisode)) return leadingEpisode;
         return "";
     }
 
@@ -288,6 +326,12 @@ public final class EpisodeTitleCompact {
         String label = normalizeDisplayText(matcher.group(1));
         if (!isEpisodeTitleCandidate(label)) return "";
         return label + " " + normalizeEpisodeToken(matcher.group(2));
+    }
+
+    private static String findLeadingBracketEpisodeDisplay(String text) {
+        Matcher matcher = LEADING_BRACKET_GROUP.matcher(stripFileNoise(text));
+        if (!matcher.matches()) return "";
+        return findEpisodeToken(matcher.group(1));
     }
 
     private static String findNumberedCollectionDisplay(Matcher header) {

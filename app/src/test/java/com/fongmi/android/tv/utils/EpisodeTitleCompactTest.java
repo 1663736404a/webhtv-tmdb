@@ -108,6 +108,27 @@ public class EpisodeTitleCompactTest {
     }
 
     @Test
+    public void leadingBracketGroupsUseTheEpisodeAfterTheGroupAndNeverBecomeUnbalanced() {
+        List<String> names = List.of(
+                "[001-100集]01·4K.mkv[1.12GB]",
+                "[001-100集]02·4K.mkv[1.14GB]",
+                "[仙逆]121 4K.mp4[1.04GB]",
+                "[仙逆]122 4K.mp4[989.83MB]",
+                "[资料]幕后访谈.mkv[312.00MB]",
+                "[资料]制作特辑.mkv[428.00MB]"
+        );
+
+        assertEquals(List.of(
+                "01 [1.12GB]",
+                "02 [1.14GB]",
+                "121 [1.04GB]",
+                "122 [989.83MB]",
+                "[资料]幕后访谈 [312.00MB]",
+                "[资料]制作特辑 [428.00MB]"
+        ), EpisodeTitleCompact.compact(names));
+    }
+
+    @Test
     public void unrecognizedCollectionHeadersFallBackToExistingRules() {
         List<String> names = List.of(
                 "[01.2020 Space Documentary] Part Alpha 1080p WEB-DL.mkv",
