@@ -87,6 +87,48 @@ public class EpisodeTitleCompactTest {
     }
 
     @Test
+    public void leadingEpisodeNumbersWinOverLaterMetadataDates() {
+        List<String> names = List.of(
+                "001 - 4K- 2023-05-03 - HEVC-H.265.mp4",
+                "002 - 4K- 2023-05-03 - HEVC-H.265.mp4",
+                "010 - 4K- 2023-06-21 - HEVC-H.265.mp4",
+                "100 纯享[4K][HEVC][2025-03-11].mp4",
+                "120 纯享[4K][HEVC][2025-07-29].mp4",
+                "148 纯享[4K][HEVC.AAC][2026.02-10].mp4",
+                "172 纯享 [4K][HEVC.AAC][2026.07.21].mp4"
+        );
+
+        assertEquals(List.of("001", "002", "010", "100 纯享", "120 纯享", "148 纯享", "172 纯享"), EpisodeTitleCompact.compact(names));
+    }
+
+    @Test
+    public void driveFolderPrefixesKeepRealEpisodeAndEditionTitlesAheadOfDates() {
+        List<String> names = List.of(
+                "[001-030]001 - 4K- 2023-05-03 - HEVC-H.265.mp4[628.8 MB]",
+                "[100-120]100 纯享[4K][HEVC][2025-03-11].mp4[881.6 MB]",
+                "[100-120]113 纯享[4K][HEVC][2025-06-10].mp4[1 GB]",
+                "[100-120]113 纯享 [重置版][4K][HEVC][2025-06-13].mp4[1 GB]",
+                "[【Z】遮丨天]148 4K.mp4[919.1 MB]",
+                "[【Z】遮丨天]148 纯享[4K][HEVC.AAC][2026.02-10].mp4[630 MB]",
+                "[【Z】遮丨天]170.mp4[760.6 MB]",
+                "[【Z】遮丨天]170 纯享 [4K][HEVC.AAC][2026.07.07].mp4[496.1 MB]",
+                "[剧场版]剧场版 背.棺.战.王.腾 .4K.HEVC.10bit.AAC-2026.04.04.mp4[2.8 GB]"
+        );
+
+        assertEquals(List.of(
+                "001 [628.8MB]",
+                "100 纯享 [881.6MB]",
+                "113 纯享 [1GB]",
+                "113 纯享 重置版 [1GB]",
+                "148 [919.1MB]",
+                "148 纯享 [630MB]",
+                "170 [760.6MB]",
+                "170 纯享 [496.1MB]",
+                "剧场版 背.棺.战.王.腾 [2.8GB]"
+        ), EpisodeTitleCompact.compact(names));
+    }
+
+    @Test
     public void summaryDirectionsIgnoreFolderMetadataAndRepeatedSeriesLabelsStayReadable() {
         List<String> names = List.of(
                 "[总结篇上 下集]总集篇上 4K .mp4[878.51MB]",

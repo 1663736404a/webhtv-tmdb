@@ -37,9 +37,11 @@ public final class EpisodeTitleCompact {
     private static final Pattern NESTED_COLLECTION_HEADER = Pattern.compile("^\\s*\\[\\[(.*?)\\]\\]\\s*(.*)$");
     private static final Pattern CATEGORY_HEADER = Pattern.compile("(?i)^\\s*\\[(PV|其他|番外|花絮|舞台剧|舞台劇)\\]\\s*(.*)$");
     private static final Pattern REPEATED_BRACKET_SERIES = Pattern.compile("(?i)^\\s*[\\[【]\\s*([^\\]】]{1,24}?)\\s*[\\]】]\\s*\\1\\s*((?:S\\s*[0-9]{1,2}\\s*E\\s*[0-9]{1,4}|EP?\\s*[0-9]{1,4}|SP\\s*[0-9]{1,4}|[0-9]{1,4}(?:[.·][0-9]+)?))(?=$|[\\s._\\-·|/\\\\:：,，;；\\[\\]()（）【】《》])");
-    private static final Pattern LEADING_BRACKET_GROUP = Pattern.compile("^\\s*[\\[【][^\\]】]+[\\]】]\\s*(.+)$");
     private static final Pattern BARE_STRUCTURED_HEADER = Pattern.compile("(?i)^\\s*\\[(?:DBD-Raws|[^\\]]*(?:字幕组|字幕組|字幕团|字幕團))\\]");
     private static final Pattern INLINE_EPISODE = Pattern.compile("(?i)(?<![0-9])([0-9]{1,3}(?:\\.[0-9]+)?(?:SP)?)[\\s._-]*([\\p{IsHan}々〆〇ヶ]+(?:[（(][^）)]{1,16}[）)])?)");
+    private static final Pattern LEADING_FILE_EPISODE = Pattern.compile("(?i)^\\s*([0-9]{1,3})(?=$|[\\s._\\-·|/\\\\:：,，;；\\[\\]()（）【】《》])");
+    private static final Pattern SEMANTIC_FILE_TITLE = Pattern.compile("(?i)^\\s*(剧场版|劇場版|特别篇|特別篇)\\s+(.+)$");
+    private static final Pattern TECHNICAL_TITLE_SUFFIX = Pattern.compile("(?i)(?:^|[\\s._\\-·])(?:4320P|2160P|1080P|720P|[48]K|HDR10(?:\\+|⁺)?|HDR|SDR|DV|DOLBY|HEVC|H[.]?26[45]|X26[45]|AVC|AV1|AAC|FLAC|WEB-?DL|WEBRIP|BLU-?RAY|BDRIP|BD|MP4|MKV|AVI|TS|(?:HI)?10-?BIT|8-?BIT|(?:19|20)[0-9]{2}[-._][0-9]{1,2}[-._][0-9]{1,2})(?=$|[\\s._\\-·])");
     private static final Pattern BRACKET_EPISODE = Pattern.compile("(?i)(?:SP[0-9]{1,3}|[0-9]{1,3}(?:[.·][0-9]+)?(?:SP)?)");
     private static final Pattern PROMO_TOKEN = Pattern.compile("(?i)^PV\\s*([0-9]{1,3})$");
     private static final Pattern STAGE_TITLE = Pattern.compile("(觉醒|覺醒|転生|转生)");
@@ -52,13 +54,15 @@ public final class EpisodeTitleCompact {
     private static final Pattern WEAK_EPISODE_TOKEN = Pattern.compile("(?i)[上下](?:集|部)?|前篇|后篇|後篇|正片|预告|預告|花絮");
     private static final Pattern VARIANT_TOKEN = Pattern.compile("(?i)(?:^|[\\s._\\-·|/\\\\:：,，;；\\[\\]()（）【】《》])((?:4320|2160|1080|720)P|[48]K|HQ|HD|HDR10(?:\\+|⁺)?|HDR|SDR|DV|60FPS|50FPS|30FPS|25FPS|24FPS|10BITS|8BITS|HEVC|H265|H\\.265|AVC|H264|H\\.264|AV1|DDP\\s*2[.·]?0|AAC\\s*2[.·]?0)(?=$|[\\s._\\-·|/\\\\:：,，;；\\[\\]()（）【】《》])");
     private static final Pattern TAIL_CODE = Pattern.compile("(?i)[._\\-·]([0-9]{8,})$");
+    private static final Pattern DATE_TOKEN = Pattern.compile("(?i)[0-9]{4}[-._][0-9]{1,2}[-._][0-9]{1,2}");
     private static final Pattern[] EPISODE_TOKENS = {
             Pattern.compile("(?i)S\\s*[0-9]{1,2}\\s*E\\s*[0-9]{1,4}(?:\\s*(?:E|[-~—–])\\s*[0-9]{1,4})?"),
             Pattern.compile("(?i)(?<![0-9])[0-9]{1,2}\\s*[x×]\\s*[0-9]{1,4}(?:\\s*[-~—–]\\s*[0-9]{1,4})?(?![0-9])"),
             Pattern.compile("(?i)第\\s*[0-9一二三四五六七八九十百]+\\s*(?:集|话|話|期|章|回)"),
             Pattern.compile("(?i)[0-9]{1,4}\\s*(?:集|话|話|期|章|回)"),
             Pattern.compile("(?i)(?:EP|E)\\s*[0-9]{1,4}(?:\\s*[-~—–]\\s*[0-9]{1,4})?"),
-            Pattern.compile("(?i)[0-9]{4}[-._][0-9]{1,2}[-._][0-9]{1,2}"),
+            Pattern.compile("(?i)^\\s*([0-9]{1,3})(?=$|[\\s._\\-·|/\\\\:：,，;；\\[\\]()（）【】《》])"),
+            DATE_TOKEN,
             Pattern.compile("(?i)(?:^|[\\s._\\-·|/\\\\:：,，;；\\[\\]()（）【】《》])([0-9]{1,4}v[0-9]+|[0-9]{1,3})(?=$|[\\s._\\-·|/\\\\:：,，;；\\[\\]()（）【】《》])")
     };
     private static final Pattern TECH_SUFFIX = Pattern.compile("(?i)^[\\s._\\-\\[\\]()（）【】]+(?:4K|8K|2160P|1080P|720P|HDR|HDR10|DV|DOLBY|HEVC|H265|H\\.265|H264|H\\.264|AV1|AAC|FLAC|WEB-DL|WEBRIP|BLURAY|BD|HD|国语|国配|粤语|中字|中英双字|简中|繁中|内嵌字幕|无字)(?:[\\s._\\-\\[\\]()（）【】]+(?:4K|8K|2160P|1080P|720P|HDR|HDR10|DV|DOLBY|HEVC|H265|H\\.265|H264|H\\.264|AV1|AAC|FLAC|WEB-DL|WEBRIP|BLURAY|BD|HD|国语|国配|粤语|中字|中英双字|简中|繁中|内嵌字幕|无字))*[\\s._\\-\\[\\]()（）【】]*$");
@@ -315,8 +319,8 @@ public final class EpisodeTitleCompact {
         String repeated = findRepeatedBracketSeriesDisplay(text);
         if (!isEmpty(repeated)) return repeated;
         if (BARE_STRUCTURED_HEADER.matcher(text).find()) return findNestedCollectionDisplay(text);
-        String leadingEpisode = findLeadingBracketEpisodeDisplay(text);
-        if (!isEmpty(leadingEpisode)) return leadingEpisode;
+        String fileDisplay = findLeadingFileDisplay(text);
+        if (!isEmpty(fileDisplay)) return fileDisplay;
         return "";
     }
 
@@ -328,10 +332,49 @@ public final class EpisodeTitleCompact {
         return label + " " + normalizeEpisodeToken(matcher.group(2));
     }
 
-    private static String findLeadingBracketEpisodeDisplay(String text) {
-        Matcher matcher = LEADING_BRACKET_GROUP.matcher(stripFileNoise(text));
-        if (!matcher.matches()) return "";
-        return findEpisodeToken(matcher.group(1));
+    private static String findLeadingFileDisplay(String text) {
+        String remainder = stripLeadingBracketGroup(stripFileNoise(text));
+        Matcher episode = LEADING_FILE_EPISODE.matcher(remainder);
+        if (episode.find()) return buildLeadingEpisodeDisplay(remainder, normalizeEpisodeToken(episode.group(1)), episode.end());
+        Matcher semantic = SEMANTIC_FILE_TITLE.matcher(remainder);
+        if (!semantic.matches()) return "";
+        String title = trimTechnicalTitleSuffix(semantic.group(2));
+        return normalizeSpecialLabel(semantic.group(1)) + (isEmpty(title) ? "" : " " + title);
+    }
+
+    private static String stripLeadingBracketGroup(String text) {
+        int start = 0;
+        while (start < text.length() && Character.isWhitespace(text.charAt(start))) start++;
+        if (start >= text.length()) return text;
+        char close = matchingBracket(text.charAt(start));
+        if (close == 0) return text;
+        int depth = 0;
+        for (int i = start; i < text.length(); i++) {
+            char current = text.charAt(i);
+            if (current == text.charAt(start)) depth++;
+            if (current != close || --depth != 0) continue;
+            return text.substring(i + 1).trim();
+        }
+        return text;
+    }
+
+    private static String buildLeadingEpisodeDisplay(String text, String episode, int end) {
+        String remainder = text.substring(end).trim();
+        if (!remainder.startsWith("纯享")) return episode;
+        StringBuilder display = new StringBuilder(episode).append(" 纯享");
+        Matcher bracket = BRACKET_TOKEN.matcher(remainder.substring(2));
+        while (bracket.find()) {
+            String value = cleanupEdge(bracket.group(1));
+            if (value.matches("重置版|修复版|修復版")) display.append(' ').append(value);
+        }
+        return display.toString();
+    }
+
+    private static String trimTechnicalTitleSuffix(String text) {
+        Matcher technical = TECHNICAL_TITLE_SUFFIX.matcher(text);
+        int end = text.length();
+        while (technical.find()) end = Math.min(end, technical.start());
+        return cleanupEdge(text.substring(0, end)).replaceAll("[.·]+", ".");
     }
 
     private static String findNumberedCollectionDisplay(Matcher header) {
@@ -515,6 +558,7 @@ public final class EpisodeTitleCompact {
 
     private static boolean isEpisodeTitleCandidate(String value) {
         if (isEmpty(value) || RESOLUTION_TOKEN.matcher(value).matches()) return false;
+        if (DATE_TOKEN.matcher(value).matches()) return false;
         if (isTechnicalToken(value)) return false;
         return !value.matches("(?i)(?:(?:EP?|S[0-9]{1,2}E|SP)?[0-9]{1,4}|[0-9]{1,3}(?:[.·][0-9]+)?(?:SP)?)");
     }
