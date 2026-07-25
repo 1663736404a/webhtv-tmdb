@@ -517,7 +517,7 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
 
     private void configureOptions(Uri uri, boolean dash) {
         String url = uri.toString();
-        boolean realtime = isRealtimeUrl(url);
+        IjkInputBufferPolicy.Decision inputBuffer = IjkInputBufferPolicy.resolve(url, IjkPerformanceSetting.getScene(), IjkPerformanceSetting.getBufferMb());
         if (dash) ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "iformat", "dash");
         configureSoftDecodeOptions();
         ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "dns_cache_clear", 1);
@@ -527,7 +527,7 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "http-detect-range-support", dash ? 1 : 0);
         ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "enable-accurate-seek", IjkPerformanceSetting.isAccurateSeek() ? 1 : 0);
         ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "framedrop", IjkPerformanceSetting.getFrameDropValue());
-        ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "max-buffer-size", IjkPerformanceSetting.getBufferMb() * 1024L * 1024L);
+        ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "max-buffer-size", inputBuffer.maxBufferBytes());
         ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "packet-buffering", dash ? 0 : (IjkPerformanceSetting.isPacketBuffering() ? 1 : 0));
         ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "first-high-water-mark-ms", IjkPerformanceSetting.getFirstWaterMs());
         ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "next-high-water-mark-ms", IjkPerformanceSetting.getNextWaterMs());
@@ -545,7 +545,7 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "subtitle", 1);
         ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "video-pictq-size", IjkPerformanceSetting.getPictureQueue());
         ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "protocol_whitelist", "async,cache,crypto,file,http,https,pipe,rtmp,rtp,tcp,tls,udp,data,ijkinject,ijklongurl,ijksegment,ijkhttphook,ijklivehook,ijktcphook,ijkurlhook,ijkmediadatasource");
-        ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "infbuf", IjkPerformanceSetting.useInfiniteBuffer(realtime) ? 1 : 0);
+        ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "infbuf", inputBuffer.infiniteBuffer() ? 1 : 0);
         applyProbeOptions();
         applyRtspOptions(url);
     }
@@ -580,11 +580,6 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         } else if (IjkPerformanceSetting.getRtspTransport() == IjkPerformanceSetting.RTSP_UDP) {
             ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "rtsp_transport", "udp");
         }
-    }
-
-    private boolean isRealtimeUrl(String url) {
-        String lower = url.toLowerCase(Locale.US);
-        return lower.startsWith("rtsp") || lower.startsWith("rtp") || lower.startsWith("udp") || lower.startsWith("rtmp");
     }
 
     private boolean shouldProxyHls(MediaItem item, String uri) {

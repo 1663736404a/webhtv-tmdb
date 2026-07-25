@@ -230,11 +230,6 @@ public final class IjkPerformanceSetting {
         PlaybackPerformanceSetting.markCustom();
     }
 
-    public static boolean useInfiniteBuffer(boolean realtime) {
-        if (!realtime) return false;
-        return getScene() == SCENE_AUTO || getScene() == SCENE_LIVE_STABLE;
-    }
-
     public static void applyRecommended() {
         Prefers.put(KEY_SCENE, SCENE_AUTO);
         Prefers.put(KEY_BUFFER_MB, 15);
