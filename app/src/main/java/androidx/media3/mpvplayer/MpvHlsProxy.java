@@ -77,7 +77,6 @@ public final class MpvHlsProxy extends NanoHTTPD {
     private static final long MIN_CACHE_FILE_BYTES = 1;
     private static final byte[] PNG_SIGNATURE = new byte[]{(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
     private static final byte[] PNG_IEND = new byte[]{0x49, 0x45, 0x4E, 0x44, (byte) 0xAE, 0x42, 0x60, (byte) 0x82};
-    private static final Pattern URI_ATTR = Pattern.compile("URI=\"([^\"]+)\"");
     private static final Pattern DASH_BASE_URL = Pattern.compile("(<BaseURL\\b[^>]*>)(.*?)(</BaseURL>)", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
     private static final Pattern CONTENT_RANGE = Pattern.compile("bytes\\s+(\\d+)-(\\d+)/(\\d+|\\*)", Pattern.CASE_INSENSITIVE);
 
@@ -215,7 +214,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
                 return error(Status.BAD_REQUEST, "invalid playlist");
             }
             text = applyAdblock(text, id, session.url);
-            String rewritten = rewritePlaylist(response.request().url().toString(), text, id);
+            String rewritten = rewritePlaylist(response.request().url().toString(), text, id, null);
             byte[] data = rewritten.getBytes(StandardCharsets.UTF_8);
             SpiderDebug.log(TAG, "playlist session=%d code=%d bytes=%d rewritten=%d url=%s", id, response.code(), text.length(), data.length, shortUrl(session.url));
             return noCache(newFixedLengthResponse(Status.OK, MIME_M3U8, new ByteArrayInputStream(data), data.length));
@@ -357,6 +356,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
         if (target == null || owner == null) return error(Status.NOT_FOUND, "expired item");
         String range = requestHeader(httpSession, "range");
         boolean targetPlaylist = isPlaylistUrl(target.url, null);
+        if (targetPlaylist) recordSelectedVariant(target);
         String forwardedRange = targetPlaylist ? null : range;
         if (!targetPlaylist && target.cacheable) {
             Response cached = serveCached(owner, target.url, range);
@@ -375,6 +375,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
         String finalUrl = response.request().url().toString();
         MediaType type = body.contentType();
         if (isPlaylistUrl(target.url, type) || isPlaylistUrl(finalUrl, type)) {
+            recordSelectedVariant(target);
             try (response; body) {
                 if (!response.isSuccessful()) {
                     recordPlaylistResponse(target.sessionId, response.code(), target.url, null);
@@ -388,7 +389,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
                     return error(Status.BAD_REQUEST, "invalid playlist");
                 }
                 text = applyAdblock(text, target.sessionId, target.url);
-                String rewritten = rewritePlaylist(finalUrl, text, target.sessionId);
+                String rewritten = rewritePlaylist(finalUrl, text, target.sessionId, target.variant());
                 byte[] data = rewritten.getBytes(StandardCharsets.UTF_8);
                 SpiderDebug.log(TAG, "nested playlist id=%s code=%d bytes=%d url=%s", id, response.code(), data.length, shortUrl(target.url));
                 return noCache(newFixedLengthResponse(Status.OK, MIME_M3U8, new ByteArrayInputStream(data), data.length));
@@ -441,162 +442,33 @@ public final class MpvHlsProxy extends NanoHTTPD {
         }
     }
 
-    private String rewritePlaylist(String playlistUrl, String text, int session) {
-        String[] lines = text.split("\n", -1);
-        StringBuilder out = new StringBuilder(text.length() + 256);
-        List<Segment> segments = new ArrayList<>();
-        boolean[] skipVariantLines = lowerVariantLinesToSkip(lines, session);
-        boolean pendingByteRange = false;
-        double pendingDuration = 0;
-        double elapsed = 0;
-        for (int i = 0; i < lines.length; i++) {
-            if (skipVariantLines != null && skipVariantLines[i]) continue;
-            String raw = trimCr(lines[i]);
-            String line = raw.trim();
-            if (line.startsWith("#") && line.contains("URI=\"")) {
-                out.append(rewriteUriAttributes(playlistUrl, raw, session, isCacheableUriAttribute(line)));
-                if (line.startsWith("#EXT-X-MAP") && line.toUpperCase(Locale.US).contains("BYTERANGE=")) {
-                    stats(session).hasByteRange = true;
-                }
-            } else if (line.startsWith("#EXTINF:")) {
-                pendingDuration = parseExtInfDuration(line);
-                out.append(raw);
-            } else if (line.startsWith("#EXT-X-BYTERANGE:")) {
-                pendingByteRange = true;
-                stats(session).hasByteRange = true;
-                out.append(raw);
-            } else if (!line.isEmpty() && !line.startsWith("#")) {
-                String targetUrl = resolve(playlistUrl, line);
-                out.append(proxyItemUrl(targetUrl, session, pendingDuration > 0 && !pendingByteRange));
-                if (pendingDuration > 0) {
-                    segments.add(new Segment(targetUrl, pendingDuration, elapsed, pendingByteRange));
-                    elapsed += pendingDuration;
-                }
-                pendingDuration = 0;
-                pendingByteRange = false;
-            } else {
-                out.append(raw);
-            }
-            if (i < lines.length - 1) out.append('\n');
+    private String rewritePlaylist(String playlistUrl, String text, int session, @Nullable HlsPlaylistRewriter.Variant inheritedVariant) {
+        HlsPlaylistRewriter.Result result = HlsPlaylistRewriter.rewrite(text, inheritedVariant, (uri, cacheable, context) -> {
+            String targetUrl = resolve(playlistUrl, uri);
+            HlsPlaylistRewriter.Variant targetVariant = context.role() == HlsPlaylistRewriter.UriRole.VARIANT_PLAYLIST ? context.variant() : null;
+            String rewrittenUrl = proxyItemUrl(targetUrl, session, cacheable, targetVariant);
+            return new HlsPlaylistRewriter.MappedUri(targetUrl, rewrittenUrl);
+        });
+        recordPlaylistDetails(session, text, result);
+        if (!result.variants().isEmpty()) {
+            SpiderDebug.log(TAG, "master playlist preserved variants session=%d variants=%d", session, result.variants().size());
         }
-        recordPlaylistDetails(session, text, segments);
-        return out.toString();
-    }
-
-    @Nullable
-    private boolean[] lowerVariantLinesToSkip(String[] lines, int session) {
-        List<Variant> variants = new ArrayList<>();
-        for (int i = 0; i < lines.length; i++) {
-            String line = trimCr(lines[i]).trim();
-            if (!line.startsWith("#EXT-X-STREAM-INF")) continue;
-            int uriLine = nextUriLine(lines, i + 1);
-            if (uriLine < 0) continue;
-            variants.add(new Variant(i, uriLine, variantBandwidth(line), variantWidth(line), variantHeight(line)));
-        }
-        if (variants.size() <= 1) return null;
-        Variant best = null;
-        for (Variant variant : variants) if (best == null || variant.betterThan(best)) best = variant;
-        if (best == null || best.score() <= 0) return null;
-        boolean[] skip = new boolean[lines.length];
-        for (Variant variant : variants) {
-            if (variant == best) continue;
-            skip[variant.tagLine] = true;
-            skip[variant.uriLine] = true;
-        }
-        SpiderDebug.log(TAG, "master playlist select highest variant session=%d variants=%d bandwidth=%d resolution=%dx%d", session, variants.size(), best.bandwidth, best.width, best.height);
-        return skip;
-    }
-
-    private int nextUriLine(String[] lines, int start) {
-        for (int i = start; i < lines.length; i++) {
-            String line = trimCr(lines[i]).trim();
-            if (line.isEmpty()) continue;
-            if (!line.startsWith("#")) return i;
-            if (line.startsWith("#EXT-X-STREAM-INF")) return -1;
-        }
-        return -1;
-    }
-
-    private long variantBandwidth(String line) {
-        long average = parseLongAttribute(line, "AVERAGE-BANDWIDTH");
-        return average > 0 ? average : parseLongAttribute(line, "BANDWIDTH");
-    }
-
-    private int variantWidth(String line) {
-        return variantResolution(line)[0];
-    }
-
-    private int variantHeight(String line) {
-        return variantResolution(line)[1];
-    }
-
-    private int[] variantResolution(String line) {
-        String value = attributeValue(line, "RESOLUTION");
-        if (TextUtils.isEmpty(value)) return new int[]{0, 0};
-        String[] parts = value.toLowerCase(Locale.US).split("x", 2);
-        if (parts.length < 2) return new int[]{0, 0};
-        try {
-            return new int[]{Integer.parseInt(parts[0].trim()), Integer.parseInt(parts[1].trim())};
-        } catch (Throwable ignored) {
-            return new int[]{0, 0};
-        }
-    }
-
-    private long parseLongAttribute(String line, String name) {
-        String value = attributeValue(line, name);
-        if (TextUtils.isEmpty(value)) return 0;
-        try {
-            return Long.parseLong(value);
-        } catch (Throwable ignored) {
-            return 0;
-        }
-    }
-
-    @Nullable
-    private String attributeValue(String line, String name) {
-        int colon = line.indexOf(':');
-        if (colon < 0 || colon >= line.length() - 1) return null;
-        for (String part : line.substring(colon + 1).split(",")) {
-            int equals = part.indexOf('=');
-            if (equals <= 0) continue;
-            String key = part.substring(0, equals).trim();
-            if (!name.equalsIgnoreCase(key)) continue;
-            String value = part.substring(equals + 1).trim();
-            if (value.length() >= 2 && value.startsWith("\"") && value.endsWith("\"")) value = value.substring(1, value.length() - 1);
-            return value;
-        }
-        return null;
-    }
-
-    private boolean isCacheableUriAttribute(String line) {
-        if (!line.startsWith("#EXT-X-MAP")) return false;
-        return !line.toUpperCase(Locale.US).contains("BYTERANGE=");
-    }
-
-    private String rewriteUriAttributes(String playlistUrl, String line, int session, boolean cacheable) {
-        Matcher matcher = URI_ATTR.matcher(line);
-        StringBuffer buffer = new StringBuffer();
-        while (matcher.find()) {
-            String value = matcher.group(1);
-            String replacement = value;
-            if (!TextUtils.isEmpty(value) && !value.startsWith("data:")) {
-                replacement = proxyItemUrl(resolve(playlistUrl, value), session, cacheable);
-            }
-            matcher.appendReplacement(buffer, "URI=\"" + Matcher.quoteReplacement(replacement) + "\"");
-        }
-        matcher.appendTail(buffer);
-        return buffer.toString();
+        return result.text();
     }
 
     private String proxyItemUrl(String targetUrl, int session, boolean cacheable) {
+        return proxyItemUrl(targetUrl, session, cacheable, null);
+    }
+
+    private String proxyItemUrl(String targetUrl, int session, boolean cacheable, @Nullable HlsPlaylistRewriter.Variant variant) {
         String id = Long.toString(nextId.incrementAndGet());
-        targets.put(id, new Target(session, targetUrl, System.currentTimeMillis(), cacheable));
+        targets.put(id, new Target(session, targetUrl, System.currentTimeMillis(), cacheable, variant));
         return baseUrl() + "/mpv/item?s=" + session + "&id=" + id;
     }
 
     private String proxyDashItemUrl(String targetUrl, int session) {
         String id = Long.toString(nextId.incrementAndGet());
-        targets.put(id, new Target(session, targetUrl, System.currentTimeMillis(), true));
+        targets.put(id, new Target(session, targetUrl, System.currentTimeMillis(), true, null));
         return baseUrl() + "/mpv/dash-item/" + id + "/media.m4s";
     }
 
@@ -673,16 +545,16 @@ public final class MpvHlsProxy extends NanoHTTPD {
         return status == 206 && isCompleteRangeResponse(range, contentRange, contentLength);
     }
 
-    private void preloadSegments(Session session, List<Segment> segments, double startSeconds) {
+    private void preloadSegments(Session session, List<HlsPlaylistRewriter.Segment> segments, double startSeconds) {
         if (!PreloadSetting.isPreload(kernel) || !isCacheEnabled() || segments.isEmpty()) return;
         double seconds = 0;
-        for (Segment segment : segments) {
+        for (HlsPlaylistRewriter.Segment segment : segments) {
             if (segment.endSeconds() <= startSeconds) continue;
-            if (segment.startSeconds <= startSeconds && segment.endSeconds() > startSeconds) continue;
-            if (segment.byteRange) continue;
+            if (segment.startSeconds() <= startSeconds && segment.endSeconds() > startSeconds) continue;
+            if (segment.byteRange()) continue;
             if (seconds >= PreloadSetting.getPreloadTimeSeconds(kernel)) break;
-            seconds += Math.max(0, segment.durationSeconds);
-            preloadSegment(session, segment.url);
+            seconds += Math.max(0, segment.durationSeconds());
+            preloadSegment(session, segment.uri());
         }
     }
 
@@ -838,11 +710,22 @@ public final class MpvHlsProxy extends NanoHTTPD {
         if (isVodPlaylist(text)) stats.vod = true;
     }
 
-    private void recordPlaylistDetails(int session, String text, List<Segment> segments) {
+    private void recordPlaylistDetails(int session, String text, HlsPlaylistRewriter.Result result) {
         SessionStats stats = stats(session);
         stats.vod = isVodPlaylist(text);
-        if (stats.vod && !segments.isEmpty()) stats.segments = List.copyOf(segments);
+        String upper = text.toUpperCase(Locale.US);
+        if (upper.contains("#EXT-X-BYTERANGE:") || upper.contains("BYTERANGE=")) stats.hasByteRange = true;
+        if (!result.variants().isEmpty()) stats.recordVariants(result.variants());
+        if (stats.vod && !result.segments().isEmpty()) stats.segments = result.segments();
         else if (!stats.vod) stats.segments = List.of();
+    }
+
+    private void recordSelectedVariant(Target target) {
+        HlsPlaylistRewriter.Variant variant = target.variant();
+        if (variant == null) return;
+        SessionStats stats = stats(target.sessionId());
+        if (!stats.recordSelectedVariant(variant)) return;
+        SpiderDebug.log(TAG, "variant requested session=%d peak=%d average=%d resolution=%dx%d", target.sessionId(), variant.bandwidth(), variant.averageBandwidth(), variant.width(), variant.height());
     }
 
     private void recordItemResponse(int session, int status, String url) {
@@ -870,22 +753,11 @@ public final class MpvHlsProxy extends NanoHTTPD {
         if (stats == null) return "playlist -";
         String type = stats.vod ? "vod" : stats.seenPlaylist ? "live" : "-";
         String status = stats.lastStatus <= 0 ? "-" : String.valueOf(stats.lastStatus);
-        return "playlist " + type + " p" + stats.playlistRequests + "/i" + stats.itemRequests + " last " + status + (stats.hasByteRange ? " byterange" : "");
+        return "playlist " + type + " p" + stats.playlistRequests + "/i" + stats.itemRequests + " last " + status + stats.variantText() + (stats.hasByteRange ? " byterange" : "");
     }
 
     private static boolean isVodPlaylist(String text) {
         return text != null && text.toUpperCase(Locale.US).contains("#EXT-X-ENDLIST");
-    }
-
-    private static double parseExtInfDuration(String line) {
-        try {
-            int colon = line.indexOf(':');
-            int comma = line.indexOf(',', colon + 1);
-            String value = comma >= 0 ? line.substring(colon + 1, comma) : line.substring(colon + 1);
-            return Double.parseDouble(value.trim());
-        } catch (Throwable ignored) {
-            return 0;
-        }
     }
 
     private static boolean isHttpUrl(String url) {
@@ -967,10 +839,6 @@ public final class MpvHlsProxy extends NanoHTTPD {
         } catch (Throwable e) {
             return uri;
         }
-    }
-
-    private static String trimCr(String value) {
-        return value.endsWith("\r") ? value.substring(0, value.length() - 1) : value;
     }
 
     private static boolean isPlaylistUrl(String url, @Nullable MediaType type) {
@@ -1144,28 +1012,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
     private record Session(String url, Map<String, String> headers, long createdAtMs) {
     }
 
-    private record Target(int sessionId, String url, long createdAtMs, boolean cacheable) {
-    }
-
-    private record Segment(String url, double durationSeconds, double startSeconds, boolean byteRange) {
-        double endSeconds() {
-            return startSeconds + durationSeconds;
-        }
-    }
-
-    private record Variant(int tagLine, int uriLine, long bandwidth, int width, int height) {
-        long area() {
-            return (long) width * height;
-        }
-
-        long score() {
-            return Math.max(bandwidth, area());
-        }
-
-        boolean betterThan(Variant other) {
-            if (bandwidth != other.bandwidth) return bandwidth > other.bandwidth;
-            return area() > other.area();
-        }
+    private record Target(int sessionId, String url, long createdAtMs, boolean cacheable, @Nullable HlsPlaylistRewriter.Variant variant) {
     }
 
     private record Range(long start, long end) {
@@ -1445,7 +1292,25 @@ public final class MpvHlsProxy extends NanoHTTPD {
         private volatile int lastStatus;
         private volatile long lastErrorAtMs;
         private volatile String lastUrl;
-        private volatile List<Segment> segments = List.of();
+        private volatile HlsPlaylistRewriter.Variant selectedVariant;
+        private volatile int variantCount;
+        private volatile List<HlsPlaylistRewriter.Segment> segments = List.of();
+
+        private void recordVariants(List<HlsPlaylistRewriter.VariantEntry> variants) {
+            variantCount = variants.size();
+        }
+
+        private synchronized boolean recordSelectedVariant(HlsPlaylistRewriter.Variant variant) {
+            if (variant.equals(selectedVariant)) return false;
+            selectedVariant = variant;
+            return true;
+        }
+
+        private String variantText() {
+            HlsPlaylistRewriter.Variant variant = selectedVariant;
+            if (variant == null) return variantCount == 0 ? "" : " variants " + variantCount;
+            return " variant " + variant.width() + "x" + variant.height() + " peak " + variant.bandwidth() + " average " + variant.averageBandwidth();
+        }
     }
 
     private static final class LimitedInputStream extends FilterInputStream {
