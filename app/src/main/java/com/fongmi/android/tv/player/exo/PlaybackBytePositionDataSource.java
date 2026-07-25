@@ -8,6 +8,8 @@ import androidx.media3.datasource.DataSource;
 import androidx.media3.datasource.DataSpec;
 import androidx.media3.datasource.TransferListener;
 
+import com.fongmi.android.tv.player.PlaybackResourceClassifier;
+
 import java.io.IOException;
 import java.util.HashSet;
 import java.util.List;
@@ -25,7 +27,7 @@ import java.util.regex.Pattern;
  * source is active.  This class deliberately fails closed when the protocol or
  * continuity cannot be proven.</p>
  */
-final class PlaybackBytePositionDataSource implements DataSource {
+public final class PlaybackBytePositionDataSource implements DataSource {
 
     private static final long UNSET = C.POSITION_UNSET;
     private static final Pattern CONTENT_RANGE = Pattern.compile("bytes\\s+(\\d+)\\s*-\\s*(\\d+)\\s*/\\s*(\\d+|\\*)", Pattern.CASE_INSENSITIVE);
@@ -43,6 +45,7 @@ final class PlaybackBytePositionDataSource implements DataSource {
     private static int openedStreamCount;
     private static Eligibility eligibility = Eligibility.UNKNOWN;
     private static boolean continuityValid;
+    private static PlaybackResourceClassifier.Classification resourceClassification;
 
     private final DataSource upstream;
     private long nextPositionBytes = UNSET;
@@ -69,6 +72,19 @@ final class PlaybackBytePositionDataSource implements DataSource {
             openedStreamCount = 0;
             eligibility = Eligibility.UNKNOWN;
             continuityValid = false;
+            resourceClassification = null;
+        }
+    }
+
+    public static PlaybackResourceClassifier.Classification latestResourceClassification() {
+        synchronized (LOCK) {
+            return resourceClassification;
+        }
+    }
+
+    public static long resourceSessionSequence() {
+        synchronized (LOCK) {
+            return sessionGeneration;
         }
     }
 
@@ -119,7 +135,12 @@ final class PlaybackBytePositionDataSource implements DataSource {
             ContentRange range = parseContentRange(headers);
             rangeEndBytes = range == null ? UNSET : range.endBytes();
             long totalLength = resolveTotalLength(dataSpec, length, headers);
-            completeOpen(registration, dataSpec, classification, totalLength);
+            PlaybackResourceClassifier.Classification resource = PlaybackResourceClassifier.classifyDataSource(
+                    dataSpec.uri.toString(),
+                    resolvedUri == null ? null : resolvedUri.toString(),
+                    contentType(headers),
+                    headers);
+            completeOpen(registration, dataSpec, classification, totalLength, resource);
             return length;
         } catch (IOException | RuntimeException error) {
             failOpen(registration);
@@ -231,8 +252,10 @@ final class PlaybackBytePositionDataSource implements DataSource {
         }
     }
 
-    private void completeOpen(OpenRegistration registration, DataSpec dataSpec, Classification classification, long totalLength) {
+    private void completeOpen(OpenRegistration registration, DataSpec dataSpec, Classification classification, long totalLength,
+                              PlaybackResourceClassifier.Classification resource) {
         synchronized (LOCK) {
+            if (registration.generation() == sessionGeneration && resource != null) resourceClassification = resource;
             if (totalLength > contentLengthBytes) contentLengthBytes = totalLength;
             if (!registration.first() || eligibility == Eligibility.INELIGIBLE) {
                 if (!registration.first()) invalidateLocked(Eligibility.INELIGIBLE);
@@ -365,6 +388,10 @@ final class PlaybackBytePositionDataSource implements DataSource {
             }
         }
         return "";
+    }
+
+    private static String contentType(Map<String, List<String>> headers) {
+        return normalizedContentType(headers);
     }
 
     @Nullable

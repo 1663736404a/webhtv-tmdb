@@ -2317,17 +2317,25 @@ public class PlayerManager implements ParseCallback {
 
     private void publishPlaybackAutoContext() {
         if (spec == null || engine == null || !playbackAutoSession.active()) return;
+        PlaybackResourceClassifier.Classification requestClassification = PlaybackResourceClassifier.classifyRequest(
+                spec.getUrl(), spec.getFormat(), spec.getFormat());
+        PlaybackResourceClassifier.Classification observedClassification = engine.getResourceClassification();
+        PlaybackResourceClassifier.Classification classification = PlaybackResourceClassifier.merge(requestClassification, observedClassification);
+        PlaybackRoute.Resolution observedRoute = engine.getEffectivePlaybackRoute();
+        if (observedRoute == null || observedRoute.route() == PlaybackRoute.OTHER) observedRoute = spec.getPlaybackRoute();
         long now = SystemClock.elapsedRealtime();
         PlaybackAutoContext.Fact<PlaybackAutoContext.Kernel> kernel = PlaybackAutoContext.Fact.forSession(
                 playbackAutoKernel(playerType), PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH, now);
         PlaybackAutoContext.Fact<PlaybackAutoContext.DecodeMode> decode = PlaybackAutoContext.Fact.forSession(
                 engine.isHard() ? PlaybackAutoContext.DecodeMode.HARDWARE : PlaybackAutoContext.DecodeMode.SOFTWARE,
                 PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH, now);
-        PlaybackAutoContext.PathFacts path = PlaybackAutoContext.PathFacts.fromResolution(spec.getPlaybackRoute(), now);
-        if (!playbackAutoContextStore.publishPlaybackFacts(playbackAutoSession, kernel, decode, path, now)) return;
+        PlaybackAutoContext.PathFacts path = classification.toPathFacts(observedRoute, now);
+        PlaybackAutoContext.ResourceFacts resource = classification.toResourceFacts(now);
+        if (!playbackAutoContextStore.publishPlaybackFacts(playbackAutoSession, kernel, decode, resource, path, now)) return;
         PlaybackAutoContext snapshot = playbackAutoContextStore.snapshot();
         if (playbackAutoSession.equals(snapshot.session())) {
             PlaybackTrace.log("playback-auto-context", playbackTrace.current(), "%s", snapshot.logSummary());
+            PlaybackTrace.log("playback-auto-resource", playbackTrace.current(), "%s", classification.logSummary());
         }
     }
 
@@ -2506,6 +2514,7 @@ public class PlayerManager implements ParseCallback {
         public void onPlaybackStateChanged(int state) {
             if (state != Player.STATE_IDLE) App.removeCallbacks(runnable);
             if (SpiderDebug.isEnabled()) SpiderDebug.log("player", "state=%s spec=%s", stateName(state), debugSpec());
+            publishPlaybackAutoContext();
             if (state == Player.STATE_READY) {
                 playbackTrace.mark(PlaybackTrace.Stage.READY, "player=" + playerType);
                 markStartupCompletion(true, getCurrentTracks());
@@ -2541,6 +2550,7 @@ public class PlayerManager implements ParseCallback {
 
         @Override
         public void onTracksChanged(@NonNull Tracks tracks) {
+            publishPlaybackAutoContext();
             if (!tracks.isEmpty() && !initTrack) {
                 playbackTrace.mark(PlaybackTrace.Stage.TRACKS, trackSummary(tracks));
                 restoreTrackSelection(Track.find(getKey()));
@@ -2555,6 +2565,7 @@ public class PlayerManager implements ParseCallback {
         @Override
         public void onRenderedFirstFrame() {
             playbackTrace.mark(PlaybackTrace.Stage.FIRST_FRAME, "source=media3 player=" + playerType);
+            publishPlaybackAutoContext();
         }
 
         @Override

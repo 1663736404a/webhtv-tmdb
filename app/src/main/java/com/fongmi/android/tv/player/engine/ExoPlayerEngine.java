@@ -15,11 +15,13 @@ import com.fongmi.android.tv.App;
 import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.bean.Track;
 import com.fongmi.android.tv.player.PlaybackTrace;
+import com.fongmi.android.tv.player.PlaybackResourceClassifier;
 import com.fongmi.android.tv.player.exo.ErrorMsgProvider;
 import com.fongmi.android.tv.player.exo.ExoUtil;
 import com.fongmi.android.tv.player.exo.ExoTunnelingProgressWatchdog;
 import com.fongmi.android.tv.player.exo.ExoTunnelingRuntimeState;
 import com.fongmi.android.tv.player.exo.ExoTunnelingWatchdog;
+import com.fongmi.android.tv.player.exo.PlaybackBytePositionDataSource;
 import com.fongmi.android.tv.player.exo.MediaSourceFactory;
 import com.fongmi.android.tv.player.exo.PlaybackAnalyticsListener;
 import com.fongmi.android.tv.player.exo.PreCache;
@@ -46,6 +48,8 @@ public class ExoPlayerEngine implements PlayerEngine {
     private boolean cacheSessionActive;
     private boolean tunnelingFallbackAttempted;
     private boolean tunnelingEnabledForSession;
+    private PlaybackResourceClassifier.Classification resourceClassification;
+    private long byteSessionSequence = -1;
     private final ExoTunnelingWatchdog tunnelingWatchdog = new ExoTunnelingWatchdog();
     private final ExoTunnelingProgressWatchdog tunnelingProgressWatchdog = new ExoTunnelingProgressWatchdog();
     private final Runnable tunnelingWatchdogRunnable = this::onTunnelingWatchdogTimeout;
@@ -247,6 +251,7 @@ public class ExoPlayerEngine implements PlayerEngine {
     public void start(PlaySpec spec, boolean playWhenReady) {
         this.spec = spec;
         this.activeFormat = spec.getFormat();
+        this.resourceClassification = PlaybackResourceClassifier.classifyRequest(spec.getUrl(), spec.getFormat(), spec.getFormat());
         this.playWhenReady = playWhenReady;
         resetAttemptedFormats();
         PlaybackTrace.log("player-engine", getPlaybackTraceId(), "start decode=%d format=%s play=%s headers=%s urlLen=%d", decode, spec.getFormat(), playWhenReady, spec.getHeaders() == null ? 0 : spec.getHeaders().size(), spec.getUrl() == null ? 0 : spec.getUrl().length());
@@ -257,6 +262,7 @@ public class ExoPlayerEngine implements PlayerEngine {
     public void start(PlaySpec spec, long position, boolean playWhenReady) {
         this.spec = spec;
         this.activeFormat = spec.getFormat();
+        this.resourceClassification = PlaybackResourceClassifier.classifyRequest(spec.getUrl(), spec.getFormat(), spec.getFormat());
         this.playWhenReady = playWhenReady;
         resetAttemptedFormats();
         PlaybackTrace.log("player-engine", getPlaybackTraceId(), "start decode=%d format=%s position=%d play=%s headers=%s urlLen=%d", decode, spec.getFormat(), position, playWhenReady, spec.getHeaders() == null ? 0 : spec.getHeaders().size(), spec.getUrl() == null ? 0 : spec.getUrl().length());
@@ -267,6 +273,7 @@ public class ExoPlayerEngine implements PlayerEngine {
     public void restart(PlaySpec spec, long position, boolean playWhenReady) {
         this.spec = spec;
         this.activeFormat = spec.getFormat();
+        this.resourceClassification = PlaybackResourceClassifier.classifyRequest(spec.getUrl(), spec.getFormat(), spec.getFormat());
         this.playWhenReady = playWhenReady;
         resetAttemptedFormats();
         PlaybackTrace.log("player-engine", getPlaybackTraceId(), "restart decode=%d format=%s position=%d play=%s headers=%s urlLen=%d", decode, spec.getFormat(), position, playWhenReady, spec.getHeaders() == null ? 0 : spec.getHeaders().size(), spec.getUrl() == null ? 0 : spec.getUrl().length());
@@ -296,6 +303,24 @@ public class ExoPlayerEngine implements PlayerEngine {
     @Override
     public boolean isVod() {
         return player.getDuration() > TimeUnit.MINUTES.toMillis(1) && !player.isCurrentMediaItemLive();
+    }
+
+    @Override
+    public PlaybackResourceClassifier.Classification getResourceClassification() {
+        PlaybackResourceClassifier.Classification current = resourceClassification;
+        if (current == null) {
+            current = PlaybackResourceClassifier.classifyRequest(spec == null ? null : spec.getUrl(), spec == null ? null : spec.getFormat(), spec == null ? null : spec.getFormat());
+        }
+        if (byteSessionSequence >= 0 && PlaybackBytePositionDataSource.resourceSessionSequence() == byteSessionSequence) {
+            PlaybackResourceClassifier.Classification observed = PlaybackBytePositionDataSource.latestResourceClassification();
+            current = PlaybackResourceClassifier.merge(current, observed);
+        }
+        if (player == null) return current;
+        try {
+            return PlaybackResourceClassifier.observePlayer(current, player.isCurrentMediaItemLive(), player.getDuration());
+        } catch (Throwable ignored) {
+            return current;
+        }
     }
 
     @Override
@@ -395,6 +420,7 @@ public class ExoPlayerEngine implements PlayerEngine {
         armTunnelingWatchdog();
         PlaybackAnalyticsListener.finishSession(player.getCurrentPosition());
         PlaybackAnalyticsListener.beginSession(spec.getPlaybackTraceId());
+        byteSessionSequence = PlaybackBytePositionDataSource.resourceSessionSequence();
         PlaybackTrace.log("player-engine", getPlaybackTraceId(), "prepare position=%d decode=%d format=%s originalFormat=%s play=%s", position, decode, activeFormat, spec.getFormat(), playWhenReady);
         ExoPerformanceSetting.beginAutoSession();
         if (!playWhenReady) player.pause();

@@ -1,11 +1,13 @@
 package androidx.media3.mpvplayer;
 
+import android.os.SystemClock;
 import android.text.TextUtils;
 
 import androidx.annotation.Nullable;
 import androidx.media3.exoplayer.hls.playlist.HlsAdsParser;
 
 import com.fongmi.android.tv.player.PlaybackRouteRegistry;
+import com.fongmi.android.tv.player.PlaybackResourceClassifier;
 import com.fongmi.android.tv.setting.PlayerSetting;
 import com.fongmi.android.tv.setting.PreloadSetting;
 import com.fongmi.android.tv.setting.Setting;
@@ -119,7 +121,15 @@ public final class MpvHlsProxy extends NanoHTTPD {
         int id = ++this.sessionId;
         Session session = new Session(url, sanitize(headers), System.currentTimeMillis());
         sessions.put(id, session);
-        sessionStats.put(id, new SessionStats());
+        SessionStats stats = new SessionStats();
+        stats.classification = PlaybackResourceClassifier.classify(
+                baseUrl() + "/mpv/index.m3u8?s=" + id,
+                url,
+                "application/vnd.apple.mpegurl",
+                "hls",
+                Map.of(),
+                null);
+        sessionStats.put(id, stats);
         pruneExpiredSessions(session.createdAtMs);
         pruneCache();
         String proxyUrl = baseUrl() + "/mpv/index.m3u8?s=" + sessionId;
@@ -133,7 +143,15 @@ public final class MpvHlsProxy extends NanoHTTPD {
         int id = ++this.sessionId;
         Session session = new Session(url, sanitize(headers), System.currentTimeMillis());
         sessions.put(id, session);
-        sessionStats.put(id, new SessionStats());
+        SessionStats stats = new SessionStats();
+        stats.classification = PlaybackResourceClassifier.classify(
+                baseUrl() + "/mpv/index.mpd?s=" + id,
+                url,
+                "application/dash+xml",
+                "dash",
+                Map.of(),
+                null);
+        sessionStats.put(id, stats);
         pruneExpiredSessions(session.createdAtMs);
         String proxyUrl = baseUrl() + "/mpv/index.mpd?s=" + id;
         SpiderDebug.log(TAG, "dash enabled session=%d url=%s headers=%s proxy=%s", id, shortUrl(url), session.headers.keySet(), proxyUrl);
@@ -167,6 +185,17 @@ public final class MpvHlsProxy extends NanoHTTPD {
                 + "/" + formatBytes(cacheLimitBytes())
                 + " / preload " + preloading.size()
                 + " / " + statsText();
+    }
+
+    @Nullable
+    public PlaybackResourceClassifier.Classification resourceClassification() {
+        SessionStats stats = sessionStats.get(sessionId);
+        if (stats == null) return null;
+        PlaybackResourceClassifier.Classification classification = stats.classification;
+        if (classification != null) return classification;
+        Session session = sessions.get(sessionId);
+        if (session == null) return null;
+        return PlaybackResourceClassifier.classifyRequest(session.url, null, null);
     }
 
     void preloadAround(long positionMs) {
@@ -250,6 +279,12 @@ public final class MpvHlsProxy extends NanoHTTPD {
             String manifestUrl = response.request().url().toString();
             String text = body.string();
             if (!text.toLowerCase(Locale.US).contains("<mpd")) return error(Status.BAD_REQUEST, "invalid dash");
+            SessionStats stats = stats(id);
+            stats.classification = PlaybackResourceClassifier.classifyDash(
+                    started && getListeningPort() > 0 ? baseUrl() + "/mpv/index.mpd?s=" + id : null,
+                    session.url,
+                    text,
+                    SystemClock.elapsedRealtime());
             text = rewriteSegmentBase(session, manifestUrl, text);
             Matcher matcher = DASH_BASE_URL.matcher(text);
             StringBuffer rewritten = new StringBuffer();
@@ -758,11 +793,23 @@ public final class MpvHlsProxy extends NanoHTTPD {
         stats.playlistRequests++;
         recordStatus(stats, status, url);
         if (isVodPlaylist(text)) stats.vod = true;
+        if (text != null && !text.isBlank()) {
+            Session owner = sessions.get(session);
+            if (owner != null) {
+                stats.classification = PlaybackResourceClassifier.classifyHls(
+                        playerPlaylistUri(session), owner.url, text, SystemClock.elapsedRealtime());
+            }
+        }
     }
 
     private void recordPlaylistDetails(int session, String text, HlsPlaylistRewriter.Result result) {
         SessionStats stats = stats(session);
         stats.vod = isVodPlaylist(text);
+        Session owner = sessions.get(session);
+        if (owner != null) {
+            stats.classification = PlaybackResourceClassifier.classifyHls(
+                    playerPlaylistUri(session), owner.url, text, SystemClock.elapsedRealtime());
+        }
         String upper = text.toUpperCase(Locale.US);
         if (upper.contains("#EXT-X-BYTERANGE:") || upper.contains("BYTERANGE=")) stats.hasByteRange = true;
         if (!result.variants().isEmpty()) stats.recordVariants(result.variants());
@@ -782,6 +829,11 @@ public final class MpvHlsProxy extends NanoHTTPD {
         SessionStats stats = stats(session);
         stats.itemRequests++;
         recordStatus(stats, status, url);
+    }
+
+    private String playerPlaylistUri(int session) {
+        if (!started || getListeningPort() <= 0) return null;
+        return baseUrl() + "/mpv/index.m3u8?s=" + session;
     }
 
     private SessionStats stats(int session) {
@@ -1311,6 +1363,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
         private volatile int lastStatus;
         private volatile long lastErrorAtMs;
         private volatile String lastUrl;
+        private volatile PlaybackResourceClassifier.Classification classification;
         private volatile HlsPlaylistRewriter.Variant selectedVariant;
         private volatile int variantCount;
         private volatile List<HlsPlaylistRewriter.Segment> segments = List.of();

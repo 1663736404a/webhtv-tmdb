@@ -31,6 +31,8 @@ import androidx.media3.mpvplayer.MpvHlsProxy;
 import com.fongmi.android.tv.App;
 import com.fongmi.android.tv.BuildConfig;
 import com.fongmi.android.tv.player.exo.ExoUtil;
+import com.fongmi.android.tv.player.PlaybackResourceClassifier;
+import com.fongmi.android.tv.player.PlaybackRoute;
 import com.fongmi.android.tv.setting.IjkPerformanceSetting;
 import com.fongmi.android.tv.setting.PlayerSetting;
 import com.fongmi.android.tv.utils.Task;
@@ -95,6 +97,8 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
     private boolean repeatOne;
     private boolean ownsSurface;
     private boolean currentDash;
+    private volatile PlaybackResourceClassifier.Classification resourceClassification;
+    private volatile String currentPlayableUrl;
     private float volume;
 
     IjkSimplePlayer(int decode) {
@@ -383,6 +387,7 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
             Uri sourceUri = mediaItem.localConfiguration.uri;
             Map<String, String> headers = ExoUtil.extractHeaders(mediaItem);
             String playableUrl = sourceUri.toString();
+            resourceClassification = PlaybackResourceClassifier.classifyRequest(playableUrl, mediaItem.localConfiguration.mimeType, mediaItem.localConfiguration.mimeType);
             boolean dash = isLikelyDash(mediaItem, playableUrl);
             currentDash = dash;
             if (BuildConfig.DEBUG) Log.e("WebHTV-IJK", "open dash=" + dash + " uri=" + playableUrl + " headers=" + headers.keySet());
@@ -395,6 +400,7 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
                 SpiderDebug.log("ijk", "hls proxy enabled original=%s proxy=%s", sourceUri, playableUrl);
             }
             SpiderDebug.log("ijk", "open dash=%s decode=%d uri=%s mime=%s headers=%s", dash, decode, summarizeUri(), mediaItem.localConfiguration.mimeType, headers.keySet());
+            currentPlayableUrl = playableUrl;
             configureOptions(sourceUri, dash);
             bindVideoOutput();
             ijk.setDataSource(App.get(), Uri.parse(playableUrl), headers);
@@ -423,6 +429,8 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         ijk.reset();
         hlsProxy.clear();
         currentDash = false;
+        resourceClassification = null;
+        currentPlayableUrl = null;
         loading = false;
         bufferingPercent = 0;
         currentTracks = Tracks.EMPTY;
@@ -644,6 +652,17 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
     private long duration() {
         long duration = safeDuration();
         return duration > 0 ? duration : C.TIME_UNSET;
+    }
+
+    PlaybackResourceClassifier.Classification getResourceClassification() {
+        PlaybackResourceClassifier.Classification current = resourceClassification;
+        PlaybackResourceClassifier.Classification proxy = hlsProxy.resourceClassification();
+        if (proxy != null) current = PlaybackResourceClassifier.merge(current, proxy);
+        return current;
+    }
+
+    PlaybackRoute.Resolution getPlaybackRouteResolution() {
+        return PlaybackRoute.resolve(currentPlayableUrl);
     }
 
     private long safeDuration() {

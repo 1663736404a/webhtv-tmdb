@@ -34,6 +34,8 @@ public class PlaybackAutoContextStoreTest {
         assertEquals(PlaybackAutoContext.Kernel.UNKNOWN, after.kernel().value());
         assertEquals(0, after.revision());
         assertFalse(store.publishDeviceFacts(first, PlaybackAutoContext.DeviceFacts.unknown(), 210));
+        assertFalse(store.publishResourceFacts(first,
+                PlaybackResourceClassifier.classifyRequest("https://cdn.example/old.m3u8", "hls", "hls").toResourceFacts(210), 210));
         assertFalse(store.clear(first));
         assertEquals(second, store.snapshot().session());
     }
@@ -61,6 +63,22 @@ public class PlaybackAutoContextStoreTest {
         assertEquals(PlaybackRoute.OTHER, before.path().route().value());
         assertEquals(1, after.revision());
         assertEquals(PlaybackRoute.DIRECT_REMOTE_HTTP, after.path().route().value());
+    }
+
+    @Test
+    public void playbackAndResourceFactsPublishInOneRevision() {
+        PlaybackAutoContextStore store = new PlaybackAutoContextStore();
+        PlaybackAutoContext.SessionToken session = store.beginSession("p-resource-atomic", 370);
+        PlaybackResourceClassifier.Classification classification = PlaybackResourceClassifier.classifyHls(
+                "https://cdn.example/live.m3u8", null, "#EXTM3U\n#EXTINF:2,\na.ts\n");
+
+        assertTrue(store.publishPlaybackFacts(session, kernel(PlaybackAutoContext.Kernel.EXO, 380), decode(true, 380),
+                classification.toResourceFacts(380), classification.toPathFacts(PlaybackRoute.resolve("https://cdn.example/live.m3u8"), 380), 380));
+
+        PlaybackAutoContext snapshot = store.snapshot();
+        assertEquals(1, snapshot.revision());
+        assertEquals(PlaybackAutoContext.Protocol.HLS, snapshot.resource().protocol().value());
+        assertEquals(PlaybackAutoContext.StreamKind.LIVE, snapshot.resource().streamKind().value());
     }
 
     @Test

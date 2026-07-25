@@ -55,6 +55,11 @@ public record PlaybackAutoContext(
                 kernel, decodeMode, device, resource, path, runtime);
     }
 
+    PlaybackAutoContext withPlaybackFacts(Fact<Kernel> kernel, Fact<DecodeMode> decodeMode, ResourceFacts resource, PathFacts path) {
+        return new PlaybackAutoContext(session, startedAtElapsedMs, revision, publishedAtElapsedMs,
+                kernel, decodeMode, device, resource, path, runtime);
+    }
+
     PlaybackAutoContext withDeviceFacts(DeviceFacts device) {
         return new PlaybackAutoContext(session, startedAtElapsedMs, revision, publishedAtElapsedMs,
                 kernel, decodeMode, device, resource, path, runtime);
@@ -88,6 +93,8 @@ public record PlaybackAutoContext(
                 " " + path.logSummary() +
                 " protocol=" + factLabel(resource.protocol(), resource.protocol().value().label()) +
                 " stream=" + factLabel(resource.streamKind(), resource.streamKind().value().label()) +
+                " transfer=" + factLabel(resource.transferUnit(), resource.transferUnit().value().label()) +
+                " manifest=" + factLabel(resource.manifest(), resource.manifest().value().kind().label()) +
                 " runtime=" + factLabel(runtime.phase(), runtime.phase().value().label()) +
                 " memory=" + factLabel(device.memoryPressure(), device.memoryPressure().value().label());
     }
@@ -205,13 +212,23 @@ public record PlaybackAutoContext(
             Fact<Protocol> protocol,
             Fact<StreamKind> streamKind,
             Fact<RangeSupport> rangeSupport,
-            Fact<TransferUnit> transferUnit) {
+            Fact<TransferUnit> transferUnit,
+            Fact<ManifestFacts> manifest) {
+
+        public ResourceFacts(
+                Fact<Protocol> protocol,
+                Fact<StreamKind> streamKind,
+                Fact<RangeSupport> rangeSupport,
+                Fact<TransferUnit> transferUnit) {
+            this(protocol, streamKind, rangeSupport, transferUnit, Fact.unknown(ManifestFacts.unknown()));
+        }
 
         public ResourceFacts {
             protocol = protocol == null ? Fact.unknown(Protocol.UNKNOWN) : protocol;
             streamKind = streamKind == null ? Fact.unknown(StreamKind.UNKNOWN) : streamKind;
             rangeSupport = rangeSupport == null ? Fact.unknown(RangeSupport.UNKNOWN) : rangeSupport;
             transferUnit = transferUnit == null ? Fact.unknown(TransferUnit.UNKNOWN) : transferUnit;
+            manifest = manifest == null ? Fact.unknown(ManifestFacts.unknown()) : manifest;
         }
 
         public static ResourceFacts unknown() {
@@ -219,7 +236,8 @@ public record PlaybackAutoContext(
                     Fact.unknown(Protocol.UNKNOWN),
                     Fact.unknown(StreamKind.UNKNOWN),
                     Fact.unknown(RangeSupport.UNKNOWN),
-                    Fact.unknown(TransferUnit.UNKNOWN));
+                    Fact.unknown(TransferUnit.UNKNOWN),
+                    Fact.unknown(ManifestFacts.unknown()));
         }
     }
 
@@ -229,7 +247,21 @@ public record PlaybackAutoContext(
             Fact<Boolean> loopback,
             Fact<PlaybackRouteCapabilities.ObservedLeg> observedLeg,
             Fact<PlaybackRouteCapabilities.UpstreamVisibility> upstreamVisibility,
-            Fact<PlaybackRouteCapabilities.ControlScope> controlScope) {
+            Fact<PlaybackRouteCapabilities.ControlScope> controlScope,
+            Fact<PathKind> playerPath,
+            Fact<PathKind> upstreamPath,
+            Fact<UpstreamState> upstreamState) {
+
+        public PathFacts(
+                Fact<PlaybackRoute> route,
+                Fact<PlaybackRoute.Owner> owner,
+                Fact<Boolean> loopback,
+                Fact<PlaybackRouteCapabilities.ObservedLeg> observedLeg,
+                Fact<PlaybackRouteCapabilities.UpstreamVisibility> upstreamVisibility,
+                Fact<PlaybackRouteCapabilities.ControlScope> controlScope) {
+            this(route, owner, loopback, observedLeg, upstreamVisibility, controlScope,
+                    Fact.unknown(PathKind.UNKNOWN), Fact.unknown(PathKind.UNKNOWN), Fact.unknown(UpstreamState.UNKNOWN));
+        }
 
         public PathFacts {
             route = route == null ? Fact.unknown(PlaybackRoute.OTHER) : route;
@@ -238,6 +270,9 @@ public record PlaybackAutoContext(
             observedLeg = observedLeg == null ? Fact.unknown(PlaybackRouteCapabilities.ObservedLeg.SOURCE_SPECIFIC) : observedLeg;
             upstreamVisibility = upstreamVisibility == null ? Fact.unknown(PlaybackRouteCapabilities.UpstreamVisibility.UNKNOWN) : upstreamVisibility;
             controlScope = controlScope == null ? Fact.unknown(PlaybackRouteCapabilities.ControlScope.NONE) : controlScope;
+            playerPath = playerPath == null ? Fact.unknown(PathKind.UNKNOWN) : playerPath;
+            upstreamPath = upstreamPath == null ? Fact.unknown(PathKind.UNKNOWN) : upstreamPath;
+            upstreamState = upstreamState == null ? Fact.unknown(UpstreamState.UNKNOWN) : upstreamState;
         }
 
         public static PathFacts unknown() {
@@ -247,26 +282,96 @@ public record PlaybackAutoContext(
                     Fact.unknown(false),
                     Fact.unknown(PlaybackRouteCapabilities.ObservedLeg.SOURCE_SPECIFIC),
                     Fact.unknown(PlaybackRouteCapabilities.UpstreamVisibility.UNKNOWN),
-                    Fact.unknown(PlaybackRouteCapabilities.ControlScope.NONE));
+                    Fact.unknown(PlaybackRouteCapabilities.ControlScope.NONE),
+                    Fact.unknown(PathKind.UNKNOWN),
+                    Fact.unknown(PathKind.UNKNOWN),
+                    Fact.unknown(UpstreamState.UNKNOWN));
         }
 
         public static PathFacts fromResolution(PlaybackRoute.Resolution resolution, long sampledAtElapsedMs) {
             PlaybackRoute.Resolution safe = resolution == null ? PlaybackRoute.resolve(null) : resolution;
             PlaybackRouteCapabilities capabilities = PlaybackRouteCapabilities.resolve(safe);
             Confidence confidence = Confidence.fromRoute(safe.confidence());
+            PathKind playerPath = pathKind(safe.location());
+            PathKind upstreamPath = switch (playerPath) {
+                case LOCAL, LAN_PRIVATE, REMOTE -> playerPath;
+                default -> PathKind.UNKNOWN;
+            };
+            UpstreamState upstreamState = playerPath == PathKind.LOCAL
+                    ? UpstreamState.NOT_APPLICABLE : upstreamState(capabilities.upstreamVisibility());
             return new PathFacts(
                     Fact.forSession(safe.route(), ValueSource.ROUTE_CLASSIFIER, confidence, sampledAtElapsedMs),
                     Fact.forSession(safe.owner(), ValueSource.ROUTE_CLASSIFIER, confidence, sampledAtElapsedMs),
                     Fact.forSession(safe.loopback(), ValueSource.ROUTE_CLASSIFIER, confidence, sampledAtElapsedMs),
                     Fact.forSession(capabilities.observedLeg(), ValueSource.ROUTE_CLASSIFIER, confidence, sampledAtElapsedMs),
                     Fact.forSession(capabilities.upstreamVisibility(), ValueSource.ROUTE_CLASSIFIER, confidence, sampledAtElapsedMs),
-                    Fact.forSession(capabilities.controlScope(), ValueSource.ROUTE_CLASSIFIER, confidence, sampledAtElapsedMs));
+                    Fact.forSession(capabilities.controlScope(), ValueSource.ROUTE_CLASSIFIER, confidence, sampledAtElapsedMs),
+                    Fact.forSession(playerPath, ValueSource.ROUTE_CLASSIFIER, confidence, sampledAtElapsedMs),
+                    upstreamPath == PathKind.UNKNOWN ? Fact.unknown(PathKind.UNKNOWN) : Fact.forSession(upstreamPath, ValueSource.ROUTE_CLASSIFIER, confidence, sampledAtElapsedMs),
+                    Fact.forSession(upstreamState, ValueSource.ROUTE_CLASSIFIER, confidence, sampledAtElapsedMs));
         }
 
         private String logSummary() {
             String routeValue = route.hasValue() ? route.value().name().toLowerCase(Locale.US) : "unknown";
             String ownerValue = owner.hasValue() ? owner.value().label() : "unknown";
-            return "route=" + factLabel(route, routeValue) + " owner=" + factLabel(owner, ownerValue);
+            String playerValue = playerPath.hasValue() ? playerPath.value().label() : "unknown";
+            String upstreamValue = upstreamPath.hasValue() ? upstreamPath.value().label() : "unknown";
+            return "route=" + factLabel(route, routeValue) + " owner=" + factLabel(owner, ownerValue)
+                    + " playerPath=" + factLabel(playerPath, playerValue)
+                    + " upstreamPath=" + factLabel(upstreamPath, upstreamValue)
+                    + " upstreamState=" + factLabel(upstreamState, upstreamState.value().label());
+        }
+
+        private static PathKind pathKind(PlaybackRoute.Location location) {
+            if (location == null) return PathKind.UNKNOWN;
+            return switch (location) {
+                case LOCAL -> PathKind.LOCAL;
+                case LAN_PRIVATE -> PathKind.LAN_PRIVATE;
+                case REMOTE -> PathKind.REMOTE;
+                case APP_INTERNAL_SERVICE -> PathKind.APP_INTERNAL_SERVICE;
+                case EXTERNAL_LOOPBACK -> PathKind.EXTERNAL_LOOPBACK;
+                case UNKNOWN -> PathKind.UNKNOWN;
+            };
+        }
+
+        private static UpstreamState upstreamState(PlaybackRouteCapabilities.UpstreamVisibility visibility) {
+            if (visibility == null) return UpstreamState.UNKNOWN;
+            return switch (visibility) {
+                case REQUEST_LEVEL_ONLY, APP_SERVICE_PATH -> UpstreamState.VISIBLE;
+                case OPAQUE_EXTERNAL_PROCESS -> UpstreamState.OPAQUE;
+                case UNKNOWN -> UpstreamState.UNKNOWN;
+            };
+        }
+    }
+
+    public record ManifestFacts(
+            ManifestKind kind,
+            Boolean endList,
+            Long targetDurationMs,
+            Long partDurationMs,
+            Long holdBackMs,
+            Integer variantCount,
+            Boolean byteRange,
+            Boolean lowLatency) {
+
+        public ManifestFacts {
+            kind = kind == null ? ManifestKind.UNKNOWN : kind;
+            targetDurationMs = nonNegativeOrNull(targetDurationMs);
+            partDurationMs = nonNegativeOrNull(partDurationMs);
+            holdBackMs = nonNegativeOrNull(holdBackMs);
+            variantCount = variantCount == null ? null : Math.max(0, variantCount);
+        }
+
+        public static ManifestFacts unknown() {
+            return new ManifestFacts(ManifestKind.UNKNOWN, null, null, null, null, null, null, null);
+        }
+
+        public static ManifestFacts none() {
+            return new ManifestFacts(ManifestKind.NONE, null, null, null, null, null, null, null);
+        }
+
+        private static Long nonNegativeOrNull(Long value) {
+            return value == null || value < 0 ? null : value;
         }
     }
 
@@ -337,6 +442,9 @@ public record PlaybackAutoContext(
     public enum ValueSource {
         PLAYER_MANAGER("player-manager"),
         PLAYBACK_REQUEST("playback-request"),
+        MANIFEST("manifest"),
+        PROXY("proxy"),
+        DATA_SOURCE("data-source"),
         ROUTE_CLASSIFIER("route-classifier"),
         PLAYER_CALLBACK("player-callback"),
         SYSTEM_API("system-api"),
@@ -465,6 +573,43 @@ public record PlaybackAutoContext(
         }
     }
 
+    /** A path classification that does not imply a change to the legacy route policy. */
+    public enum PathKind {
+        LOCAL("local"),
+        LAN_PRIVATE("lan-private"),
+        REMOTE("remote"),
+        APP_INTERNAL_SERVICE("app-internal-service"),
+        EXTERNAL_LOOPBACK("external-loopback"),
+        UNKNOWN("unknown");
+
+        private final String label;
+
+        PathKind(String label) {
+            this.label = label;
+        }
+
+        public String label() {
+            return label;
+        }
+    }
+
+    public enum UpstreamState {
+        VISIBLE("visible"),
+        OPAQUE("opaque"),
+        NOT_APPLICABLE("not-applicable"),
+        UNKNOWN("unknown");
+
+        private final String label;
+
+        UpstreamState(String label) {
+            this.label = label;
+        }
+
+        public String label() {
+            return label;
+        }
+    }
+
     public enum Protocol {
         LOCAL("local"),
         PROGRESSIVE_HTTP("progressive-http"),
@@ -528,6 +673,25 @@ public record PlaybackAutoContext(
         private final String label;
 
         TransferUnit(String label) {
+            this.label = label;
+        }
+
+        public String label() {
+            return label;
+        }
+    }
+
+    public enum ManifestKind {
+        NONE("none"),
+        HLS_MASTER("hls-master"),
+        HLS_MEDIA("hls-media"),
+        DASH_STATIC("dash-static"),
+        DASH_DYNAMIC("dash-dynamic"),
+        UNKNOWN("unknown");
+
+        private final String label;
+
+        ManifestKind(String label) {
             this.label = label;
         }
 

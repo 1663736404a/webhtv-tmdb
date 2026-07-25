@@ -20,6 +20,7 @@ import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.bean.Track;
 import com.fongmi.android.tv.player.PlayerHelper;
 import com.fongmi.android.tv.player.PlaybackRoute;
+import com.fongmi.android.tv.player.PlaybackResourceClassifier;
 import com.fongmi.android.tv.player.PlaybackTrace;
 import com.fongmi.android.tv.player.exo.ExoUtil;
 import com.fongmi.android.tv.player.exo.TrackUtil;
@@ -247,6 +248,11 @@ public class MpvPlayerEngine implements PlayerEngine {
         PlaybackRoute.Resolution current = player.getPlaybackRouteResolution();
         if (current.route() != PlaybackRoute.OTHER) return current;
         return spec == null ? current : spec.getPlaybackRoute();
+    }
+
+    @Override
+    public PlaybackResourceClassifier.Classification getResourceClassification() {
+        return player.getResourceClassification();
     }
 
     @Override

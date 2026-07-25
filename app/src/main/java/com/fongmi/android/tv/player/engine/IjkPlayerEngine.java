@@ -12,6 +12,8 @@ import androidx.media3.common.util.UnstableApi;
 import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.bean.Track;
 import com.fongmi.android.tv.player.PlaybackTrace;
+import com.fongmi.android.tv.player.PlaybackResourceClassifier;
+import com.fongmi.android.tv.player.PlaybackRoute;
 import com.fongmi.android.tv.player.exo.ExoUtil;
 import com.fongmi.android.tv.player.exo.TrackUtil;
 import com.fongmi.android.tv.utils.ResUtil;
@@ -103,6 +105,18 @@ public class IjkPlayerEngine implements PlayerEngine {
     @Override
     public boolean isVod() {
         return player.getDuration() > TimeUnit.MINUTES.toMillis(1) && !player.isCurrentMediaItemLive();
+    }
+
+    @Override
+    public PlaybackResourceClassifier.Classification getResourceClassification() {
+        return player.getResourceClassification();
+    }
+
+    @Override
+    public PlaybackRoute.Resolution getEffectivePlaybackRoute() {
+        PlaybackRoute.Resolution current = player.getPlaybackRouteResolution();
+        if (current.route() != PlaybackRoute.OTHER) return current;
+        return spec == null ? current : spec.getPlaybackRoute();
     }
 
     @Override

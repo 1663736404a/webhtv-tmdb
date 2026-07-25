@@ -10,6 +10,7 @@ import androidx.media3.common.Tracks;
 
 import com.fongmi.android.tv.bean.Track;
 import com.fongmi.android.tv.player.PlaybackRoute;
+import com.fongmi.android.tv.player.PlaybackResourceClassifier;
 import com.fongmi.android.tv.player.PlaybackTrace;
 import com.fongmi.android.tv.player.lut.MpvLutShader;
 
@@ -150,6 +151,15 @@ public interface PlayerEngine {
     }
 
     default PlaybackRoute.Resolution getEffectivePlaybackRoute() {
+        return null;
+    }
+
+    /**
+     * Returns the most recent resource classification observed by this engine.
+     * Implementations must return an immutable snapshot and may return null
+     * when the engine has not observed a stronger fact than the request itself.
+     */
+    default PlaybackResourceClassifier.Classification getResourceClassification() {
         return null;
     }
 

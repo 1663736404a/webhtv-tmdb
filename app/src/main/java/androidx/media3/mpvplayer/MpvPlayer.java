@@ -37,6 +37,7 @@ import androidx.media3.common.VideoSize;
 import androidx.media3.common.util.UnstableApi;
 
 import com.fongmi.android.tv.player.PlaybackRoute;
+import com.fongmi.android.tv.player.PlaybackResourceClassifier;
 import com.fongmi.android.tv.player.PlaybackTrace;
 import com.fongmi.android.tv.player.engine.PlayerCacheState;
 import com.fongmi.android.tv.player.iso.IsoSessionManager;
@@ -155,6 +156,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     private MpvLutShader lutShader;
     private String currentPlayableUri;
     private String playbackTraceId = PlaybackTrace.NONE;
+    private volatile PlaybackResourceClassifier.Classification resourceClassification;
     private String currentIsoUri;
     private boolean isoTrackListDumped;
     private long isoMetadataListenerSessionId = -1;
@@ -525,6 +527,19 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         return PlaybackRoute.resolve(currentPlayableUri);
     }
 
+    @Nullable
+    public PlaybackResourceClassifier.Classification getResourceClassification() {
+        PlaybackResourceClassifier.Classification current = resourceClassification;
+        PlaybackResourceClassifier.Classification proxy = hlsProxy.resourceClassification();
+        if (proxy != null) current = PlaybackResourceClassifier.merge(current, proxy);
+        if (current == null) return null;
+        try {
+            return PlaybackResourceClassifier.observePlayer(current, isCurrentMediaItemLive(), getDuration());
+        } catch (Throwable ignored) {
+            return current;
+        }
+    }
+
     public void setLutShader(@Nullable MpvLutShader shader) {
         lutShader = shader;
         applyShaderPipeline(false);
@@ -718,6 +733,8 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     private void continueOpenCurrent(Map<String, String> headers, long generation) {
         if (!mediaReplacementCoordinator.isCurrent(generation)) return;
         try {
+            String sourceMime = mediaItem == null || mediaItem.localConfiguration == null ? null : mediaItem.localConfiguration.mimeType;
+            resourceClassification = PlaybackResourceClassifier.classifyRequest(currentPlayableUri, sourceMime, sourceMime);
             if (currentIsoUri != null) {
                 currentLikelyHls = false;
                 currentLikelyDash = false;
@@ -1760,6 +1777,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         pendingSeekPositionMs = C.TIME_UNSET;
         idleActive = false;
         currentPlayableUri = null;
+        resourceClassification = null;
         closeIsoSession();
         currentLikelyHls = false;
         currentLikelyDash = false;

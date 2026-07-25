@@ -75,4 +75,30 @@ public class PlaybackAutoContextTest {
         assertFalse(summary.contains("private"));
         assertFalse(summary.contains("token"));
     }
+
+    @Test
+    public void pathAndResourceFactsExposeBothObservedLegs() {
+        PlaybackResourceClassifier.Classification classification = PlaybackResourceClassifier.classifyHls(
+                "http://127.0.0.1:7777/mpv/index.m3u8",
+                "https://origin.example/live.m3u8",
+                "#EXTM3U\n#EXTINF:2,\na.ts\n");
+        PlaybackAutoContext.PathFacts path = classification.toPathFacts(PlaybackRoute.resolve("http://127.0.0.1:7777/mpv/index.m3u8"), 20);
+        PlaybackAutoContext.ResourceFacts resource = classification.toResourceFacts(20);
+
+        assertEquals(PlaybackAutoContext.PathKind.EXTERNAL_LOOPBACK, path.playerPath().value());
+        assertEquals(PlaybackAutoContext.PathKind.UNKNOWN, path.upstreamPath().value());
+        assertEquals(PlaybackAutoContext.UpstreamState.OPAQUE, path.upstreamState().value());
+        assertEquals(PlaybackAutoContext.StreamKind.LIVE, resource.streamKind().value());
+        assertEquals(PlaybackAutoContext.ManifestKind.HLS_MEDIA, resource.manifest().value().kind());
+    }
+
+    @Test
+    public void localPathHasNoUpstreamLeg() {
+        PlaybackAutoContext.PathFacts path = PlaybackAutoContext.PathFacts.fromResolution(
+                PlaybackRoute.resolve("file:///storage/movie.mkv"), 30);
+
+        assertEquals(PlaybackAutoContext.PathKind.LOCAL, path.playerPath().value());
+        assertEquals(PlaybackAutoContext.PathKind.LOCAL, path.upstreamPath().value());
+        assertEquals(PlaybackAutoContext.UpstreamState.NOT_APPLICABLE, path.upstreamState().value());
+    }
 }

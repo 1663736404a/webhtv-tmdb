@@ -36,6 +36,16 @@ public final class PlaybackAutoContextStore {
         return update(session, publishedAtElapsedMs, context -> context.withPlaybackFacts(kernel, decodeMode, path));
     }
 
+    public boolean publishPlaybackFacts(
+            PlaybackAutoContext.SessionToken session,
+            PlaybackAutoContext.Fact<PlaybackAutoContext.Kernel> kernel,
+            PlaybackAutoContext.Fact<PlaybackAutoContext.DecodeMode> decodeMode,
+            PlaybackAutoContext.ResourceFacts resource,
+            PlaybackAutoContext.PathFacts path,
+            long publishedAtElapsedMs) {
+        return update(session, publishedAtElapsedMs, context -> context.withPlaybackFacts(kernel, decodeMode, resource, path));
+    }
+
     public boolean publishDeviceFacts(PlaybackAutoContext.SessionToken session, PlaybackAutoContext.DeviceFacts device, long publishedAtElapsedMs) {
         return update(session, publishedAtElapsedMs, context -> context.withDeviceFacts(device));
     }
