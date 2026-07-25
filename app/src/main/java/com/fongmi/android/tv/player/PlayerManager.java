@@ -116,6 +116,7 @@ public class PlayerManager implements ParseCallback {
     private final BroadcastReceiver noisyReceiver;
     private final PlaybackBufferingTracker playbackBufferingTracker;
     private final PlaybackTrace playbackTrace;
+    private final PlaybackAutoContextStore playbackAutoContextStore;
     private final ExoNetworkGuardController networkProtectionController;
     private final ForwardBufferTrend networkProtectionTrend;
     private final LiveDanmakuBatcher liveDanmakuBatcher;
@@ -132,6 +133,7 @@ public class PlayerManager implements ParseCallback {
     private String currentDanmakuKey;
     private String loadingDanmakuKey;
     private String lastLoggedRouteTraceId = PlaybackTrace.NONE;
+    private PlaybackAutoContext.SessionToken playbackAutoSession = PlaybackAutoContext.SessionToken.none();
     private long danmakuLoadStartedAtMs;
     private volatile long liveDanmakuGeneration;
     private volatile boolean liveDanmakuPlaybackActive;
@@ -187,6 +189,7 @@ public class PlayerManager implements ParseCallback {
         this.networkProtectionRunnable = this::evaluateNetworkProtection;
         this.playbackBufferingTracker = new PlaybackBufferingTracker();
         this.playbackTrace = new PlaybackTrace();
+        this.playbackAutoContextStore = PlaybackAutoContextStore.process();
         this.networkProtectionController = new ExoNetworkGuardController();
         this.networkProtectionTrend = new ForwardBufferTrend();
         this.liveDanmakuBuffer = new LiveDanmakuBuffer();
@@ -220,6 +223,7 @@ public class PlayerManager implements ParseCallback {
         App.removeCallbacks(liveDanmakuMetricsRunnable);
         if (danmakuController != null) danmakuController.setListener(null);
         danmakuController = null;
+        clearPlaybackAutoContext();
         if (engine == null) return;
         engine.release();
         engine = null;
@@ -287,6 +291,10 @@ public class PlayerManager implements ParseCallback {
 
     public String getPlaybackTraceId() {
         return playbackTrace.current();
+    }
+
+    public PlaybackAutoContext getPlaybackAutoContext() {
+        return playbackAutoContextStore.snapshot();
     }
 
     public int getPlaybackState() {
@@ -942,6 +950,7 @@ public class PlayerManager implements ParseCallback {
         waitingLutBeforePlay = false;
         clearLutWarmupRecovery();
         playbackBufferingTracker.reset();
+        clearPlaybackAutoContext();
         playbackTrace.clear();
         lastLoggedRouteTraceId = PlaybackTrace.NONE;
     }
@@ -1465,6 +1474,7 @@ public class PlayerManager implements ParseCallback {
         if (spec == null || spec.getUrl() == null || engine == null) return;
         spec.setPlaybackTraceId(playbackTrace.ensure());
         spec.refreshPlaybackRoute();
+        publishPlaybackAutoContext();
         logPlaybackRoute();
         if (SpiderDebug.isEnabled()) SpiderDebug.log("player", "setMediaItem timeout=%d notify=%s spec=%s", timeout, notifyPrepare, debugSpec());
         resetNetworkProtectionSession("new-media");
@@ -2295,6 +2305,7 @@ public class PlayerManager implements ParseCallback {
     private void beginPlaybackTrace(String reason) {
         playbackBufferingTracker.reset();
         playbackTrace.begin();
+        playbackAutoSession = playbackAutoContextStore.beginSession(playbackTrace.current(), SystemClock.elapsedRealtime());
         lastLoggedRouteTraceId = PlaybackTrace.NONE;
         bindPlaybackTrace();
         playbackTrace.mark(PlaybackTrace.Stage.REQUEST, "reason=" + reason + " player=" + playerType + " decode=" + (engine == null ? -1 : engine.getDecode()));
@@ -2302,6 +2313,35 @@ public class PlayerManager implements ParseCallback {
 
     private void bindPlaybackTrace() {
         if (spec != null) spec.setPlaybackTraceId(playbackTrace.current());
+    }
+
+    private void publishPlaybackAutoContext() {
+        if (spec == null || engine == null || !playbackAutoSession.active()) return;
+        long now = SystemClock.elapsedRealtime();
+        PlaybackAutoContext.Fact<PlaybackAutoContext.Kernel> kernel = PlaybackAutoContext.Fact.forSession(
+                playbackAutoKernel(playerType), PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH, now);
+        PlaybackAutoContext.Fact<PlaybackAutoContext.DecodeMode> decode = PlaybackAutoContext.Fact.forSession(
+                engine.isHard() ? PlaybackAutoContext.DecodeMode.HARDWARE : PlaybackAutoContext.DecodeMode.SOFTWARE,
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH, now);
+        PlaybackAutoContext.PathFacts path = PlaybackAutoContext.PathFacts.fromResolution(spec.getPlaybackRoute(), now);
+        if (!playbackAutoContextStore.publishPlaybackFacts(playbackAutoSession, kernel, decode, path, now)) return;
+        PlaybackAutoContext snapshot = playbackAutoContextStore.snapshot();
+        if (playbackAutoSession.equals(snapshot.session())) {
+            PlaybackTrace.log("playback-auto-context", playbackTrace.current(), "%s", snapshot.logSummary());
+        }
+    }
+
+    private void clearPlaybackAutoContext() {
+        playbackAutoContextStore.clear(playbackAutoSession);
+        playbackAutoSession = PlaybackAutoContext.SessionToken.none();
+    }
+
+    private static PlaybackAutoContext.Kernel playbackAutoKernel(int playerType) {
+        return switch (PlayerSetting.sanitizePlayer(playerType)) {
+            case PlayerSetting.IJK -> PlaybackAutoContext.Kernel.IJK;
+            case PlayerSetting.MPV -> PlaybackAutoContext.Kernel.MPV;
+            default -> PlaybackAutoContext.Kernel.EXO;
+        };
     }
 
     private void logPlaybackRoute() {
