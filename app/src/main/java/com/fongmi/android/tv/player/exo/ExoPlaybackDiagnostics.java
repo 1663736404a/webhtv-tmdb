@@ -44,6 +44,17 @@ final class ExoPlaybackDiagnostics {
         return 0;
     }
 
+    static int trackConstraintBitrate(@Nullable Format format) {
+        return format == null ? 0 : Math.max(0, format.bitrate);
+    }
+
+    static String trackConstraintBitrateSource(@Nullable Format format) {
+        if (format == null) return "missing";
+        if (format.peakBitrate > 0) return "peak";
+        if (format.averageBitrate > 0) return "average";
+        return "unknown";
+    }
+
     static String bitrateSource(@Nullable Format format) {
         if (format == null) return "missing";
         if (format.averageBitrate > 0) return "average";

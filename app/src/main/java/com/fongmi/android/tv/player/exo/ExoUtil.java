@@ -14,6 +14,7 @@ import android.view.Display;
 import android.view.accessibility.CaptioningManager;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.C;
 import androidx.media3.common.Format;
@@ -24,6 +25,7 @@ import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
 import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
+import androidx.media3.exoplayer.DecoderReuseEvaluation;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.LoadControl;
 import androidx.media3.exoplayer.Renderer;
@@ -78,8 +80,6 @@ public class ExoUtil {
     private static final long ENHANCED_ADAPT_COOLDOWN_MS = 15_000L;
     private static final int ENHANCED_DROPPED_FRAMES_THRESHOLD = 24;
     private static final int ENHANCED_DROPPED_FRAMES_PER_SECOND_THRESHOLD = 4;
-    private static final int ENHANCED_BANDWIDTH_SAFETY_NUMERATOR = 4;
-    private static final int ENHANCED_BANDWIDTH_SAFETY_DENOMINATOR = 5;
     private static final int FFMPEG_SKIP_FRAME_NONREF = 8;
     private static final int FFMPEG_SKIP_LOOP_FILTER_ALL = 48;
     private static final int FFMPEG_LOWRES_HALF = 1;
@@ -652,8 +652,17 @@ public class ExoUtil {
 
         @Override
         public void onBandwidthEstimate(EventTime eventTime, int totalLoadTimeMs, long totalBytesLoaded, long bitrateEstimate) {
-            if (bitrateEstimate <= 0 || bitrateEstimate * ENHANCED_BANDWIDTH_SAFETY_NUMERATOR >= (long) profile.bitrate() * ENHANCED_BANDWIDTH_SAFETY_DENOMINATOR) return;
+            if (!ExoAdaptiveVideoBitratePolicy.shouldDowngrade(profile.bitrate(), bitrateEstimate)) return;
             maybeDowngrade("bandwidth=" + bitrateEstimate, eventTime, bitrateEstimate);
+        }
+
+        @Override
+        public void onVideoInputFormatChanged(EventTime eventTime, Format format, @Nullable DecoderReuseEvaluation decoderReuseEvaluation) {
+            int selectedBitrate = ExoPlaybackDiagnostics.trackConstraintBitrate(format);
+            ExoAdaptiveVideoBitratePolicy.SelectionCheck check = ExoAdaptiveVideoBitratePolicy.checkSelectedTrack(profile.maxVideoBitrate(), selectedBitrate);
+            SpiderDebug.log("exo-enhance", "adaptive selected profile=%dx%d@%d profileBitrate=%d requestedCap=%d selected=%dx%d@%.3f selectedBitrate=%d selectedBitrateSource=%s averageBitrate=%d peakBitrate=%d capStatus=%s exceedAllowed=true position=%d",
+                    profile.width(), profile.height(), profile.frameRate(), profile.bitrate(), check.requestedCap(), format.width, format.height, format.frameRate,
+                    check.selectedBitrate(), ExoPlaybackDiagnostics.trackConstraintBitrateSource(format), Math.max(0, format.averageBitrate), Math.max(0, format.peakBitrate), check.status().label(), eventTime.currentPlaybackPositionMs);
         }
 
         private int getDroppedFramesPerSecond(int droppedFrames, long elapsedMs) {
@@ -665,15 +674,10 @@ public class ExoUtil {
             long now = android.os.SystemClock.elapsedRealtime();
             if (profileIndex >= profiles.size() - 1 || now - lastAdaptMs < ENHANCED_ADAPT_COOLDOWN_MS) return;
             EnhancedVideoProfile next = profiles.get(++profileIndex);
-            if (bitrateEstimate > 0) next = capByBandwidth(next, bitrateEstimate);
+            if (bitrateEstimate > 0) next = next.withBandwidthCap(bitrateEstimate);
             apply(next);
             lastAdaptMs = now;
-            SpiderDebug.log("exo-enhance", "adaptive downgrade reason=%s profile=%dx%d@%d bitrate=%d position=%d", reason, next.width(), next.height(), next.frameRate(), next.bitrate(), eventTime.currentPlaybackPositionMs);
-        }
-
-        private EnhancedVideoProfile capByBandwidth(EnhancedVideoProfile profile, long bitrateEstimate) {
-            int bitrate = (int) Math.max(1_000_000L, bitrateEstimate * ENHANCED_BANDWIDTH_SAFETY_NUMERATOR / ENHANCED_BANDWIDTH_SAFETY_DENOMINATOR);
-            return profile.withBitrate(Math.min(profile.bitrate(), bitrate));
+            SpiderDebug.log("exo-enhance", "adaptive downgrade reason=%s profile=%dx%d@%d profileBitrate=%d requestedCap=%d position=%d", reason, next.width(), next.height(), next.frameRate(), next.bitrate(), next.maxVideoBitrate(), eventTime.currentPlaybackPositionMs);
         }
 
         private void apply(EnhancedVideoProfile profile) {
@@ -724,8 +728,8 @@ public class ExoUtil {
             return new EnhancedVideoProfile(width, height, bitrate, frameRate, maxVideoBitrate);
         }
 
-        private EnhancedVideoProfile withBitrate(int bitrate) {
-            return new EnhancedVideoProfile(width, height, bitrate, frameRate, maxVideoBitrate);
+        EnhancedVideoProfile withBandwidthCap(long bitrateEstimate) {
+            return withTrackBitrate(ExoAdaptiveVideoBitratePolicy.resolveTrackBitrateCap(maxVideoBitrate, bitrateEstimate));
         }
 
         private EnhancedVideoProfile withTrackBitrate(int maxVideoBitrate) {
