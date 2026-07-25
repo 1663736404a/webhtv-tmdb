@@ -27,8 +27,6 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -82,12 +80,14 @@ public final class MpvHlsProxy extends NanoHTTPD {
 
     private final OkHttpClient client;
     private final int kernel;
+    private final MpvHlsCacheCoordinator cacheCoordinator;
     private final Map<Integer, Session> sessions;
     private final Map<Integer, SessionStats> sessionStats;
     private final Map<String, Target> targets;
     private final AtomicLong nextId;
     private final java.util.Set<String> preloading;
     private ExecutorService preloadExecutor;
+    private MpvHlsCacheCoordinator.ClientLease cacheClient;
     private PlaybackRouteRegistry.Registration routeRegistration;
     private int preloadThreads;
     private volatile int sessionId;
@@ -100,6 +100,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
     public MpvHlsProxy(int kernel) {
         super("127.0.0.1", 0);
         this.kernel = PlayerSetting.sanitizePlayer(kernel);
+        cacheCoordinator = MpvHlsCacheCoordinator.shared(Path.cache("mpv_hls"));
         client = OkHttp.player().newBuilder()
                 .connectTimeout(15, TimeUnit.SECONDS)
                 .readTimeout(30, TimeUnit.SECONDS)
@@ -114,6 +115,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
 
     public synchronized String proxy(String url, Map<String, String> headers) throws IOException {
         ensureStarted();
+        refreshCacheCoordinator();
         int id = ++this.sessionId;
         Session session = new Session(url, sanitize(headers), System.currentTimeMillis());
         sessions.put(id, session);
@@ -127,6 +129,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
 
     public synchronized String proxyDash(String url, Map<String, String> headers) throws IOException {
         ensureStarted();
+        refreshCacheCoordinator();
         int id = ++this.sessionId;
         Session session = new Session(url, sanitize(headers), System.currentTimeMillis());
         sessions.put(id, session);
@@ -146,10 +149,15 @@ public final class MpvHlsProxy extends NanoHTTPD {
 
     public synchronized void release() {
         clear();
-        if (started) stop();
-        if (routeRegistration != null) routeRegistration.close();
-        routeRegistration = null;
-        started = false;
+        try {
+            if (started) stop();
+        } finally {
+            if (routeRegistration != null) routeRegistration.close();
+            routeRegistration = null;
+            if (cacheClient != null) cacheClient.close();
+            cacheClient = null;
+            started = false;
+        }
     }
 
     String diagnostics() {
@@ -179,8 +187,8 @@ public final class MpvHlsProxy extends NanoHTTPD {
             if (path.startsWith("/mpv/item")) return serveItem(session, null);
             return error(Status.NOT_FOUND, "not found");
         } catch (Throwable e) {
-            SpiderDebug.log(TAG, e);
-            return error(Status.INTERNAL_ERROR, e.getMessage() == null ? e.toString() : e.getMessage());
+            SpiderDebug.log(TAG, "serve failed errorType=%s", e.getClass().getSimpleName());
+            return error(Status.INTERNAL_ERROR, "proxy failure");
         }
     }
 
@@ -188,7 +196,18 @@ public final class MpvHlsProxy extends NanoHTTPD {
         if (started) return;
         start(NanoHTTPD.SOCKET_READ_TIMEOUT, true);
         routeRegistration = PlaybackRouteRegistry.registerAppService(getListeningPort(), PlaybackRouteRegistry.AppOwner.HLS_PROXY);
+        cacheClient = cacheCoordinator.registerClient(configuredCacheLimitBytes(), this::cancelPreloadsForCircuit);
         started = true;
+        if (cacheCoordinator.isCircuitOpen()) cancelPreloadsForCircuit();
+    }
+
+    private void refreshCacheCoordinator() {
+        if (cacheClient != null) cacheClient.update(configuredCacheLimitBytes());
+    }
+
+    private void cancelPreloadsForCircuit() {
+        releasePreloadExecutor();
+        preloading.clear();
     }
 
     private String baseUrl() {
@@ -293,7 +312,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
             SpiderDebug.log(TAG, "dash SegmentBase grouped representations=%d url=%s", converted, shortUrl(manifestUrl));
             return output.toString();
         } catch (Throwable e) {
-            SpiderDebug.log(TAG, "dash SegmentBase grouping skipped url=%s error=%s", shortUrl(manifestUrl), e.getMessage());
+            SpiderDebug.log(TAG, "dash SegmentBase grouping skipped errorType=%s", e.getClass().getSimpleName());
             return text;
         }
     }
@@ -361,7 +380,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
         if (!targetPlaylist && target.cacheable) {
             Response cached = serveCached(owner, target.url, range);
             if (cached != null) {
-                SpiderDebug.log(TAG, "cache hit id=%s range=%s url=%s", id, range, shortUrl(target.url));
+                SpiderDebug.log(TAG, "cache hit id=%s range=%s", id, range);
                 return cached;
             }
         }
@@ -407,14 +426,23 @@ public final class MpvHlsProxy extends NanoHTTPD {
             source = maybeCacheStreaming(owner, target, source, response.code(), forwardedRange, response.header("Content-Range"), contentLength, mime);
         }
         InputStream stream = new CloseResponseInputStream(source, response);
-        Response.IStatus streamingStatus = streamingStatus(response, forwardedRange);
-        Response result = mayStripPngPrefix || contentLength < 0
-                ? newChunkedResponse(streamingStatus, mime, stream)
-                : newFixedLengthResponse(streamingStatus, mime, stream, contentLength);
-        addStreamingHeaders(result, response, forwardedRange);
-        SpiderDebug.log(TAG, "item id=%s code=%d range=%s contentRange=%s length=%d mime=%s url=%s",
-                id, response.code(), forwardedRange, response.header("Content-Range"), contentLength, mime, shortUrl(target.url));
-        return result;
+        try {
+            Response.IStatus streamingStatus = streamingStatus(response, forwardedRange);
+            Response result = mayStripPngPrefix || contentLength < 0
+                    ? newChunkedResponse(streamingStatus, mime, stream)
+                    : newFixedLengthResponse(streamingStatus, mime, stream, contentLength);
+            addStreamingHeaders(result, response, forwardedRange);
+            SpiderDebug.log(TAG, "item id=%s code=%d range=%s contentRange=%s length=%d mime=%s url=%s",
+                    id, response.code(), forwardedRange, response.header("Content-Range"), contentLength, mime, shortUrl(target.url));
+            return result;
+        } catch (Throwable error) {
+            try {
+                stream.close();
+            } catch (Throwable ignored) {
+            }
+            if (error instanceof IOException io) throw io;
+            throw new IOException(error);
+        }
     }
 
     private okhttp3.Response fetch(Session session, String url, @Nullable String range, boolean identityEncoding) throws IOException {
@@ -437,7 +465,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
             }
             return filtered;
         } catch (Throwable e) {
-            SpiderDebug.log(TAG, "adblock ignored session=%d url=%s error=%s", session, shortUrl(url), e.getMessage());
+            SpiderDebug.log(TAG, "adblock ignored session=%d errorType=%s", session, e.getClass().getSimpleName());
             return text;
         }
     }
@@ -487,7 +515,6 @@ public final class MpvHlsProxy extends NanoHTTPD {
 
     @Nullable
     private Response serveCached(Session session, String url, @Nullable String rangeHeader) throws IOException {
-        if (!isCacheEnabled()) return null;
         File file = cacheFile(session, url);
         if (!file.isFile() || file.length() < MIN_CACHE_FILE_BYTES) return null;
         long length = file.length();
@@ -499,38 +526,42 @@ public final class MpvHlsProxy extends NanoHTTPD {
         }
         long start = range == null ? 0 : range.start;
         long end = range == null ? length - 1 : range.end;
-        FileInputStream input = new FileInputStream(file);
-        skipFully(input, start);
-        //noinspection ResultOfMethodCallIgnored
-        file.setLastModified(System.currentTimeMillis());
-        Response response = newFixedLengthResponse(range == null ? Status.OK : Status.PARTIAL_CONTENT, cacheMime(url, file), new LimitedInputStream(input, end - start + 1), end - start + 1);
-        response.addHeader("Access-Control-Allow-Origin", "*");
-        response.addHeader("Cache-Control", "no-cache");
-        response.addHeader("Connection", "close");
-        response.addHeader("Accept-Ranges", "bytes");
-        if (range != null) response.addHeader("Content-Range", "bytes " + start + "-" + end + "/" + length);
-        return response;
+        MpvHlsCacheCoordinator.ReadLease input = cacheCoordinator.openRead(file);
+        if (input == null) return null;
+        try {
+            skipFully(input, start);
+            Response response = newFixedLengthResponse(range == null ? Status.OK : Status.PARTIAL_CONTENT, cacheMime(url, file), new LimitedInputStream(input, end - start + 1), end - start + 1);
+            response.addHeader("Access-Control-Allow-Origin", "*");
+            response.addHeader("Cache-Control", "no-cache");
+            response.addHeader("Connection", "close");
+            response.addHeader("Accept-Ranges", "bytes");
+            if (range != null) response.addHeader("Content-Range", "bytes " + start + "-" + end + "/" + length);
+            return response;
+        } catch (Throwable error) {
+            try {
+                input.close();
+            } catch (Throwable ignored) {
+            }
+            if (error instanceof IOException io) throw io;
+            throw new IOException(error);
+        }
     }
 
     private InputStream maybeCacheStreaming(Session session, Target target, InputStream source, int status, @Nullable String range, @Nullable String contentRange, long contentLength, String mime) {
+        refreshCacheCoordinator();
         if (!shouldWriteThroughCache(target, status, range, contentRange, contentLength)) return source;
         File file = cacheFile(session, target.url);
         if (file.isFile() && file.length() >= MIN_CACHE_FILE_BYTES) return source;
         String key = file.getName();
-        if (!preloading.add(key)) return source;
-        File dir = cacheDir();
-        if (!dir.exists() && !dir.mkdirs()) {
-            preloading.remove(key);
-            return source;
-        }
-        File temp = tempFile(dir, file);
+        MpvHlsCacheCoordinator.ReservationDecision decision = cacheCoordinator.tryReserve(
+                key, file, contentLength, configuredCacheLimitBytes(), MpvHlsCacheCoordinator.WriterType.FOREGROUND);
+        if (!decision.granted()) return source;
+        MpvHlsCacheCoordinator.WriteReservation reservation = decision.reservation();
         try {
-            return new CacheWritingInputStream(source, new FileOutputStream(temp), temp, file, key, target.url, contentLength, mime);
+            return new CacheWritingInputStream(source, new FileOutputStream(reservation.tempFile()), reservation, mime);
         } catch (Throwable e) {
-            preloading.remove(key);
-            //noinspection ResultOfMethodCallIgnored
-            temp.delete();
-            SpiderDebug.log(TAG, "stream cache open failed url=%s error=%s", shortUrl(target.url), e.getMessage());
+            reservation.fail(e);
+            logCacheFailure("foreground-open", e);
             return source;
         }
     }
@@ -540,13 +571,14 @@ public final class MpvHlsProxy extends NanoHTTPD {
         if (!isCacheEnabled() || !stats(target.sessionId).vod) return false;
         if (!isHttpUrl(target.url)) return false;
         if (contentLength < MIN_CACHE_FILE_BYTES) return false;
-        if (contentLength > cacheLimitBytes()) return false;
+        if (contentLength > configuredCacheLimitBytes()) return false;
         if (status == 200) return true;
         return status == 206 && isCompleteRangeResponse(range, contentRange, contentLength);
     }
 
     private void preloadSegments(Session session, List<HlsPlaylistRewriter.Segment> segments, double startSeconds) {
-        if (!PreloadSetting.isPreload(kernel) || !isCacheEnabled() || segments.isEmpty()) return;
+        refreshCacheCoordinator();
+        if (!PreloadSetting.isPreload(kernel) || !isCacheEnabled() || !cacheCoordinator.canStartPreload(configuredCacheLimitBytes()) || segments.isEmpty()) return;
         double seconds = 0;
         for (HlsPlaylistRewriter.Segment segment : segments) {
             if (segment.endSeconds() <= startSeconds) continue;
@@ -563,16 +595,22 @@ public final class MpvHlsProxy extends NanoHTTPD {
         File file = cacheFile(session, url);
         if (file.isFile() && file.length() > 0) return;
         String key = file.getName();
+        if (cacheCoordinator.isKeyBusyOrCached(key, file)) return;
         if (!preloading.add(key)) return;
-        getPreloadExecutor().execute(() -> {
-            try {
-                prefetchToCache(session, url, file);
-            } catch (Throwable e) {
-                SpiderDebug.log(TAG, "preload failed url=%s error=%s", shortUrl(url), e.getMessage());
-            } finally {
-                preloading.remove(key);
-            }
-        });
+        try {
+            getPreloadExecutor().execute(() -> {
+                try {
+                    prefetchToCache(session, url, file);
+                } catch (Throwable e) {
+                    SpiderDebug.log(TAG, "preload failed errorType=%s action=stop-cache-write", e.getClass().getSimpleName());
+                } finally {
+                    preloading.remove(key);
+                }
+            });
+        } catch (Throwable error) {
+            preloading.remove(key);
+            SpiderDebug.log(TAG, "preload submit failed errorType=%s action=stop-cache-write", error.getClass().getSimpleName());
+        }
     }
 
     private synchronized ExecutorService getPreloadExecutor() {
@@ -595,43 +633,70 @@ public final class MpvHlsProxy extends NanoHTTPD {
     }
 
     private void prefetchToCache(Session session, String url, File file) throws IOException {
-        if (!isCacheEnabled() || (file.isFile() && file.length() > 0)) return;
+        refreshCacheCoordinator();
+        if (!isCacheEnabled() || !cacheCoordinator.canStartPreload(configuredCacheLimitBytes()) || (file.isFile() && file.length() > 0)) return;
         try (okhttp3.Response response = fetch(session, url, null, true)) {
             ResponseBody body = response.body();
             if (!response.isSuccessful() || body == null || isPlaylistUrl(url, body.contentType()) || isPngMime(body.contentType())) return;
             long contentLength = body.contentLength();
-            if (contentLength < MIN_CACHE_FILE_BYTES || contentLength > cacheLimitBytes()) return;
-            writeCacheFile(body.byteStream(), file, contentLength, mediaMimeFromUrl(url, body.contentType()));
-            SpiderDebug.log(TAG, "preload cached length=%d url=%s", contentLength, shortUrl(url));
+            if (contentLength < MIN_CACHE_FILE_BYTES || contentLength > configuredCacheLimitBytes()) return;
+            String key = file.getName();
+            MpvHlsCacheCoordinator.ReservationDecision decision = cacheCoordinator.tryReserve(
+                    key, file, contentLength, configuredCacheLimitBytes(), MpvHlsCacheCoordinator.WriterType.PREFETCH);
+            if (!decision.granted()) return;
+            writeCacheFile(body.byteStream(), decision.reservation(), contentLength, mediaMimeFromUrl(url, body.contentType()));
         }
     }
 
-    private void writeCacheFile(InputStream input, File file, long expectedLength, String mime) throws IOException {
-        File dir = cacheDir();
-        if (!dir.exists() && !dir.mkdirs()) return;
-        File temp = tempFile(dir, file);
+    private void writeCacheFile(InputStream input, MpvHlsCacheCoordinator.WriteReservation reservation,
+                                long expectedLength, String mime) throws IOException {
         long written = 0;
-        try (InputStream in = input; OutputStream out = new FileOutputStream(temp)) {
+        OutputStream output;
+        try {
+            output = new FileOutputStream(reservation.tempFile());
+        } catch (Throwable error) {
+            reservation.fail(error);
+            logCacheFailure("prefetch-open", error);
+            return;
+        }
+        try (InputStream in = input; OutputStream out = output) {
             byte[] buffer = new byte[64 * 1024];
             int read;
             while ((read = in.read(buffer)) != -1) {
-                out.write(buffer, 0, read);
+                if (!reservation.canWrite(read)) {
+                    reservation.abort();
+                    return;
+                }
+                try {
+                    out.write(buffer, 0, read);
+                } catch (Throwable error) {
+                    reservation.fail(error);
+                    logCacheFailure("prefetch-write", error);
+                    return;
+                }
                 written += read;
-                if (written > cacheLimitBytes()) throw new IOException("cache item exceeds limit");
+                if (!reservation.recordWritten(read)) {
+                    reservation.abort();
+                    return;
+                }
             }
-        } catch (Throwable e) {
-            //noinspection ResultOfMethodCallIgnored
-            temp.delete();
-            if (e instanceof IOException io) throw io;
-            throw new IOException(e);
+        } catch (Throwable error) {
+            reservation.abort();
+            if (error instanceof IOException io) throw io;
+            throw new IOException(error);
         }
         if (expectedLength > 0 && written != expectedLength) {
-            //noinspection ResultOfMethodCallIgnored
-            temp.delete();
+            reservation.abort();
             return;
         }
-        commitCacheFile(temp, file, mime);
-        pruneCache();
+        try {
+            if (reservation.commit(mime)) {
+                SpiderDebug.log(TAG, "cache-write action=preload-commit bytes=%d", written);
+            }
+        } catch (Throwable error) {
+            reservation.fail(error);
+            logCacheFailure("prefetch-commit", error);
+        }
     }
 
     private File cacheFile(Session session, String url) {
@@ -643,40 +708,25 @@ public final class MpvHlsProxy extends NanoHTTPD {
     }
 
     private boolean isCacheEnabled() {
-        return cacheLimitBytes() > 0;
+        return configuredCacheLimitBytes() > 0;
     }
 
     private long cacheLimitBytes() {
+        return cacheCoordinator.effectiveCapacityBytes(configuredCacheLimitBytes());
+    }
+
+    private long configuredCacheLimitBytes() {
         long playCache = Math.max(0, PlayerSetting.getPlayCacheSize(kernel));
         long preloadCache = PreloadSetting.isPreload(kernel) ? Math.max(0, PreloadSetting.getPreloadSizeBytes(kernel)) : playCache;
         return Math.max(0, Math.min(playCache, preloadCache));
     }
 
     private void pruneCache() {
-        File dir = cacheDir();
-        if (!dir.exists() && !dir.mkdirs()) return;
-        File[] files = dir.listFiles(file -> file.isFile() && file.getName().endsWith(CACHE_FILE_SUFFIX));
-        if (files == null || files.length == 0) return;
-        long total = 0;
-        for (File file : files) total += Math.max(0, file.length());
-        long limit = cacheLimitBytes();
-        if (limit <= 0 || total <= limit) return;
-        Arrays.sort(files, Comparator.comparingLong(File::lastModified));
-        for (File file : files) {
-            if (total <= limit) break;
-            long length = Math.max(0, file.length());
-            if (file.delete()) {
-                deleteMeta(file);
-                total -= length;
-            }
-        }
+        cacheCoordinator.prune(configuredCacheLimitBytes());
     }
 
     private long cacheBytes() {
-        File[] files = cacheDir().listFiles(file -> file.isFile() && file.getName().endsWith(CACHE_FILE_SUFFIX));
-        long total = 0;
-        if (files != null) for (File file : files) total += Math.max(0, file.length());
-        return total;
+        return cacheCoordinator.cacheBytes();
     }
 
     private int parseSessionId(IHTTPSession session) {
@@ -895,37 +945,8 @@ public final class MpvHlsProxy extends NanoHTTPD {
         return mediaMimeFromUrl(url, null);
     }
 
-    private void writeCacheMeta(File file, String mime) throws IOException {
-        if (TextUtils.isEmpty(mime)) mime = MIME_BINARY;
-        try (OutputStream out = new FileOutputStream(metaFile(file))) {
-            out.write(mime.getBytes(StandardCharsets.UTF_8));
-        }
-    }
-
     private File metaFile(File file) {
         return new File(file.getParentFile(), file.getName() + CACHE_META_SUFFIX);
-    }
-
-    private void deleteMeta(File file) {
-        //noinspection ResultOfMethodCallIgnored
-        metaFile(file).delete();
-    }
-
-    private File tempFile(File dir, File file) {
-        return new File(dir, file.getName() + "." + Thread.currentThread().getId() + "." + System.nanoTime() + ".tmp");
-    }
-
-    private void commitCacheFile(File temp, File file, String mime) throws IOException {
-        if (file.exists()) {
-            //noinspection ResultOfMethodCallIgnored
-            file.delete();
-        }
-        deleteMeta(file);
-        if (!temp.renameTo(file)) throw new IOException("rename cache failed");
-        try {
-            writeCacheMeta(file, mime);
-        } catch (IOException ignored) {
-        }
     }
 
     private static String stripQuery(String url) {
@@ -1009,6 +1030,14 @@ public final class MpvHlsProxy extends NanoHTTPD {
         return value.substring(0, 120) + "...";
     }
 
+    private void logCacheFailure(String action, Throwable error) {
+        String type = error == null ? "unknown" : error.getClass().getSimpleName();
+        MpvHlsCacheCoordinator.CapacitySnapshot snapshot = cacheCoordinator.snapshot(configuredCacheLimitBytes());
+        SpiderDebug.log(TAG, "cache-write action=%s errorType=%s policy=%s physicalBytes=%d reservedBytes=%d effectiveBytes=%d circuit=%s",
+                action, type, snapshot.policy().state(), snapshot.physicalBytes(), snapshot.reservedBytes(),
+                snapshot.policy().effectiveCapacityBytes(), snapshot.circuitOpen());
+    }
+
     private record Session(String url, Map<String, String> headers, long createdAtMs) {
     }
 
@@ -1020,25 +1049,20 @@ public final class MpvHlsProxy extends NanoHTTPD {
 
     private final class CacheWritingInputStream extends FilterInputStream {
 
-        private final File temp;
-        private final File file;
-        private final String key;
-        private final String url;
+        private final MpvHlsCacheCoordinator.WriteReservation reservation;
         private final long expectedLength;
         private final String mime;
         private OutputStream cache;
         private long written;
         private boolean completed;
-        private boolean released;
 
-        CacheWritingInputStream(InputStream in, OutputStream cache, File temp, File file, String key, String url, long expectedLength, String mime) {
+        CacheWritingInputStream(InputStream in, OutputStream cache,
+                                MpvHlsCacheCoordinator.WriteReservation reservation,
+                                String mime) {
             super(in);
             this.cache = cache;
-            this.temp = temp;
-            this.file = file;
-            this.key = key;
-            this.url = url;
-            this.expectedLength = expectedLength;
+            this.reservation = reservation;
+            this.expectedLength = reservation.expectedBytes();
             this.mime = mime;
         }
 
@@ -1077,11 +1101,16 @@ public final class MpvHlsProxy extends NanoHTTPD {
             OutputStream out = cache;
             if (out == null) return;
             try {
+                if (!reservation.canWrite(1)) {
+                    disableCache(null);
+                    return;
+                }
                 out.write(value);
                 written++;
-                checkCacheProgress();
+                if (!reservation.recordWritten(1)) disableCache(null);
+                else checkCacheProgress();
             } catch (Throwable e) {
-                disableCache(e.getMessage());
+                disableCache(e);
             }
         }
 
@@ -1089,19 +1118,22 @@ public final class MpvHlsProxy extends NanoHTTPD {
             OutputStream out = cache;
             if (out == null) return;
             try {
+                if (!reservation.canWrite(length)) {
+                    disableCache(null);
+                    return;
+                }
                 out.write(buffer, offset, length);
                 written += length;
-                checkCacheProgress();
+                if (!reservation.recordWritten(length)) disableCache(null);
+                else checkCacheProgress();
             } catch (Throwable e) {
-                disableCache(e.getMessage());
+                disableCache(e);
             }
         }
 
         private void checkCacheProgress() {
             if (expectedLength > 0 && written > expectedLength) {
-                disableCache("item exceeds expected length");
-            } else if (written > cacheLimitBytes()) {
-                disableCache("item exceeds limit");
+                disableCache(new IOException("cache item exceeds expected length"));
             } else if (expectedLength > 0 && written == expectedLength) {
                 finishCache();
             }
@@ -1115,46 +1147,33 @@ public final class MpvHlsProxy extends NanoHTTPD {
             try {
                 if (out != null) out.close();
                 if (expectedLength > 0 && written != expectedLength) {
-                    //noinspection ResultOfMethodCallIgnored
-                    temp.delete();
-                    SpiderDebug.log(TAG, "stream cache discard length=%d expected=%d url=%s", written, expectedLength, shortUrl(url));
+                    reservation.abort();
                     return;
                 }
-                commitCacheFile(temp, file, mime);
-                pruneCache();
-                SpiderDebug.log(TAG, "stream cached length=%d url=%s", written, shortUrl(url));
+                if (reservation.commit(mime)) {
+                    SpiderDebug.log(TAG, "cache-write action=foreground-commit bytes=%d", written);
+                }
             } catch (Throwable e) {
-                //noinspection ResultOfMethodCallIgnored
-                temp.delete();
-                SpiderDebug.log(TAG, "stream cache commit failed url=%s error=%s", shortUrl(url), e.getMessage());
-            } finally {
-                releaseKey();
+                reservation.fail(e);
+                logCacheFailure("foreground-commit", e);
             }
         }
 
-        private void disableCache(String reason) {
+        private void disableCache(@Nullable Throwable error) {
+            if (completed) return;
+            completed = true;
             OutputStream out = cache;
             cache = null;
             closeQuietly(out);
-            //noinspection ResultOfMethodCallIgnored
-            temp.delete();
-            releaseKey();
-            SpiderDebug.log(TAG, "stream cache disabled url=%s error=%s", shortUrl(url), reason);
+            reservation.fail(error);
+            logCacheFailure("foreground-drop", error);
         }
 
         private void abortCache() {
             OutputStream out = cache;
             cache = null;
             closeQuietly(out);
-            //noinspection ResultOfMethodCallIgnored
-            temp.delete();
-            releaseKey();
-        }
-
-        private void releaseKey() {
-            if (released) return;
-            released = true;
-            preloading.remove(key);
+            reservation.abort();
         }
 
         private void closeQuietly(@Nullable OutputStream out) {
@@ -1316,6 +1335,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
     private static final class LimitedInputStream extends FilterInputStream {
 
         private long remaining;
+        private boolean closed;
 
         LimitedInputStream(InputStream in, long length) {
             super(in);
@@ -1324,18 +1344,35 @@ public final class MpvHlsProxy extends NanoHTTPD {
 
         @Override
         public int read() throws IOException {
-            if (remaining <= 0) return -1;
+            if (remaining <= 0) {
+                close();
+                return -1;
+            }
             int value = super.read();
             if (value != -1) remaining--;
+            else close();
+            if (remaining <= 0) close();
             return value;
         }
 
         @Override
         public int read(byte[] buffer, int offset, int length) throws IOException {
-            if (remaining <= 0) return -1;
+            if (remaining <= 0) {
+                close();
+                return -1;
+            }
             int read = super.read(buffer, offset, (int) Math.min(length, remaining));
             if (read != -1) remaining -= read;
+            else close();
+            if (remaining <= 0) close();
             return read;
+        }
+
+        @Override
+        public void close() throws IOException {
+            if (closed) return;
+            closed = true;
+            super.close();
         }
     }
 
