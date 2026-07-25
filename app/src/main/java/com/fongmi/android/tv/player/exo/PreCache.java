@@ -266,7 +266,7 @@ public class PreCache implements Player.Listener {
         if (autoDecision != null && !autoDecision.enabled()) {
             ObservedMediaBitrateEstimator.Estimate media = PlaybackAnalyticsListener.getMediaBitrateEstimate();
             ForwardBufferTrend.Snapshot trend = PlaybackAnalyticsListener.getBufferTrend();
-            transition(PreloadLifecycleTracker.State.PAUSED_AUTO, "auto-" + autoDecision.mode(), "generation=%d route=%s mode=%s position=%d buffered=%d bandwidth=%d bitrate=%d bitrateSource=%s bitrateConfidence=%s bufferSlope=%d slopeConfidence=%s slopeWindowMs=%d", generation, route, autoDecision.mode(), player.getCurrentPosition(), player.getTotalBufferedDuration(), PlaybackAnalyticsListener.getSnapshot().bandwidthEstimate(), getSelectedBitrate(), media.source().label(), media.confidence().label(), trend.slopeMsPerSecond(), trend.confidence().label(), trend.windowMs());
+            transition(PreloadLifecycleTracker.State.PAUSED_AUTO, "auto-" + autoDecision.mode(), "generation=%d route=%s mode=%s position=%d buffered=%d bandwidth=%d bitrate=%d bitrateSource=%s bitrateConfidence=%s average=%d averageSource=%s averageConfidence=%s burst=%d burstSource=%s burstConfidence=%s bufferSlope=%d slopeConfidence=%s slopeWindowMs=%d", generation, route, autoDecision.mode(), player.getCurrentPosition(), player.getTotalBufferedDuration(), PlaybackAnalyticsListener.getSnapshot().bandwidthEstimate(), getSelectedBitrate(), media.source().label(), media.confidence().label(), media.averageBitrateBitsPerSecond(), media.averageSource().label(), media.averageConfidence().label(), media.burstBitrateBitsPerSecond(), media.burstSource().label(), media.burstConfidence().label(), trend.slopeMsPerSecond(), trend.confidence().label(), trend.windowMs());
             return true;
         }
         if (autoDecision != null) setEffectiveThreads(autoDecision.threads());
@@ -289,7 +289,7 @@ public class PreCache implements Player.Listener {
                 logTaskEnd(event, "next-range", null);
             } else {
                 beginTaskMetrics();
-                logTask(event, "estimatedBytes=%d bitrate=%d bitrateSource=%s bitrateConfidence=%s p50=%d p90=%d position=%d buffered=%d loading=%s bufferSlope=%d slopeConfidence=%s slopeWindowMs=%d waitCount=%d waitTotalMs=%d", estimatedBytes, bitrate, media.source().label(), media.confidence().label(), media.p50BitsPerSecond(), media.p90BitsPerSecond(), player.getCurrentPosition(), player.getTotalBufferedDuration(), player.isLoading(), trend.slopeMsPerSecond(), trend.confidence().label(), trend.windowMs(), priority.waitCount(), priority.waitTotalMs());
+                logTask(event, "estimatedBytes=%d bitrate=%d bitrateSource=%s bitrateConfidence=%s average=%d averageSource=%s averageConfidence=%s burst=%d burstSource=%s burstConfidence=%s p50=%d p90=%d position=%d buffered=%d loading=%s bufferSlope=%d slopeConfidence=%s slopeWindowMs=%d waitCount=%d waitTotalMs=%d", estimatedBytes, bitrate, media.source().label(), media.confidence().label(), media.averageBitrateBitsPerSecond(), media.averageSource().label(), media.averageConfidence().label(), media.burstBitrateBitsPerSecond(), media.burstSource().label(), media.burstConfidence().label(), media.p50BitsPerSecond(), media.p90BitsPerSecond(), player.getCurrentPosition(), player.getTotalBufferedDuration(), player.isLoading(), trend.slopeMsPerSecond(), trend.confidence().label(), trend.windowMs(), priority.waitCount(), priority.waitTotalMs());
             }
         }
         try {
@@ -341,8 +341,8 @@ public class PreCache implements Player.Listener {
     }
 
     private long getSelectedBitrate() {
-        long observed = PlaybackAnalyticsListener.getMediaBitrateEstimate().bitrateBitsPerSecond();
-        if (observed > 0) return observed;
+        ObservedMediaBitrateEstimator.Estimate estimate = PlaybackAnalyticsListener.getMediaBitrateEstimate();
+        if (estimate.reliable()) return estimate.bitrateBitsPerSecond();
         Format video = TrackUtil.selectedFormat(player.getCurrentTracks(), C.TRACK_TYPE_VIDEO);
         Format audio = TrackUtil.selectedFormat(player.getCurrentTracks(), C.TRACK_TYPE_AUDIO);
         return ExoPlaybackDiagnostics.combinedBitrate(video, audio);

@@ -61,13 +61,27 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
 
     public static DisplayMediaBitrateEstimate getDisplayMediaBitrateEstimate() {
         ObservedMediaBitrateEstimator.Estimate estimate = BITRATE_ESTIMATOR.estimate();
-        return new DisplayMediaBitrateEstimate(estimate.bitrateBitsPerSecond(), estimate.source().label(), estimate.confidence().label(), estimate.source() != ObservedMediaBitrateEstimator.Source.FORMAT && estimate.source() != ObservedMediaBitrateEstimator.Source.UNKNOWN);
+        return toDisplayMediaBitrateEstimate(estimate, estimate.source() != ObservedMediaBitrateEstimator.Source.FORMAT && estimate.source() != ObservedMediaBitrateEstimator.Source.UNKNOWN);
     }
 
     public static DisplayMediaBitrateEstimate getDisplayMediaBitrateEstimate(@Nullable Format videoFormat) {
         boolean videoBitrateKnown = ExoPlaybackDiagnostics.formatBitrate(videoFormat) > 0;
         ObservedMediaBitrateEstimator.Estimate estimate = videoBitrateKnown ? BITRATE_ESTIMATOR.estimate() : BITRATE_ESTIMATOR.estimateWithoutFormat();
-        return new DisplayMediaBitrateEstimate(estimate.bitrateBitsPerSecond(), estimate.source().label(), estimate.confidence().label(), estimate.source() != ObservedMediaBitrateEstimator.Source.UNKNOWN);
+        return toDisplayMediaBitrateEstimate(estimate, estimate.source() != ObservedMediaBitrateEstimator.Source.UNKNOWN);
+    }
+
+    private static DisplayMediaBitrateEstimate toDisplayMediaBitrateEstimate(ObservedMediaBitrateEstimator.Estimate estimate, boolean estimated) {
+        return new DisplayMediaBitrateEstimate(
+                estimate.bitrateBitsPerSecond(),
+                estimate.source().label(),
+                estimate.confidence().label(),
+                estimated,
+                estimate.averageBitrateBitsPerSecond(),
+                estimate.averageSource().label(),
+                estimate.averageConfidence().label(),
+                estimate.burstBitrateBitsPerSecond(),
+                estimate.burstSource().label(),
+                estimate.burstConfidence().label());
     }
 
     public static DisplayFrameRateEstimate getDisplayFrameRateEstimate() {
@@ -104,8 +118,8 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
         if (finished.everReady()) {
             long rebufferTotalMs = finished.rebufferTotalMs();
             if (finished.rebufferStartMs() > 0) rebufferTotalMs += Math.max(0, SystemClock.elapsedRealtime() - finished.rebufferStartMs());
-            long mediaBitrate = getMediaBitrateEstimate().bitrateBitsPerSecond();
-            if (mediaBitrate <= 0) mediaBitrate = ExoPlaybackDiagnostics.combinedBitrate(finished.videoFormat(), finished.audioFormat());
+            ObservedMediaBitrateEstimator.Estimate media = getMediaBitrateEstimate();
+            long mediaBitrate = media.reliable() ? media.bitrateBitsPerSecond() : ExoPlaybackDiagnostics.combinedBitrate(finished.videoFormat(), finished.audioFormat());
             ExoPerformanceSetting.recordAutoSession(finished.rebufferCount(), rebufferTotalMs, Math.max(finished.positionMs(), finalPositionMs), mediaBitrate, finished.bandwidthEstimate());
         }
         reset();
@@ -142,8 +156,7 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
         long totalMs = current.rebufferTotalMs();
         if (current.rebufferStartMs() > 0) totalMs += Math.max(0, now - current.rebufferStartMs());
         ObservedMediaBitrateEstimator.Estimate media = getMediaBitrateEstimate();
-        long mediaBitrate = media.bitrateBitsPerSecond();
-        if (mediaBitrate <= 0) mediaBitrate = ExoPlaybackDiagnostics.combinedBitrate(current.videoFormat(), current.audioFormat());
+        long mediaBitrate = media.reliable() ? media.bitrateBitsPerSecond() : ExoPlaybackDiagnostics.combinedBitrate(current.videoFormat(), current.audioFormat());
         int previousMs = ExoPerformanceSetting.getAutoSessionRebufferMs();
         int updatedMs = ExoPerformanceSetting.updateAutoSession(current.rebufferCount(), totalMs, current.positionMs(), mediaBitrate, current.bandwidthEstimate());
         if (updatedMs != previousMs && SpiderDebug.isEnabled()) {
@@ -232,7 +245,12 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
         lastBandwidthLogMs = now;
         ObservedMediaBitrateEstimator.Estimate media = getMediaBitrateEstimate();
         ForwardBufferTrend.Snapshot trend = getBufferTrend();
-        traceLog("bandwidth=%d loadTime=%dms bytes=%d mediaBitrate=%d mediaSource=%s mediaConfidence=%s bufferSlope=%d slopeWindowMs=%d", bitrateEstimate, totalLoadTimeMs, totalBytesLoaded, media.bitrateBitsPerSecond(), media.source().label(), media.confidence().label(), trend.slopeMsPerSecond(), trend.windowMs());
+        traceLog("bandwidth=%d loadTime=%dms bytes=%d mediaBitrate=%d mediaSource=%s mediaConfidence=%s mediaAverage=%d averageSource=%s averageConfidence=%s mediaBurst=%d burstSource=%s burstConfidence=%s bufferSlope=%d slopeWindowMs=%d",
+                bitrateEstimate, totalLoadTimeMs, totalBytesLoaded,
+                media.bitrateBitsPerSecond(), media.source().label(), media.confidence().label(),
+                media.averageBitrateBitsPerSecond(), media.averageSource().label(), media.averageConfidence().label(),
+                media.burstBitrateBitsPerSecond(), media.burstSource().label(), media.burstConfidence().label(),
+                trend.slopeMsPerSecond(), trend.windowMs());
     }
 
     @Override
@@ -269,8 +287,11 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
         lastMediaEstimateLogMs = now;
         ObservedMediaBitrateEstimator.Estimate media = getMediaBitrateEstimate();
         ForwardBufferTrend.Snapshot trend = getBufferTrend();
-        traceLog("media-estimate bitrate=%d source=%s confidence=%s p50=%d p90=%d windows=%d windowMs=%d contentLength=%d duration=%d bufferSlope=%d slopeConfidence=%s slopeWindowMs=%d slopeSamples=%d",
-                media.bitrateBitsPerSecond(), media.source().label(), media.confidence().label(), media.p50BitsPerSecond(), media.p90BitsPerSecond(), media.windowCount(), media.windowDurationMs(), media.contentLengthBytes(), media.durationMs(),
+        traceLog("media-estimate bitrate=%d source=%s confidence=%s average=%d averageSource=%s averageConfidence=%s burst=%d burstSource=%s burstConfidence=%s p50=%d p90=%d windows=%d windowMs=%d observedMs=%d contentLength=%d duration=%d bufferSlope=%d slopeConfidence=%s slopeWindowMs=%d slopeSamples=%d",
+                media.bitrateBitsPerSecond(), media.source().label(), media.confidence().label(),
+                media.averageBitrateBitsPerSecond(), media.averageSource().label(), media.averageConfidence().label(),
+                media.burstBitrateBitsPerSecond(), media.burstSource().label(), media.burstConfidence().label(),
+                media.p50BitsPerSecond(), media.p90BitsPerSecond(), media.windowCount(), media.windowDurationMs(), media.observedDurationMs(), media.contentLengthBytes(), media.durationMs(),
                 trend.slopeMsPerSecond(), trend.confidence().label(), trend.windowMs(), trend.sampleCount());
     }
 
@@ -297,7 +318,17 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
         };
     }
 
-    public record DisplayMediaBitrateEstimate(long bitrateBitsPerSecond, String source, String confidence, boolean estimated) {
+    public record DisplayMediaBitrateEstimate(
+            long bitrateBitsPerSecond,
+            String source,
+            String confidence,
+            boolean estimated,
+            long averageBitrateBitsPerSecond,
+            String averageSource,
+            String averageConfidence,
+            long burstBitrateBitsPerSecond,
+            String burstSource,
+            String burstConfidence) {
     }
 
     public record DisplayFrameRateEstimate(float frameRate, int sampleCount) {
