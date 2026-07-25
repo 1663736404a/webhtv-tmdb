@@ -51,14 +51,12 @@ public class PreCache implements Player.Listener {
 
         @Override
         public void onPrepareError(MediaItem mediaItem, IOException exception) {
-            finishTask(PreloadLifecycleTracker.TaskEvent.Outcome.PREPARE_ERROR, "prepare-error", exception);
-            openExternalCircuit("prepare-error", exception);
+            handleTaskError(PreloadLifecycleTracker.TaskEvent.Outcome.PREPARE_ERROR, "prepare-error", exception);
         }
 
         @Override
         public void onDownloadError(MediaItem mediaItem, IOException exception) {
-            finishTask(PreloadLifecycleTracker.TaskEvent.Outcome.DOWNLOAD_ERROR, "download-error", exception);
-            openExternalCircuit("download-error", exception);
+            handleTaskError(PreloadLifecycleTracker.TaskEvent.Outcome.DOWNLOAD_ERROR, "download-error", exception);
         }
     };
     private ThreadPoolExecutor executor;
@@ -79,6 +77,7 @@ public class PreCache implements Player.Listener {
     private long taskCacheBytesBefore;
     private boolean playable;
     private boolean externalPreloadCircuitOpen;
+    private boolean diskPreloadCircuitOpen;
     private BufferGate bufferGate;
     private AutoPreloadPolicy autoPolicy;
 
@@ -97,6 +96,7 @@ public class PreCache implements Player.Listener {
         lastStartMs = C.TIME_UNSET;
         playable = false;
         externalPreloadCircuitOpen = false;
+        diskPreloadCircuitOpen = false;
         bufferGate = BufferGate.FIRST_FRAME;
         this.player.addListener(this);
         PlaybackCacheMetrics.Snapshot cacheMetrics = PlaybackCacheMetrics.snapshot();
@@ -130,6 +130,8 @@ public class PreCache implements Player.Listener {
         clearSeek();
         lastStartMs = C.TIME_UNSET;
         playable = false;
+        externalPreloadCircuitOpen = false;
+        diskPreloadCircuitOpen = false;
         bufferGate = BufferGate.FIRST_FRAME;
     }
 
@@ -217,7 +219,7 @@ public class PreCache implements Player.Listener {
             return;
         }
         cancel();
-        if (update()) schedule(expectedGeneration);
+        if (update()) schedule(generation);
     }
 
     private boolean update() {
@@ -247,8 +249,17 @@ public class PreCache implements Player.Listener {
             stop("live");
             return false;
         }
+        if (diskPreloadCircuitOpen) {
+            transition(PreloadLifecycleTracker.State.PAUSED_STORAGE, "disk-preload-circuit-open", "generation=%d position=%d buffered=%d", generation, player.getCurrentPosition(), player.getTotalBufferedDuration());
+            return false;
+        }
         if (externalPreloadCircuitOpen) {
             transition(PreloadLifecycleTracker.State.PAUSED_AUTO, "external-preload-circuit-open", "generation=%d route=%s position=%d buffered=%d", generation, route, player.getCurrentPosition(), player.getTotalBufferedDuration());
+            return true;
+        }
+        ExoCacheWritePolicy.Decision cacheDecision = MediaSourceFactory.getCacheWriteDecision();
+        if (!cacheDecision.writeAllowed()) {
+            pauseForStorage(cacheDecision);
             return true;
         }
         AutoPreloadPolicy.Decision autoDecision = getAutoDecision();
@@ -284,7 +295,11 @@ public class PreCache implements Player.Listener {
         try {
             helper.preCache(startMs, lengthMs);
         } catch (RuntimeException | Error e) {
-            finishTask(PreloadLifecycleTracker.TaskEvent.Outcome.START_ERROR, "start-error", e);
+            PreloadLifecycleTracker.TaskEvent event = finishTask(PreloadLifecycleTracker.TaskEvent.Outcome.START_ERROR, "start-error", e);
+            if (event != null && ExoCacheWriteErrorClassifier.isDiskWriteFailure(e)) {
+                openDiskCircuit("start-error", e);
+                return false;
+            }
             throw e;
         }
         lastStartMs = startMs;
@@ -347,6 +362,27 @@ public class PreCache implements Player.Listener {
         PlaybackTrace.log("exo-preload", playbackTraceId, "event=circuit-open session=%d generation=%d route=%s reason=%s error=%s action=stop-preload-keep-playback", lifecycle.sessionId(), generation, route, reason, error == null ? "-" : error.getClass().getSimpleName());
         stopCurrentTask("external-preload-circuit-open");
         transition(PreloadLifecycleTracker.State.PAUSED_AUTO, "external-preload-circuit-open", "generation=%d route=%s", generation, route);
+    }
+
+    private void handleTaskError(PreloadLifecycleTracker.TaskEvent.Outcome outcome, String reason, Throwable error) {
+        if (finishTask(outcome, reason, error) == null) return;
+        if (ExoCacheWriteErrorClassifier.isDiskWriteFailure(error)) openDiskCircuit(reason, error);
+        else openExternalCircuit(reason, error);
+    }
+
+    private void openDiskCircuit(String reason, Throwable error) {
+        if (diskPreloadCircuitOpen) return;
+        diskPreloadCircuitOpen = true;
+        ExoCacheWritePolicy.Decision decision = MediaSourceFactory.getCacheWriteDecision();
+        PlaybackTrace.log("exo-preload", playbackTraceId, "event=disk-circuit-open session=%d generation=%d reason=%s error=%s policy=%s action=stop-preload-keep-playback", lifecycle.sessionId(), generation, reason, error == null ? "-" : error.getClass().getSimpleName(), decision.reason().label());
+        stopCurrentTask("disk-preload-circuit-open");
+        transition(PreloadLifecycleTracker.State.PAUSED_STORAGE, "disk-preload-circuit-open", "generation=%d policy=%s", generation, decision.reason().label());
+    }
+
+    private void pauseForStorage(ExoCacheWritePolicy.Decision decision) {
+        String reason = "storage-" + decision.reason().label();
+        if (lifecycle.hasActiveTask()) stopCurrentTask(reason);
+        transition(PreloadLifecycleTracker.State.PAUSED_STORAGE, reason, "generation=%d actualCapacityBytes=%d safeCapacityBytes=%d cacheSizeBytes=%d availableBytes=%d reserveBytes=%d reclaimBytes=%d", generation, decision.actualCapacityBytes(), decision.effectiveCapacityBytes(), decision.existingCacheBytes(), decision.availableStorageBytes(), decision.reserveBytes(), decision.reclaimBytes());
     }
 
     private PreCacheHelper createHelper(MediaItem mediaItem) {
@@ -484,12 +520,13 @@ public class PreCache implements Player.Listener {
         PlaybackTrace.log("exo-preload", playbackTraceId, "event=%s session=%d task=%d generation=%d outcome=%s startMs=%d lengthMs=%d %s", type, event.sessionId(), event.taskId(), event.generation(), outcome, event.startMs(), event.lengthMs(), detail(format, args));
     }
 
-    private void finishTask(PreloadLifecycleTracker.TaskEvent.Outcome outcome, String reason, Throwable error) {
+    private PreloadLifecycleTracker.TaskEvent finishTask(PreloadLifecycleTracker.TaskEvent.Outcome outcome, String reason, Throwable error) {
         PreloadLifecycleTracker.TaskEvent event = lifecycle.endTask(outcome);
-        if (event == null) return;
+        if (event == null) return null;
         logTaskEnd(event, reason, error);
         PreloadLifecycleTracker.State state = outcome == PreloadLifecycleTracker.TaskEvent.Outcome.COMPLETED ? PreloadLifecycleTracker.State.WAIT_NEXT_RANGE : PreloadLifecycleTracker.State.WAIT_RETRY;
         transition(state, reason, "generation=%d task=%d", event.generation(), event.taskId());
+        return event;
     }
 
     private void beginTaskMetrics() {

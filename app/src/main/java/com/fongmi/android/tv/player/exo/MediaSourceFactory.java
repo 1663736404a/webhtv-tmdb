@@ -25,6 +25,7 @@ import androidx.media3.extractor.ExtractorsFactory;
 import androidx.media3.extractor.ts.TsExtractor;
 
 import com.fongmi.android.tv.App;
+import com.fongmi.android.tv.player.cache.DiskCacheCapacityPolicy;
 import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
 import com.fongmi.android.tv.setting.PlayerSetting;
 import com.fongmi.android.tv.setting.PreloadSetting;
@@ -41,7 +42,6 @@ import java.util.Map;
 
 public class MediaSourceFactory implements MediaSource.Factory {
 
-    private static final int CACHE_SPACE_PERCENT = 80;
     private static final String CONCAT_SOURCE_SEPARATOR = "***";
     private static final String CONCAT_SOURCE_SEPARATOR_REGEX = "\\*\\*\\*";
     private static final String CONCAT_DURATION_SEPARATOR = "|||";
@@ -51,8 +51,6 @@ public class MediaSourceFactory implements MediaSource.Factory {
 
     private static StandaloneDatabaseProvider databaseProvider;
     private static Cache cache;
-    private static long cacheCapacityBytes;
-    private static int activeCacheSessions;
 
     private final DefaultMediaSourceFactory defaultMediaSourceFactory;
     private OkHttpDataSource.Factory httpDataSourceFactory;
@@ -74,21 +72,25 @@ public class MediaSourceFactory implements MediaSource.Factory {
     static synchronized Cache getCache() {
         if (cache != null) return cache;
         File dir = Path.exoCache();
-        cacheCapacityBytes = getMaxCacheSize(dir);
-        CACHE_CAPACITY_STATE.recordCreated(cacheCapacityBytes);
-        return cache = new SimpleCache(dir, new LeastRecentlyUsedCacheEvictor(cacheCapacityBytes), getDatabaseProvider());
+        DiskCacheCapacityPolicy.Decision decision = resolveCapacity(dir, FileUtil.getDirectorySize(dir));
+        long capacityBytes = initialCapacityBytes(decision);
+        Cache created = new SimpleCache(dir, new LeastRecentlyUsedCacheEvictor(capacityBytes), getDatabaseProvider());
+        cache = created;
+        CACHE_CAPACITY_STATE.recordCreated(capacityBytes);
+        if (SpiderDebug.isEnabled()) SpiderDebug.log("exo-cache", "created capacityBytes=%d policy=%s existingBytes=%d availableBytes=%d reserveBytes=%d", capacityBytes, decision.state(), decision.existingCacheBytes(), decision.availableStorageBytes(), decision.reserveBytes());
+        return created;
     }
 
     public static synchronized void acquireCacheSession() {
-        refreshPendingCacheCapacity();
-        if (activeCacheSessions == 0 && CACHE_CAPACITY_STATE.hasPending()) releaseCacheLocked("next-player-session");
-        activeCacheSessions++;
+        DiskCacheCapacityPolicy.Decision decision = refreshPendingCacheCapacity();
+        if (isReliable(decision) && CACHE_CAPACITY_STATE.canReleasePending()) rebuildCacheLocked("next-player-session");
+        CACHE_CAPACITY_STATE.acquireSession();
     }
 
     public static synchronized void releaseCacheSession() {
-        activeCacheSessions = Math.max(0, activeCacheSessions - 1);
-        refreshPendingCacheCapacity();
-        if (activeCacheSessions == 0 && CACHE_CAPACITY_STATE.hasPending()) releaseCacheLocked("last-player-release");
+        CACHE_CAPACITY_STATE.releaseSession();
+        DiskCacheCapacityPolicy.Decision decision = refreshPendingCacheCapacity();
+        if (isReliable(decision) && CACHE_CAPACITY_STATE.canReleasePending()) rebuildCacheLocked("last-player-release");
     }
 
     private static StandaloneDatabaseProvider getDatabaseProvider() {
@@ -96,15 +98,19 @@ public class MediaSourceFactory implements MediaSource.Factory {
         return databaseProvider;
     }
 
-    private static long getMaxCacheSize(File dir) {
-        long usedBytes = FileUtil.getDirectorySize(dir);
-        long availableBytes = Math.max(0, FileUtil.getAvailableStorageSpace(dir));
-        long storageBudget = (usedBytes + availableBytes) * CACHE_SPACE_PERCENT / 100;
-        return Math.min(PreloadSetting.getPreloadSizeBytes(PlayerSetting.EXO), storageBudget);
+    private static DiskCacheCapacityPolicy.Decision resolveCapacity(File dir, long existingCacheBytes) {
+        FileUtil.StorageSpace storage = FileUtil.getStorageSpace(dir);
+        return DiskCacheCapacityPolicy.resolve(storage.available(), PreloadSetting.getPreloadSizeBytes(PlayerSetting.EXO), existingCacheBytes, storage.availableBytes(), storage.totalBytes());
+    }
+
+    private static long initialCapacityBytes(DiskCacheCapacityPolicy.Decision decision) {
+        if (!isReliable(decision)) return decision.existingCacheBytes();
+        return decision.effectiveCapacityBytes();
     }
 
     static synchronized long getCacheCapacityBytes() {
-        return CACHE_CAPACITY_STATE.report(getMaxCacheSize(Path.exoCache()));
+        DiskCacheCapacityPolicy.Decision decision = refreshPendingCacheCapacity();
+        return cache == null ? initialCapacityBytes(decision) : CACHE_CAPACITY_STATE.actualCapacityBytes();
     }
 
     static synchronized long getPendingCacheCapacityBytes() {
@@ -112,20 +118,48 @@ public class MediaSourceFactory implements MediaSource.Factory {
         return CACHE_CAPACITY_STATE.pendingCapacityBytes();
     }
 
-    private static void refreshPendingCacheCapacity() {
-        CACHE_CAPACITY_STATE.report(getMaxCacheSize(Path.exoCache()));
+    static synchronized ExoCacheWritePolicy.Decision getCacheWriteDecision() {
+        DiskCacheCapacityPolicy.Decision capacity = refreshPendingCacheCapacity();
+        long actualCapacityBytes = cache == null ? 0 : CACHE_CAPACITY_STATE.actualCapacityBytes();
+        return ExoCacheWritePolicy.resolve(capacity, actualCapacityBytes);
     }
 
-    private static void releaseCacheLocked(String reason) {
-        if (cache == null) return;
+    private static DiskCacheCapacityPolicy.Decision refreshPendingCacheCapacity() {
+        File dir = Path.exoCache();
+        long existingCacheBytes = cache == null ? FileUtil.getDirectorySize(dir) : cache.getCacheSpace();
+        DiskCacheCapacityPolicy.Decision decision = resolveCapacity(dir, existingCacheBytes);
+        if (isReliable(decision)) CACHE_CAPACITY_STATE.report(decision.effectiveCapacityBytes());
+        return decision;
+    }
+
+    private static boolean isReliable(DiskCacheCapacityPolicy.Decision decision) {
+        return decision.state() != DiskCacheCapacityPolicy.State.UNAVAILABLE;
+    }
+
+    private static void rebuildCacheLocked(String reason) {
+        if (!releaseCacheLocked(reason)) return;
+        try {
+            getCache();
+        } catch (RuntimeException e) {
+            if (SpiderDebug.isEnabled()) SpiderDebug.log("exo-cache", "rebuild-failed reason=%s error=%s", reason, e.getClass().getSimpleName());
+        }
+    }
+
+    private static boolean releaseCacheLocked(String reason) {
+        if (cache == null) return false;
         Cache releasing = cache;
-        long actual = cacheCapacityBytes;
+        long actual = CACHE_CAPACITY_STATE.actualCapacityBytes();
         long pending = CACHE_CAPACITY_STATE.pendingCapacityBytes();
-        cache = null;
-        cacheCapacityBytes = 0;
-        CACHE_CAPACITY_STATE.recordReleased();
-        releasing.release();
-        if (SpiderDebug.isEnabled()) SpiderDebug.log("exo-cache", "released reason=%s actualCapacityBytes=%d pendingCapacityBytes=%d activeSessions=%d", reason, actual, pending, activeCacheSessions);
+        try {
+            releasing.release();
+            cache = null;
+            CACHE_CAPACITY_STATE.recordReleased();
+            if (SpiderDebug.isEnabled()) SpiderDebug.log("exo-cache", "released reason=%s actualCapacityBytes=%d pendingCapacityBytes=%d activeSessions=%d", reason, actual, pending, CACHE_CAPACITY_STATE.activeSessions());
+            return true;
+        } catch (RuntimeException e) {
+            if (SpiderDebug.isEnabled()) SpiderDebug.log("exo-cache", "release-failed reason=%s error=%s activeSessions=%d", reason, e.getClass().getSimpleName(), CACHE_CAPACITY_STATE.activeSessions());
+            return false;
+        }
     }
 
     static boolean isConcatenatingUrl(String url) {
