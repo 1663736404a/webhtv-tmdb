@@ -111,7 +111,7 @@ public class ExoUtil {
                 .setVideoChangeFrameRateStrategy(ExoPerformanceSetting.getFrameRateStrategy());
         if (PlaybackPerformanceSetting.isHighBufferEnabled()) builder.setLoadControl(buildEnhancedLoadControl());
         else ExoPlaybackDiagnostics.logDefaultLoadControl(PlaybackPerformanceSetting.getProfile(PlayerSetting.EXO));
-        if (PlaybackPerformanceSetting.isBandwidthMeterEnabled()) builder.setBandwidthMeter(buildEnhancedBandwidthMeter(profile));
+        if (PlaybackPerformanceSetting.isBandwidthMeterEnabled()) builder.setBandwidthMeter(buildEnhancedBandwidthMeter(App.get()));
         if (PlaybackPerformanceSetting.isDynamicSchedulingEnabled()) {
             builder.experimentalSetDynamicSchedulingEnabled(true);
         }
@@ -444,22 +444,10 @@ public class ExoUtil {
         return ExoBufferBudget.resolve(App.get(), requested);
     }
 
-    private static DefaultBandwidthMeter buildEnhancedBandwidthMeter(EnhancedVideoProfile profile) {
-        return new DefaultBandwidthMeter.Builder(App.get())
+    static DefaultBandwidthMeter buildEnhancedBandwidthMeter(@Nullable Context context) {
+        return new DefaultBandwidthMeter.Builder(context)
                 .setSlidingWindowMaxWeight(4_000)
-                .setInitialBitrateSupplier(networkType -> getInitialBitrateEstimate(profile, networkType))
                 .build();
-    }
-
-    private static long getInitialBitrateEstimate(EnhancedVideoProfile profile, int networkType) {
-        return switch (networkType) {
-            case C.NETWORK_TYPE_ETHERNET, C.NETWORK_TYPE_WIFI -> Math.max(profile.bitrate() * 2L, 20_000_000L);
-            case C.NETWORK_TYPE_5G_SA, C.NETWORK_TYPE_5G_NSA -> Math.max(profile.bitrate() * 3L / 2L, 15_000_000L);
-            case C.NETWORK_TYPE_4G -> Math.max(profile.bitrate(), 8_000_000L);
-            case C.NETWORK_TYPE_3G -> 4_000_000L;
-            case C.NETWORK_TYPE_2G -> 512_000L;
-            default -> Math.max(profile.bitrate(), 8_000_000L);
-        };
     }
 
     private static RenderersFactory buildPlaybackRenderersFactory(int decode) {
