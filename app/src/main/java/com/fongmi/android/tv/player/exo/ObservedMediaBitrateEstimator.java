@@ -31,6 +31,7 @@ final class ObservedMediaBitrateEstimator {
     private long durationMs = C.TIME_UNSET;
     private long lastRateMediaPositionMs = C.TIME_UNSET;
     private long sequence = Long.MIN_VALUE;
+    private long streamToken = Long.MIN_VALUE;
 
     synchronized void reset() {
         formatAverageBitrate = 0;
@@ -77,15 +78,19 @@ final class ObservedMediaBitrateEstimator {
     }
 
     synchronized void observeBytePosition(long nowMs, long mediaPositionMs, PlaybackBytePositionDataSource.Snapshot bytePosition, boolean stable) {
-        if (!stable || bytePosition == null || bytePosition.positionBytes() < 0 || mediaPositionMs < 0 || mediaPositionMs == C.TIME_UNSET) {
-            invalidateObserved(bytePosition == null ? Long.MIN_VALUE : bytePosition.sequence());
+        if (bytePosition != null) updateContent(bytePosition.contentLengthBytes(), durationMs);
+        if (!stable || bytePosition == null || !bytePosition.byteSlopeEligible() || bytePosition.positionBytes() < 0 || mediaPositionMs < 0 || mediaPositionMs == C.TIME_UNSET) {
+            invalidateByteSlope(
+                    bytePosition == null ? Long.MIN_VALUE : bytePosition.sequence(),
+                    bytePosition == null ? Long.MIN_VALUE : bytePosition.streamToken());
             return;
         }
-        updateContent(bytePosition.contentLengthBytes(), durationMs);
-        if (sequence != bytePosition.sequence()) invalidateObserved(bytePosition.sequence());
+        if (sequence != bytePosition.sequence() || streamToken != bytePosition.streamToken()) {
+            invalidateByteSlope(bytePosition.sequence(), bytePosition.streamToken());
+        }
         PositionSample latest = positions.peekLast();
         if (latest != null && (mediaPositionMs < latest.mediaPositionMs() || bytePosition.positionBytes() < latest.bytePositionBytes())) {
-            invalidateObserved(bytePosition.sequence());
+            invalidateByteSlope(bytePosition.sequence(), bytePosition.streamToken());
             latest = null;
         }
         if (latest != null && nowMs - latest.nowMs() < 1_000 && mediaPositionMs - latest.mediaPositionMs() < 1_000) return;
@@ -95,7 +100,7 @@ final class ObservedMediaBitrateEstimator {
     }
 
     synchronized void disrupt() {
-        invalidateObserved(sequence);
+        invalidateByteSlope(sequence, streamToken);
     }
 
     synchronized Estimate estimate() {
@@ -220,7 +225,18 @@ final class ObservedMediaBitrateEstimator {
 
     private void invalidateObserved(long sequence) {
         resetPositionWindow(sequence);
+        streamToken = Long.MIN_VALUE;
         rateSamples.clear();
+    }
+
+    /**
+     * Invalidates only byte-position slope samples.  Load-event samples remain
+     * usable for HLS/DASH and for a Progressive stream after a seek/reopen.
+     */
+    private void invalidateByteSlope(long sequence, long streamToken) {
+        resetPositionWindow(sequence);
+        this.streamToken = streamToken;
+        rateSamples.removeIf(sample -> sample.source() == Source.BYTE_SLOPE);
     }
 
     private long contentBitrate() {

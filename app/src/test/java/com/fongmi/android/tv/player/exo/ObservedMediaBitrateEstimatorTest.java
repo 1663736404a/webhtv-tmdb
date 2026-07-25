@@ -224,6 +224,41 @@ public class ObservedMediaBitrateEstimatorTest {
     }
 
     @Test
+    public void ineligibleProtocolCannotCreateByteSlope() {
+        ObservedMediaBitrateEstimator estimator = new ObservedMediaBitrateEstimator();
+        estimator.observeBytePosition(0, 0, ineligibleSnapshot(1, 0), true);
+        estimator.observeBytePosition(10_000, 10_000, ineligibleSnapshot(1, 100_000_000), true);
+        estimator.observeBytePosition(20_000, 20_000, ineligibleSnapshot(1, 200_000_000), true);
+
+        assertEquals(ObservedMediaBitrateEstimator.Source.UNKNOWN, estimator.estimateWithoutFormat().source());
+        assertEquals(0, estimator.estimateWithoutFormat().windowCount());
+    }
+
+    @Test
+    public void invalidatingSlopeKeepsLoadFallback() {
+        ObservedMediaBitrateEstimator estimator = new ObservedMediaBitrateEstimator();
+        observeRate(estimator, 12_000_000, 6_000);
+        observeRate(estimator, 12_000_000, 6_000);
+        estimator.observeBytePosition(0, 0, ineligibleSnapshot(3, 0), true);
+
+        ObservedMediaBitrateEstimator.Estimate estimate = estimator.estimateWithoutFormat();
+        assertEquals(ObservedMediaBitrateEstimator.Source.OBSERVED_LOAD, estimate.source());
+        assertEquals(12_000, estimate.observedDurationMs());
+        assertEquals(0, estimate.windowDurationMs());
+    }
+
+    @Test
+    public void streamTokenChangeInvalidatesSlopeEvenWhenSequenceMatches() {
+        ObservedMediaBitrateEstimator estimator = new ObservedMediaBitrateEstimator();
+        estimator.observeBytePosition(0, 0, progressiveSnapshot(9, 100, 0), true);
+        estimator.observeBytePosition(10_000, 10_000, progressiveSnapshot(9, 100, 100_000_000), true);
+        estimator.observeBytePosition(20_000, 20_000, progressiveSnapshot(9, 200, 200_000_000), true);
+
+        assertEquals(0, estimator.estimateWithoutFormat().windowDurationMs());
+        assertEquals(0, estimator.estimateWithoutFormat().windowCount());
+    }
+
+    @Test
     public void saturatedWholeFileRateDoesNotWrap() {
         ObservedMediaBitrateEstimator estimator = new ObservedMediaBitrateEstimator();
         estimator.updateContent(Long.MAX_VALUE, 1);
@@ -243,7 +278,29 @@ public class ObservedMediaBitrateEstimatorTest {
     }
 
     private static PlaybackBytePositionDataSource.Snapshot snapshot(long sequence, long position) {
-        return new PlaybackBytePositionDataSource.Snapshot(sequence, position, 0);
+        return progressiveSnapshot(sequence, sequence, position);
+    }
+
+    private static PlaybackBytePositionDataSource.Snapshot progressiveSnapshot(long sequence, long token, long position) {
+        return new PlaybackBytePositionDataSource.Snapshot(
+                sequence,
+                position,
+                0,
+                PlaybackBytePositionDataSource.Eligibility.PROGRESSIVE,
+                token,
+                1,
+                true);
+    }
+
+    private static PlaybackBytePositionDataSource.Snapshot ineligibleSnapshot(long sequence, long position) {
+        return new PlaybackBytePositionDataSource.Snapshot(
+                sequence,
+                position,
+                0,
+                PlaybackBytePositionDataSource.Eligibility.INELIGIBLE,
+                1,
+                2,
+                false);
     }
 
     private static long mib(long value) {
