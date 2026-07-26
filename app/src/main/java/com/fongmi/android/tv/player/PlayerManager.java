@@ -2306,6 +2306,7 @@ public class PlayerManager implements ParseCallback {
         playbackBufferingTracker.reset();
         playbackTrace.begin();
         playbackAutoSession = playbackAutoContextStore.beginSession(playbackTrace.current(), SystemClock.elapsedRealtime());
+        PlaybackMemoryMonitor.process().beginSession(playbackAutoSession);
         lastLoggedRouteTraceId = PlaybackTrace.NONE;
         bindPlaybackTrace();
         playbackTrace.mark(PlaybackTrace.Stage.REQUEST, "reason=" + reason + " player=" + playerType + " decode=" + (engine == null ? -1 : engine.getDecode()));
@@ -2340,6 +2341,7 @@ public class PlayerManager implements ParseCallback {
     }
 
     private void clearPlaybackAutoContext() {
+        PlaybackMemoryMonitor.process().endSession(playbackAutoSession);
         playbackAutoContextStore.clear(playbackAutoSession);
         playbackAutoSession = PlaybackAutoContext.SessionToken.none();
     }

@@ -65,6 +65,12 @@ public record PlaybackAutoContext(
                 kernel, decodeMode, device, resource, path, runtime);
     }
 
+    PlaybackAutoContext withMemoryFacts(Fact<MemoryPressure> pressure, Fact<MemorySnapshot> snapshot,
+                                        Fact<Long> diagnosticPssBytes) {
+        return new PlaybackAutoContext(session, startedAtElapsedMs, revision, publishedAtElapsedMs,
+                kernel, decodeMode, device.withMemoryFacts(pressure, snapshot, diagnosticPssBytes), resource, path, runtime);
+    }
+
     PlaybackAutoContext withResourceFacts(ResourceFacts resource) {
         return new PlaybackAutoContext(session, startedAtElapsedMs, revision, publishedAtElapsedMs,
                 kernel, decodeMode, device, resource, path, runtime);
@@ -96,7 +102,8 @@ public record PlaybackAutoContext(
                 " transfer=" + factLabel(resource.transferUnit(), resource.transferUnit().value().label()) +
                 " manifest=" + factLabel(resource.manifest(), resource.manifest().value().kind().label()) +
                 " runtime=" + factLabel(runtime.phase(), runtime.phase().value().label()) +
-                " memory=" + factLabel(device.memoryPressure(), device.memoryPressure().value().label());
+                " memory=" + factLabel(device.memoryPressure(), device.memoryPressure().value().label()) +
+                " " + device.memoryLogSummary();
     }
 
     private static String factLabel(Fact<?> fact, String value) {
@@ -188,12 +195,25 @@ public record PlaybackAutoContext(
 
     public record DeviceFacts(
             Fact<MemoryPressure> memoryPressure,
+            Fact<MemorySnapshot> memorySnapshot,
+            Fact<Long> diagnosticPssBytes,
             Fact<ThermalState> thermalState,
             Fact<PowerState> powerState,
             Fact<NetworkCost> networkCost) {
 
+        public DeviceFacts(
+                Fact<MemoryPressure> memoryPressure,
+                Fact<ThermalState> thermalState,
+                Fact<PowerState> powerState,
+                Fact<NetworkCost> networkCost) {
+            this(memoryPressure, Fact.unknown(MemorySnapshot.unknown()), Fact.unknown(-1L),
+                    thermalState, powerState, networkCost);
+        }
+
         public DeviceFacts {
             memoryPressure = memoryPressure == null ? Fact.unknown(MemoryPressure.UNKNOWN) : memoryPressure;
+            memorySnapshot = memorySnapshot == null ? Fact.unknown(MemorySnapshot.unknown()) : memorySnapshot;
+            diagnosticPssBytes = diagnosticPssBytes == null ? Fact.unknown(-1L) : diagnosticPssBytes;
             thermalState = thermalState == null ? Fact.unknown(ThermalState.UNKNOWN) : thermalState;
             powerState = powerState == null ? Fact.unknown(PowerState.UNKNOWN) : powerState;
             networkCost = networkCost == null ? Fact.unknown(NetworkCost.UNKNOWN) : networkCost;
@@ -202,9 +222,117 @@ public record PlaybackAutoContext(
         public static DeviceFacts unknown() {
             return new DeviceFacts(
                     Fact.unknown(MemoryPressure.UNKNOWN),
+                    Fact.unknown(MemorySnapshot.unknown()),
+                    Fact.unknown(-1L),
                     Fact.unknown(ThermalState.UNKNOWN),
                     Fact.unknown(PowerState.UNKNOWN),
                     Fact.unknown(NetworkCost.UNKNOWN));
+        }
+
+        DeviceFacts withMemoryFacts(Fact<MemoryPressure> pressure, Fact<MemorySnapshot> snapshot,
+                                    Fact<Long> pssBytes) {
+            return new DeviceFacts(
+                    pressure == null ? memoryPressure : pressure,
+                    snapshot == null ? memorySnapshot : snapshot,
+                    pssBytes == null ? diagnosticPssBytes : pssBytes,
+                    thermalState,
+                    powerState,
+                    networkCost);
+        }
+
+        private String memoryLogSummary() {
+            String snapshot = memorySnapshot.hasValue() ? memorySnapshot.value().logSummary() : MemorySnapshot.unknown().logSummary();
+            long pss = diagnosticPssBytes.hasValue() ? diagnosticPssBytes.value() : -1;
+            return snapshot + " pssBytes=" + pss;
+        }
+    }
+
+    public record MemorySnapshot(
+            MemoryTrigger trigger,
+            Long javaHeapUsedBytes,
+            Long javaHeapLimitBytes,
+            Long javaHeapHeadroomBytes,
+            Boolean lowRamDevice,
+            Long systemTotalBytes,
+            Long systemAvailableBytes,
+            Long systemThresholdBytes,
+            Boolean systemLowMemory,
+            Integer lastTrimLevel,
+            Integer processImportance,
+            Long nativeHeapAllocatedBytes) {
+
+        public MemorySnapshot {
+            trigger = trigger == null ? MemoryTrigger.UNKNOWN : trigger;
+            javaHeapUsedBytes = nonNegativeOrNull(javaHeapUsedBytes);
+            javaHeapLimitBytes = nonNegativeOrNull(javaHeapLimitBytes);
+            javaHeapHeadroomBytes = nonNegativeOrNull(javaHeapHeadroomBytes);
+            systemTotalBytes = nonNegativeOrNull(systemTotalBytes);
+            systemAvailableBytes = nonNegativeOrNull(systemAvailableBytes);
+            systemThresholdBytes = nonNegativeOrNull(systemThresholdBytes);
+            lastTrimLevel = nonNegativeOrNull(lastTrimLevel);
+            processImportance = nonNegativeOrNull(processImportance);
+            nativeHeapAllocatedBytes = nonNegativeOrNull(nativeHeapAllocatedBytes);
+            if (javaHeapLimitBytes != null && javaHeapHeadroomBytes != null) {
+                javaHeapHeadroomBytes = Math.min(javaHeapLimitBytes, javaHeapHeadroomBytes);
+            }
+        }
+
+        public static MemorySnapshot unknown() {
+            return new MemorySnapshot(MemoryTrigger.UNKNOWN, null, null, null, null,
+                    null, null, null, null, null, null, null);
+        }
+
+        public boolean hasEvidence() {
+            return trigger != MemoryTrigger.UNKNOWN
+                    || javaHeapUsedBytes != null
+                    || javaHeapLimitBytes != null
+                    || systemAvailableBytes != null
+                    || systemLowMemory != null
+                    || lastTrimLevel != null
+                    || nativeHeapAllocatedBytes != null;
+        }
+
+        public boolean hasJavaMetrics() {
+            return javaHeapUsedBytes != null && javaHeapLimitBytes != null && javaHeapHeadroomBytes != null;
+        }
+
+        public boolean hasSystemMetrics() {
+            return systemAvailableBytes != null && systemThresholdBytes != null && systemLowMemory != null;
+        }
+
+        private String logSummary() {
+            return "memoryTrigger=" + trigger.label()
+                    + " javaUsed=" + safeLong(javaHeapUsedBytes)
+                    + " javaLimit=" + safeLong(javaHeapLimitBytes)
+                    + " javaHeadroom=" + safeLong(javaHeapHeadroomBytes)
+                    + " lowRam=" + safeBoolean(lowRamDevice)
+                    + " systemTotal=" + safeLong(systemTotalBytes)
+                    + " systemAvail=" + safeLong(systemAvailableBytes)
+                    + " systemThreshold=" + safeLong(systemThresholdBytes)
+                    + " systemLow=" + safeBoolean(systemLowMemory)
+                    + " trim=" + safeInt(lastTrimLevel)
+                    + " importance=" + safeInt(processImportance)
+                    + " nativeHeap=" + safeLong(nativeHeapAllocatedBytes);
+        }
+
+        private static Long nonNegativeOrNull(Long value) {
+            return value == null || value < 0 ? null : value;
+        }
+
+        private static Integer nonNegativeOrNull(Integer value) {
+            return value == null || value < 0 ? null : value;
+        }
+
+        private static long safeLong(Long value) {
+            return value == null ? -1 : value;
+        }
+
+        private static int safeInt(Integer value) {
+            return value == null ? -1 : value;
+        }
+
+        private static String safeBoolean(Boolean value) {
+            return value == null ? "unknown" : value.toString();
         }
     }
 
@@ -447,6 +575,7 @@ public record PlaybackAutoContext(
         DATA_SOURCE("data-source"),
         ROUTE_CLASSIFIER("route-classifier"),
         PLAYER_CALLBACK("player-callback"),
+        SYSTEM_CALLBACK("system-callback"),
         SYSTEM_API("system-api"),
         ESTIMATOR("estimator"),
         UNKNOWN("unknown");
@@ -514,6 +643,24 @@ public record PlaybackAutoContext(
         private final String label;
 
         MemoryPressure(String label) {
+            this.label = label;
+        }
+
+        public String label() {
+            return label;
+        }
+    }
+
+    public enum MemoryTrigger {
+        SESSION_START("session-start"),
+        PERIODIC("periodic"),
+        TRIM_MEMORY("trim-memory"),
+        LOW_MEMORY("low-memory"),
+        UNKNOWN("unknown");
+
+        private final String label;
+
+        MemoryTrigger(String label) {
             this.label = label;
         }
 

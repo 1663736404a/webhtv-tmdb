@@ -50,6 +50,17 @@ public final class PlaybackAutoContextStore {
         return update(session, publishedAtElapsedMs, context -> context.withDeviceFacts(device));
     }
 
+    public boolean publishMemoryFacts(
+            PlaybackAutoContext.SessionToken session,
+            PlaybackAutoContext.Fact<PlaybackAutoContext.MemoryPressure> pressure,
+            PlaybackAutoContext.Fact<PlaybackAutoContext.MemorySnapshot> snapshot,
+            PlaybackAutoContext.Fact<Long> diagnosticPssBytes,
+            long publishedAtElapsedMs) {
+        if (pressure == null && snapshot == null && diagnosticPssBytes == null) return false;
+        return update(session, publishedAtElapsedMs,
+                context -> context.withMemoryFacts(pressure, snapshot, diagnosticPssBytes));
+    }
+
     public boolean publishResourceFacts(PlaybackAutoContext.SessionToken session, PlaybackAutoContext.ResourceFacts resource, long publishedAtElapsedMs) {
         return update(session, publishedAtElapsedMs, context -> context.withResourceFacts(resource));
     }
