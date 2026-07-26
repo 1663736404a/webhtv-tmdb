@@ -46,6 +46,12 @@ public final class PlaybackBufferingTracker {
         return rebufferTotalMs;
     }
 
+    public long getRebufferTotalMs(long nowMs) {
+        if (!buffering || activePhase != Phase.REBUFFER) return rebufferTotalMs;
+        long activeMs = Math.max(0, Math.max(0, nowMs) - bufferingStartedAtMs);
+        return rebufferTotalMs > Long.MAX_VALUE - activeMs ? Long.MAX_VALUE : rebufferTotalMs + activeMs;
+    }
+
     public enum Type {
         START("start"),
         END("end");

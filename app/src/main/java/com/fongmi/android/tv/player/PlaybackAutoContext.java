@@ -136,7 +136,7 @@ public record PlaybackAutoContext(
                 " stream=" + factLabel(resource.streamKind(), resource.streamKind().value().label()) +
                 " transfer=" + factLabel(resource.transferUnit(), resource.transferUnit().value().label()) +
                 " manifest=" + factLabel(resource.manifest(), resource.manifest().value().kind().label()) +
-                " runtime=" + factLabel(runtime.phase(), runtime.phase().value().label()) +
+                " runtime=" + runtime.logSummary() +
                 " memory=" + factLabel(device.memoryPressure(), device.memoryPressure().value().label()) +
                 " " + device.memoryLogSummary() +
                 " " + device.systemConditionLogSummary() +
@@ -648,7 +648,27 @@ public record PlaybackAutoContext(
             Fact<Long> mediaBitrateBitsPerSecond,
             Fact<Float> renderedFrameRate,
             Fact<Long> droppedFrames,
-            Fact<Integer> rebufferCount) {
+            Fact<Integer> rebufferCount,
+            Fact<Long> rebufferTotalMs,
+            Fact<Long> firstFrameElapsedMs,
+            Fact<Long> liveLagMs,
+            Fact<Boolean> loading,
+            Fact<Long> positionMs,
+            Fact<Long> durationMs) {
+
+        public RuntimeFacts(
+                Fact<PlaybackPhase> phase,
+                Fact<Long> bufferedDurationMs,
+                Fact<Long> bandwidthBitsPerSecond,
+                Fact<Long> mediaBitrateBitsPerSecond,
+                Fact<Float> renderedFrameRate,
+                Fact<Long> droppedFrames,
+                Fact<Integer> rebufferCount) {
+            this(phase, bufferedDurationMs, bandwidthBitsPerSecond, mediaBitrateBitsPerSecond,
+                    renderedFrameRate, droppedFrames, rebufferCount,
+                    Fact.unknown(0L), Fact.unknown(0L), Fact.unknown(0L),
+                    Fact.unknown(false), Fact.unknown(0L), Fact.unknown(0L));
+        }
 
         public RuntimeFacts {
             phase = phase == null ? Fact.unknown(PlaybackPhase.UNKNOWN) : phase;
@@ -658,6 +678,12 @@ public record PlaybackAutoContext(
             renderedFrameRate = renderedFrameRate == null ? Fact.unknown(0f) : renderedFrameRate;
             droppedFrames = droppedFrames == null ? Fact.unknown(0L) : droppedFrames;
             rebufferCount = rebufferCount == null ? Fact.unknown(0) : rebufferCount;
+            rebufferTotalMs = rebufferTotalMs == null ? Fact.unknown(0L) : rebufferTotalMs;
+            firstFrameElapsedMs = firstFrameElapsedMs == null ? Fact.unknown(0L) : firstFrameElapsedMs;
+            liveLagMs = liveLagMs == null ? Fact.unknown(0L) : liveLagMs;
+            loading = loading == null ? Fact.unknown(false) : loading;
+            positionMs = positionMs == null ? Fact.unknown(0L) : positionMs;
+            durationMs = durationMs == null ? Fact.unknown(0L) : durationMs;
         }
 
         public static RuntimeFacts unknown() {
@@ -668,7 +694,29 @@ public record PlaybackAutoContext(
                     Fact.unknown(0L),
                     Fact.unknown(0f),
                     Fact.unknown(0L),
-                    Fact.unknown(0));
+                    Fact.unknown(0),
+                    Fact.unknown(0L),
+                    Fact.unknown(0L),
+                    Fact.unknown(0L),
+                    Fact.unknown(false),
+                    Fact.unknown(0L),
+                    Fact.unknown(0L));
+        }
+
+        private String logSummary() {
+            return "phase=" + factLabel(phase, phase.value().label())
+                    + " loading=" + factLabel(loading, loading.value().toString())
+                    + " positionMs=" + factLabel(positionMs, String.valueOf(positionMs.value()))
+                    + " durationMs=" + factLabel(durationMs, String.valueOf(durationMs.value()))
+                    + " bufferedMs=" + factLabel(bufferedDurationMs, String.valueOf(bufferedDurationMs.value()))
+                    + " bandwidthBps=" + factLabel(bandwidthBitsPerSecond, String.valueOf(bandwidthBitsPerSecond.value()))
+                    + " mediaBps=" + factLabel(mediaBitrateBitsPerSecond, String.valueOf(mediaBitrateBitsPerSecond.value()))
+                    + " renderedFps=" + factLabel(renderedFrameRate, String.valueOf(renderedFrameRate.value()))
+                    + " dropped=" + factLabel(droppedFrames, String.valueOf(droppedFrames.value()))
+                    + " rebufferCount=" + factLabel(rebufferCount, String.valueOf(rebufferCount.value()))
+                    + " rebufferTotalMs=" + factLabel(rebufferTotalMs, String.valueOf(rebufferTotalMs.value()))
+                    + " firstFrameMs=" + factLabel(firstFrameElapsedMs, String.valueOf(firstFrameElapsedMs.value()))
+                    + " liveLagMs=" + factLabel(liveLagMs, String.valueOf(liveLagMs.value()));
         }
     }
 

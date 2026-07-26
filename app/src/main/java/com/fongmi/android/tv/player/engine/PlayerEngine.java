@@ -114,6 +114,11 @@ public interface PlayerEngine {
         return 0;
     }
 
+    /** Runtime metrics observed by a native engine. Unknown values are null. */
+    default RuntimeMetrics getRuntimeMetrics() {
+        return RuntimeMetrics.unknown();
+    }
+
     default String getPlaybackTraceId() {
         return PlaybackTrace.NONE;
     }
@@ -213,6 +218,29 @@ public interface PlayerEngine {
         public static PlaybackFactsSnapshot empty() {
             return new PlaybackFactsSnapshot(null, null, null, null, "", "",
                     DecoderKind.UNKNOWN, null, "", "", null);
+        }
+    }
+
+    record RuntimeMetrics(
+            Long bandwidthBitsPerSecond,
+            Long mediaBitrateBitsPerSecond,
+            Float renderedFrameRate,
+            Long droppedFrames) {
+
+        public RuntimeMetrics {
+            bandwidthBitsPerSecond = nonNegative(bandwidthBitsPerSecond);
+            mediaBitrateBitsPerSecond = nonNegative(mediaBitrateBitsPerSecond);
+            renderedFrameRate = renderedFrameRate == null || !Float.isFinite(renderedFrameRate) || renderedFrameRate <= 0
+                    ? null : renderedFrameRate;
+            droppedFrames = nonNegative(droppedFrames);
+        }
+
+        public static RuntimeMetrics unknown() {
+            return new RuntimeMetrics(null, null, null, null);
+        }
+
+        private static Long nonNegative(Long value) {
+            return value == null || value < 0 ? null : value;
         }
     }
 }

@@ -104,12 +104,14 @@ public class PlayerManager implements ParseCallback {
     private static final int LUT_WARMUP_RECOVERED_ERROR_REFRESH_THRESHOLD = 3;
     private static final long DANMAKU_FORCE_RELOAD_DEBOUNCE_MS = 10000;
     private static final long LIVE_DANMAKU_METRICS_INTERVAL_MS = 15000L;
+    private static final long PLAYBACK_TELEMETRY_INTERVAL_MS = 5000L;
     private static final float[] SPEED_PRESETS = new float[]{0.5f, 0.75f, 1f, 1.2f, 1.25f, 1.5f, 1.75f, 2f, 2.5f, 3f, 5f};
     private static final DecimalFormat SPEED_FORMAT = new DecimalFormat("0.##x");
 
     private final Runnable runnable;
     private final Runnable liveDanmakuMetricsRunnable;
     private final Runnable networkProtectionRunnable;
+    private final Runnable playbackTelemetryRunnable;
     private final Callback callback;
     private final DynamicLutEffect dynamicLutEffect;
     private final AudioManager.OnAudioFocusChangeListener audioFocusChangeListener;
@@ -117,6 +119,7 @@ public class PlayerManager implements ParseCallback {
     private final PlaybackBufferingTracker playbackBufferingTracker;
     private final PlaybackTrace playbackTrace;
     private final PlaybackAutoContextStore playbackAutoContextStore;
+    private final PlaybackTelemetryCoordinator playbackTelemetryCoordinator;
     private final PlaybackMediaFactsCoordinator playbackMediaFactsCoordinator;
     private final ExoNetworkGuardController networkProtectionController;
     private final ForwardBufferTrend networkProtectionTrend;
@@ -189,9 +192,11 @@ public class PlayerManager implements ParseCallback {
         this.runnable = this::onPlaybackTimeout;
         this.liveDanmakuMetricsRunnable = () -> logLiveDanmakuMetrics("periodic", true);
         this.networkProtectionRunnable = this::evaluateNetworkProtection;
+        this.playbackTelemetryRunnable = this::publishPlaybackTelemetryTick;
         this.playbackBufferingTracker = new PlaybackBufferingTracker();
         this.playbackTrace = new PlaybackTrace();
         this.playbackAutoContextStore = PlaybackAutoContextStore.process();
+        this.playbackTelemetryCoordinator = PlaybackTelemetryCoordinator.process();
         this.playbackMediaFactsCoordinator = new PlaybackMediaFactsCoordinator(playbackAutoContextStore);
         this.networkProtectionController = new ExoNetworkGuardController();
         this.networkProtectionTrend = new ForwardBufferTrend();
@@ -219,6 +224,7 @@ public class PlayerManager implements ParseCallback {
         player.removeListener(listener);
         App.removeCallbacks(runnable);
         App.removeCallbacks(networkProtectionRunnable);
+        App.removeCallbacks(playbackTelemetryRunnable);
         stopNativeAudioSession();
         clearDanmaku("release");
         releaseLiveDanmakuSession();
@@ -226,6 +232,7 @@ public class PlayerManager implements ParseCallback {
         App.removeCallbacks(liveDanmakuMetricsRunnable);
         if (danmakuController != null) danmakuController.setListener(null);
         danmakuController = null;
+        endPlaybackTelemetrySession("release");
         clearPlaybackAutoContext();
         if (engine == null) return;
         engine.release();
@@ -310,6 +317,11 @@ public class PlayerManager implements ParseCallback {
             PlaybackAutoContext.DisplayMode requestedMode) {
         playbackMediaFactsCoordinator.publishDisplayFacts(
                 playbackAutoSession, currentMode, requestedMode, SystemClock.elapsedRealtime());
+    }
+
+    public void publishPlaybackDecision(PlaybackTelemetry.DecisionEvent event) {
+        playbackTelemetryCoordinator.publishDecision(
+                playbackAutoSession, event, SystemClock.elapsedRealtime());
     }
 
     public int getPlaybackState() {
@@ -786,6 +798,7 @@ public class PlayerManager implements ParseCallback {
         boolean networkEstimateKnown = isTrustedNetworkEstimate(analytics, media);
         float networkSupportedSpeed = networkEstimateKnown ? Math.min(2f, analytics.bandwidthEstimate() * 0.90f / media.bitrateBitsPerSecond()) : 1f;
         long safeBufferMs = getNetworkProtectionSafeBufferMs();
+        float previousEffectiveSpeed = getEffectiveSpeed();
         ExoNetworkGuardController.State previousState = networkProtectionState;
         ExoNetworkGuardController.ProtectionTier previousTier = networkProtectionTier;
         ExoNetworkGuardController.Decision decision = networkProtectionController.evaluate(new ExoNetworkGuardController.Input(
@@ -801,7 +814,7 @@ public class PlayerManager implements ParseCallback {
                 trend.slowSlopeMsPerSecond(),
                 trend.windowMs(),
                 analytics.rebufferCount(),
-                getEffectiveSpeed(),
+                previousEffectiveSpeed,
                 ExoPerformanceSetting.getNetworkProtectionMinimumSpeed(),
                 safeBufferMs,
                 networkEstimateKnown,
@@ -821,6 +834,35 @@ public class PlayerManager implements ParseCallback {
         networkProtectionSupportedSpeed = decision.supportedSpeed();
         networkProtectionMediaBitrate = media.bitrateBitsPerSecond();
         if (decision.changed()) applyEffectiveSpeed(networkProtectionSpeed, "guard-" + decision.reason());
+        PlaybackTelemetry.DecisionOutcome telemetryOutcome = decision.changed()
+                ? PlaybackTelemetry.DecisionOutcome.APPLIED
+                : !eligible || !ready || !playing
+                ? PlaybackTelemetry.DecisionOutcome.SUPPRESSED
+                : PlaybackTelemetry.DecisionOutcome.HELD;
+        playbackTelemetryCoordinator.publishDecision(playbackAutoSession,
+                new PlaybackTelemetry.DecisionEvent(
+                        PlaybackTelemetry.DecisionDomain.NETWORK_PROTECTION,
+                        telemetryOutcome,
+                        previousState.name().toLowerCase(java.util.Locale.US),
+                        decision.state().name().toLowerCase(java.util.Locale.US),
+                        networkProtectionState.name().toLowerCase(java.util.Locale.US),
+                        decision.reason(),
+                        telemetryOutcome == PlaybackTelemetry.DecisionOutcome.SUPPRESSED
+                                ? eligibility.reason() : telemetryOutcome == PlaybackTelemetry.DecisionOutcome.HELD ? "no-change" : "none",
+                        List.of(
+                                PlaybackTelemetry.DecisionInput.bool("eligible", eligible, PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.bool("ready", ready, PlaybackAutoContext.ValueSource.PLAYER_CALLBACK, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.bool("playing", playing, PlaybackAutoContext.ValueSource.PLAYER_CALLBACK, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.bool("loading", loading, PlaybackAutoContext.ValueSource.PLAYER_CALLBACK, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.number("buffered_ms", bufferedMs, PlaybackAutoContext.ValueSource.PLAYER_CALLBACK, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.number("safe_buffer_ms", safeBufferMs, PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH),
+                                networkEstimateKnown ? PlaybackTelemetry.DecisionInput.number("bandwidth_bps", analytics.bandwidthEstimate(), PlaybackAutoContext.ValueSource.ESTIMATOR, PlaybackAutoContext.Confidence.MEDIUM) : PlaybackTelemetry.DecisionInput.unknown("bandwidth_bps"),
+                                media.bitrateBitsPerSecond() > 0 ? PlaybackTelemetry.DecisionInput.number("media_bitrate_bps", media.bitrateBitsPerSecond(), PlaybackAutoContext.ValueSource.ESTIMATOR, telemetryConfidence(media.confidence())) : PlaybackTelemetry.DecisionInput.unknown("media_bitrate_bps"),
+                                PlaybackTelemetry.DecisionInput.number("rebuffer_count", analytics.rebufferCount(), PlaybackAutoContext.ValueSource.PLAYER_CALLBACK, PlaybackAutoContext.Confidence.HIGH),
+                                trend.known() ? PlaybackTelemetry.DecisionInput.number("buffer_slope_msps", trend.slopeMsPerSecond(), PlaybackAutoContext.ValueSource.ESTIMATOR, PlaybackAutoContext.Confidence.MEDIUM) : PlaybackTelemetry.DecisionInput.unknown("buffer_slope_msps"),
+                                PlaybackTelemetry.DecisionInput.decimal("current_speed", previousEffectiveSpeed, PlaybackAutoContext.ValueSource.PLAYER_CALLBACK, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.decimal("target_speed", decision.targetSpeed(), PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH))),
+                nowMs);
         if (decision.changed() || previousState != networkProtectionState || previousTier != networkProtectionTier) {
             PlaybackTrace.log("exo-network-protection", playbackTrace.current(), "state=%s tier=%s reason=%s speed=%.3f supported=%.3f rawTarget=%.3f target=%.3f floor=%.2f buffered=%d safe=%d tte=%d ttr=%d requiredSlew=%.4f appliedSlew=%.4f feasible=%s loading=%s slope=%d fast=%d slow=%d window=%d rebuffer=%d networkKnown=%s networkSupported=%.3f route=%s",
                     networkProtectionState, networkProtectionTier, networkProtectionReason, networkProtectionSpeed, decision.supportedSpeed(), decision.rawTargetSpeed(), decision.calculatedTargetSpeed(), ExoPerformanceSetting.getNetworkProtectionMinimumSpeed(),
@@ -964,6 +1006,7 @@ public class PlayerManager implements ParseCallback {
         pendingLutPreview = false;
         waitingLutBeforePlay = false;
         clearLutWarmupRecovery();
+        endPlaybackTelemetrySession("clear");
         playbackBufferingTracker.reset();
         clearPlaybackAutoContext();
         playbackTrace.clear();
@@ -1270,8 +1313,42 @@ public class PlayerManager implements ParseCallback {
         boolean currentlyDirect = isMpvSurfaceDirect();
         MpvAutoOutputPolicy.Transition transition = MpvAutoOutputPolicy.transition(decision.eligible(), currentlyDirect);
         if (SpiderDebug.isEnabled()) SpiderDebug.log("mpv-output", "auto decision eligible=%s transition=%s reason=%s size=%dx%d tracksReady=%s early=%s subtitle=%s lutOrFilter=%s customGpu=%s direct=%s attempts=%d", decision.eligible(), transition, decision.reason(), width, height, tracksReady, earlyEvaluation, subtitleActive, lutOrFilterActive, customGpuProcessing, currentlyDirect, mpvAutoOutputProbeAttempts);
-        if (transition == MpvAutoOutputPolicy.Transition.ENTER_SURFACE_DIRECT) rebuildAndRestartMpv(true, "auto-" + decision.reason());
-        else if (transition == MpvAutoOutputPolicy.Transition.LEAVE_SURFACE_DIRECT) rebuildAndRestartMpv(false, "auto-" + decision.reason());
+        boolean transitionRequested = transition == MpvAutoOutputPolicy.Transition.ENTER_SURFACE_DIRECT
+                || transition == MpvAutoOutputPolicy.Transition.LEAVE_SURFACE_DIRECT;
+        boolean requestAccepted = true;
+        if (transition == MpvAutoOutputPolicy.Transition.ENTER_SURFACE_DIRECT) {
+            requestAccepted = rebuildAndRestartMpv(true, "auto-" + decision.reason());
+        } else if (transition == MpvAutoOutputPolicy.Transition.LEAVE_SURFACE_DIRECT) {
+            requestAccepted = rebuildAndRestartMpv(false, "auto-" + decision.reason());
+        }
+        String oldOutput = currentlyDirect ? "surface-direct" : "gpu";
+        String targetOutput = decision.eligible() ? "surface-direct" : "gpu";
+        PlaybackTelemetry.DecisionOutcome telemetryOutcome = transitionRequested
+                ? requestAccepted ? PlaybackTelemetry.DecisionOutcome.REQUESTED : PlaybackTelemetry.DecisionOutcome.FAILED
+                : PlaybackTelemetry.DecisionOutcome.HELD;
+        playbackTelemetryCoordinator.publishDecision(playbackAutoSession,
+                new PlaybackTelemetry.DecisionEvent(
+                        PlaybackTelemetry.DecisionDomain.MPV_OUTPUT,
+                        telemetryOutcome,
+                        oldOutput,
+                        targetOutput,
+                        transitionRequested && requestAccepted ? targetOutput : oldOutput,
+                        decision.reason(),
+                        transitionRequested ? requestAccepted ? "none" : "rebuild-rejected" : "no-transition",
+                        List.of(
+                                PlaybackTelemetry.DecisionInput.number("width", width, PlaybackAutoContext.ValueSource.PLAYER_CALLBACK, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.number("height", height, PlaybackAutoContext.ValueSource.PLAYER_CALLBACK, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.bool("hard_decode", engine.isHard(), PlaybackAutoContext.ValueSource.PLAYBACK_REQUEST, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.bool("leanback", Util.isLeanback(), PlaybackAutoContext.ValueSource.SYSTEM_API, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.bool("tracks_ready", tracksReady, PlaybackAutoContext.ValueSource.PLAYER_CALLBACK, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.bool("early_evaluation", earlyEvaluation, PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.bool("subtitle_active", subtitleActive, PlaybackAutoContext.ValueSource.PLAYBACK_REQUEST, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.bool("lut_or_filter", lutOrFilterActive, PlaybackAutoContext.ValueSource.PLAYBACK_REQUEST, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.bool("custom_gpu", customGpuProcessing, PlaybackAutoContext.ValueSource.PLAYBACK_REQUEST, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.bool("currently_direct", currentlyDirect, PlaybackAutoContext.ValueSource.NATIVE_RUNTIME, PlaybackAutoContext.Confidence.MEDIUM),
+                                PlaybackTelemetry.DecisionInput.bool("eligible", decision.eligible(), PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.number("probe_attempts", mpvAutoOutputProbeAttempts, PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH))),
+                SystemClock.elapsedRealtime());
         return true;
     }
 
@@ -1501,6 +1578,8 @@ public class PlayerManager implements ParseCallback {
         applySubtitleStyle();
         playbackTrace.mark(PlaybackTrace.Stage.PREPARE, "player=" + playerType + " decode=" + engine.getDecode());
         engine.start(spec.checkUa(), playWhenReady);
+        publishPlaybackTelemetry();
+        schedulePlaybackTelemetry();
         scheduleMpvAutoOutputEvaluation();
         startNativeAudioSession(playWhenReady);
         App.post(runnable, timeout);
@@ -2318,16 +2397,21 @@ public class PlayerManager implements ParseCallback {
     }
 
     private void beginPlaybackTrace(String reason) {
+        endPlaybackTelemetrySession("replace-" + reason);
         playbackBufferingTracker.reset();
         playbackTrace.begin();
-        playbackAutoSession = playbackAutoContextStore.beginSession(playbackTrace.current(), SystemClock.elapsedRealtime());
+        long now = SystemClock.elapsedRealtime();
+        playbackAutoSession = playbackAutoContextStore.beginSession(playbackTrace.current(), now);
         playbackTrackSequence = 1;
         playbackMediaFactsCoordinator.beginSession(playbackAutoSession);
         PlaybackMemoryMonitor.process().beginSession(playbackAutoSession);
         PlaybackSystemConditionMonitor.process().beginSession(playbackAutoSession);
+        playbackTelemetryCoordinator.beginSession(playbackAutoSession, now);
         lastLoggedRouteTraceId = PlaybackTrace.NONE;
         bindPlaybackTrace();
         playbackTrace.mark(PlaybackTrace.Stage.REQUEST, "reason=" + reason + " player=" + playerType + " decode=" + (engine == null ? -1 : engine.getDecode()));
+        publishPlaybackTelemetry();
+        schedulePlaybackTelemetry();
     }
 
     private void bindPlaybackTrace() {
@@ -2367,6 +2451,173 @@ public class PlayerManager implements ParseCallback {
             PlaybackTrace.log("playback-auto-context", playbackTrace.current(), "%s", snapshot.logSummary());
             PlaybackTrace.log("playback-auto-resource", playbackTrace.current(), "%s", classification.logSummary());
         }
+    }
+
+    private void publishPlaybackTelemetryTick() {
+        if (!playbackAutoSession.active()) return;
+        publishPlaybackTelemetry();
+        schedulePlaybackTelemetry();
+    }
+
+    private void publishPlaybackTelemetry() {
+        publishPlaybackTelemetry(null);
+    }
+
+    private void publishPlaybackTelemetry(PlaybackAutoContext.PlaybackPhase phaseOverride) {
+        if (!playbackAutoSession.active()) return;
+        long now = SystemClock.elapsedRealtime();
+        playbackTelemetryCoordinator.publishRuntime(
+                playbackAutoSession, collectPlaybackTelemetry(phaseOverride, now), now);
+    }
+
+    private void schedulePlaybackTelemetry() {
+        App.removeCallbacks(playbackTelemetryRunnable);
+        if (!playbackAutoSession.active() || player == null || player.getPlaybackState() == Player.STATE_ENDED) return;
+        App.post(playbackTelemetryRunnable, PLAYBACK_TELEMETRY_INTERVAL_MS);
+    }
+
+    private void endPlaybackTelemetrySession(String reason) {
+        App.removeCallbacks(playbackTelemetryRunnable);
+        if (!playbackAutoSession.active()) return;
+        long now = SystemClock.elapsedRealtime();
+        playbackTelemetryCoordinator.endSession(
+                playbackAutoSession, reason, collectPlaybackTelemetry(null, now), now);
+    }
+
+    private PlaybackTelemetry.RuntimeObservation collectPlaybackTelemetry(
+            PlaybackAutoContext.PlaybackPhase phaseOverride,
+            long now) {
+        PlaybackAutoContext.PlaybackPhase phaseValue = phaseOverride == null ? playbackPhaseSnapshot() : phaseOverride;
+        PlaybackTelemetry.Metric<PlaybackAutoContext.PlaybackPhase> phase = phaseValue == PlaybackAutoContext.PlaybackPhase.UNKNOWN
+                ? PlaybackTelemetry.Metric.unknown()
+                : PlaybackTelemetry.Metric.of(phaseValue, PlaybackAutoContext.ValueSource.PLAYER_CALLBACK,
+                PlaybackAutoContext.Confidence.HIGH);
+        PlaybackTelemetry.Metric<Boolean> loading = PlaybackTelemetry.Metric.unknown();
+        PlaybackTelemetry.Metric<Long> position = PlaybackTelemetry.Metric.unknown();
+        PlaybackTelemetry.Metric<Long> duration = PlaybackTelemetry.Metric.unknown();
+        PlaybackTelemetry.Metric<Long> buffered = PlaybackTelemetry.Metric.unknown();
+        PlaybackTelemetry.Metric<Long> bandwidth = PlaybackTelemetry.Metric.unknown();
+        PlaybackTelemetry.Metric<Long> mediaBitrate = PlaybackTelemetry.Metric.unknown();
+        PlaybackTelemetry.Metric<Float> renderedFrameRate = PlaybackTelemetry.Metric.unknown();
+        PlaybackTelemetry.Metric<Long> droppedFrames = PlaybackTelemetry.Metric.unknown();
+        PlaybackTelemetry.Metric<Long> liveLag = PlaybackTelemetry.Metric.unknown();
+        if (player != null) {
+            try {
+                loading = PlaybackTelemetry.Metric.of(player.isLoading(), PlaybackAutoContext.ValueSource.PLAYER_CALLBACK,
+                        PlaybackAutoContext.Confidence.HIGH);
+            } catch (Throwable ignored) {
+            }
+            try {
+                long value = player.getCurrentPosition();
+                if (value >= 0) position = PlaybackTelemetry.Metric.of(value, PlaybackAutoContext.ValueSource.PLAYER_CALLBACK,
+                        PlaybackAutoContext.Confidence.HIGH);
+            } catch (Throwable ignored) {
+            }
+            try {
+                long value = player.getDuration();
+                if (value >= 0 && value != C.TIME_UNSET) duration = PlaybackTelemetry.Metric.of(value,
+                        PlaybackAutoContext.ValueSource.PLAYER_CALLBACK, PlaybackAutoContext.Confidence.HIGH);
+            } catch (Throwable ignored) {
+            }
+            try {
+                long value = player.getTotalBufferedDuration();
+                if (value >= 0) buffered = PlaybackTelemetry.Metric.of(value, PlaybackAutoContext.ValueSource.PLAYER_CALLBACK,
+                        PlaybackAutoContext.Confidence.HIGH);
+            } catch (Throwable ignored) {
+            }
+        }
+        if (isExo() && playbackTrace.current().equals(PlaybackAnalyticsListener.getPlaybackTraceId())) {
+            PlaybackAnalyticsListener.Snapshot analytics = PlaybackAnalyticsListener.getSnapshot();
+            if (analytics.bandwidthEstimate() > 0) {
+                bandwidth = PlaybackTelemetry.Metric.of(analytics.bandwidthEstimate(), PlaybackAutoContext.ValueSource.ESTIMATOR,
+                        PlaybackAutoContext.Confidence.MEDIUM);
+            }
+            PlaybackAnalyticsListener.DisplayMediaBitrateEstimate media =
+                    PlaybackAnalyticsListener.getDisplayMediaBitrateEstimate(getVideoFormat());
+            if (media.bitrateBitsPerSecond() > 0) {
+                PlaybackAutoContext.ValueSource source = "format".equals(media.source())
+                        ? PlaybackAutoContext.ValueSource.PLAYER_CALLBACK : PlaybackAutoContext.ValueSource.ESTIMATOR;
+                mediaBitrate = PlaybackTelemetry.Metric.of(media.bitrateBitsPerSecond(), source,
+                        telemetryConfidence(media.confidence()));
+            }
+            PlaybackAnalyticsListener.DisplayFrameRateEstimate frameRate = PlaybackAnalyticsListener.getDisplayFrameRateEstimate();
+            if (frameRate.frameRate() > 0 && frameRate.sampleCount() > 0) {
+                renderedFrameRate = PlaybackTelemetry.Metric.of(frameRate.frameRate(), PlaybackAutoContext.ValueSource.ESTIMATOR,
+                        frameRate.sampleCount() >= 12 ? PlaybackAutoContext.Confidence.HIGH : PlaybackAutoContext.Confidence.MEDIUM);
+            }
+            if (analytics.everReady() || analytics.videoFormat() != null) {
+                droppedFrames = PlaybackTelemetry.Metric.of(Math.max(0, analytics.droppedFrames()),
+                        PlaybackAutoContext.ValueSource.PLAYER_CALLBACK, PlaybackAutoContext.Confidence.HIGH);
+            }
+            try {
+                long value = player.getCurrentLiveOffset();
+                if (player.isCurrentMediaItemLive() && value >= 0 && value != C.TIME_UNSET) {
+                    liveLag = PlaybackTelemetry.Metric.of(value, PlaybackAutoContext.ValueSource.PLAYER_CALLBACK,
+                            PlaybackAutoContext.Confidence.HIGH);
+                }
+            } catch (Throwable ignored) {
+            }
+        } else if (engine != null) {
+            try {
+                PlayerEngine.RuntimeMetrics metrics = engine.getRuntimeMetrics();
+                if (metrics.bandwidthBitsPerSecond() != null) bandwidth = PlaybackTelemetry.Metric.of(
+                        metrics.bandwidthBitsPerSecond(), PlaybackAutoContext.ValueSource.NATIVE_RUNTIME,
+                        PlaybackAutoContext.Confidence.MEDIUM);
+                if (metrics.mediaBitrateBitsPerSecond() != null) mediaBitrate = PlaybackTelemetry.Metric.of(
+                        metrics.mediaBitrateBitsPerSecond(), PlaybackAutoContext.ValueSource.NATIVE_RUNTIME,
+                        PlaybackAutoContext.Confidence.MEDIUM);
+                if (metrics.renderedFrameRate() != null) renderedFrameRate = PlaybackTelemetry.Metric.of(
+                        metrics.renderedFrameRate(), PlaybackAutoContext.ValueSource.NATIVE_RUNTIME,
+                        PlaybackAutoContext.Confidence.MEDIUM);
+                if (metrics.droppedFrames() != null) droppedFrames = PlaybackTelemetry.Metric.of(
+                        metrics.droppedFrames(), PlaybackAutoContext.ValueSource.NATIVE_RUNTIME,
+                        PlaybackAutoContext.Confidence.HIGH);
+            } catch (Throwable error) {
+                PlaybackTrace.log("playback-telemetry", playbackTrace.current(),
+                        "native metrics unavailable type=%s action=keep-unknown", error.getClass().getSimpleName());
+            }
+        }
+        long firstFrameMs = playbackTrace.stageElapsedMs(PlaybackTrace.Stage.FIRST_FRAME);
+        PlaybackTelemetry.Metric<Long> firstFrame = firstFrameMs < 0 ? PlaybackTelemetry.Metric.unknown()
+                : PlaybackTelemetry.Metric.of(firstFrameMs, PlaybackAutoContext.ValueSource.PLAYER_CALLBACK,
+                PlaybackAutoContext.Confidence.HIGH);
+        return new PlaybackTelemetry.RuntimeObservation(
+                phase,
+                loading,
+                position,
+                duration,
+                buffered,
+                bandwidth,
+                mediaBitrate,
+                renderedFrameRate,
+                droppedFrames,
+                PlaybackTelemetry.Metric.of(playbackBufferingTracker.getRebufferCount(),
+                        PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH),
+                PlaybackTelemetry.Metric.of(playbackBufferingTracker.getRebufferTotalMs(now),
+                        PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH),
+                firstFrame,
+                liveLag);
+    }
+
+    private PlaybackAutoContext.PlaybackPhase playbackPhaseSnapshot() {
+        if (player == null) return PlaybackAutoContext.PlaybackPhase.IDLE;
+        return switch (player.getPlaybackState()) {
+            case Player.STATE_BUFFERING -> PlaybackAutoContext.PlaybackPhase.BUFFERING;
+            case Player.STATE_READY -> PlaybackAutoContext.PlaybackPhase.READY;
+            case Player.STATE_ENDED -> PlaybackAutoContext.PlaybackPhase.ENDED;
+            case Player.STATE_IDLE -> spec == null ? PlaybackAutoContext.PlaybackPhase.IDLE : PlaybackAutoContext.PlaybackPhase.PREPARING;
+            default -> PlaybackAutoContext.PlaybackPhase.UNKNOWN;
+        };
+    }
+
+    private static PlaybackAutoContext.Confidence telemetryConfidence(String value) {
+        if (value == null) return PlaybackAutoContext.Confidence.UNKNOWN;
+        return switch (value) {
+            case "high" -> PlaybackAutoContext.Confidence.HIGH;
+            case "medium" -> PlaybackAutoContext.Confidence.MEDIUM;
+            case "low" -> PlaybackAutoContext.Confidence.LOW;
+            default -> PlaybackAutoContext.Confidence.UNKNOWN;
+        };
     }
 
     private void clearPlaybackAutoContext() {
@@ -2433,7 +2684,7 @@ public class PlayerManager implements ParseCallback {
     }
 
     private void recordBufferingState(int state) {
-        if (player == null || (playerType != PlayerSetting.EXO && playerType != PlayerSetting.MPV)) return;
+        if (player == null) return;
         boolean startupComplete = playbackTrace.hasStage(PlaybackTrace.Stage.FIRST_FRAME) || playbackTrace.hasStage(PlaybackTrace.Stage.AUDIO_PLAYABLE);
         PlaybackBufferingTracker.Event event = playbackBufferingTracker.update(
                 state == Player.STATE_BUFFERING,
@@ -2542,6 +2793,7 @@ public class PlayerManager implements ParseCallback {
                 App.removeCallbacks(networkProtectionRunnable);
                 networkProtectionReason = "buffering-hold";
             }
+            publishPlaybackTelemetry();
         }
 
         @Override
@@ -2567,6 +2819,9 @@ public class PlayerManager implements ParseCallback {
                 resetNetworkProtectionSession(state == Player.STATE_ENDED ? "ended" : "inactive");
             }
             recordBufferingState(state);
+            publishPlaybackTelemetry();
+            if (state == Player.STATE_ENDED) App.removeCallbacks(playbackTelemetryRunnable);
+            else schedulePlaybackTelemetry();
         }
 
         @Override
@@ -2579,6 +2834,7 @@ public class PlayerManager implements ParseCallback {
         public void onVideoSizeChanged(@NonNull VideoSize size) {
             videoSize = size;
             publishPlaybackAutoContext(true);
+            publishPlaybackTelemetry();
             applyLutForCurrentItem();
             scheduleMpvAutoOutputEvaluation();
         }
@@ -2594,6 +2850,7 @@ public class PlayerManager implements ParseCallback {
                 initTrack = true;
             }
             markStartupCompletion(player != null && player.getPlaybackState() == Player.STATE_READY, tracks);
+            publishPlaybackTelemetry();
             applyLutForCurrentItem();
             scheduleMpvAutoOutputEvaluation();
         }
@@ -2602,6 +2859,7 @@ public class PlayerManager implements ParseCallback {
         public void onRenderedFirstFrame() {
             playbackTrace.mark(PlaybackTrace.Stage.FIRST_FRAME, "source=media3 player=" + playerType);
             publishPlaybackAutoContext(true);
+            publishPlaybackTelemetry();
         }
 
         @Override
@@ -2613,6 +2871,7 @@ public class PlayerManager implements ParseCallback {
         public void onPlayerError(@NonNull PlaybackException e) {
             App.removeCallbacks(runnable);
             App.removeCallbacks(networkProtectionRunnable);
+            publishPlaybackTelemetry(PlaybackAutoContext.PlaybackPhase.ERROR);
             if (retryMpvSurfaceDirectFailure(e)) return;
             PlaybackErrorClassifier.Failure failure = PlaybackErrorClassifier.classify(e, getEffectivePlaybackRoute());
             PlayerEngine.ErrorAction action = engine.handleError(e);

@@ -240,6 +240,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     private int lastFrameRateStrategy = -1;
     private long cachedDecoderDroppedFrames;
     private long cachedOutputDroppedFrames;
+    private boolean observedDroppedFrames;
     private long cachedMistimedFrames;
     private long cachedDelayedFrames;
     private boolean cachedDisplaySyncActive;
@@ -549,6 +550,15 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
 
     public PlayerCacheState getCacheState() {
         if (initialized && mediaItem != null) refreshCacheState();
+        return buildCacheState();
+    }
+
+    /** Observer-only cache snapshot for periodic telemetry; never queries native properties. */
+    public PlayerCacheState getCachedCacheState() {
+        return buildCacheState();
+    }
+
+    private PlayerCacheState buildCacheState() {
         return new PlayerCacheState(
                 true,
                 config.cache(),
@@ -620,6 +630,23 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     public long getDroppedFrames() {
         refreshRuntimeDiagnostics(MpvDiagnosticsPolicy.Request.PANEL);
         return Math.max(0, cachedDecoderDroppedFrames) + Math.max(0, cachedOutputDroppedFrames);
+    }
+
+    public boolean hasObservedDroppedFrames() {
+        return observedDroppedFrames;
+    }
+
+    public long getObservedDroppedFrames() {
+        return Math.max(0, cachedDecoderDroppedFrames) + Math.max(0, cachedOutputDroppedFrames);
+    }
+
+    public float getObservedContentFrameRate() {
+        return cachedContentFrameRate > 0 && Float.isFinite(cachedContentFrameRate) ? cachedContentFrameRate : 0f;
+    }
+
+    public float getObservedDisplayFrameRate() {
+        double value = cachedEstimatedDisplayFps > 0 ? cachedEstimatedDisplayFps : cachedDisplayFps;
+        return value > 0 && Double.isFinite(value) && value <= Float.MAX_VALUE ? (float) value : 0f;
     }
 
     @Override
@@ -1009,8 +1036,14 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
             case "avsync" -> cachedAvSyncSeconds = doubleValue(value, cachedAvSyncSeconds);
             case "display-fps" -> cachedDisplayFps = doubleValue(value, cachedDisplayFps);
             case "estimated-display-fps" -> cachedEstimatedDisplayFps = doubleValue(value, cachedEstimatedDisplayFps);
-            case "decoder-frame-drop-count" -> cachedDecoderDroppedFrames = Math.max(0, longValue(value, cachedDecoderDroppedFrames));
-            case "frame-drop-count" -> cachedOutputDroppedFrames = Math.max(0, longValue(value, cachedOutputDroppedFrames));
+            case "decoder-frame-drop-count" -> {
+                observedDroppedFrames = value instanceof Number;
+                cachedDecoderDroppedFrames = Math.max(0, longValue(value, cachedDecoderDroppedFrames));
+            }
+            case "frame-drop-count" -> {
+                observedDroppedFrames = value instanceof Number;
+                cachedOutputDroppedFrames = Math.max(0, longValue(value, cachedOutputDroppedFrames));
+            }
             case "mistimed-frame-count" -> cachedMistimedFrames = Math.max(0, longValue(value, cachedMistimedFrames));
             case "vo-delayed-frame-count" -> cachedDelayedFrames = Math.max(0, longValue(value, cachedDelayedFrames));
             case "display-sync-active" -> cachedDisplaySyncActive = Boolean.TRUE.equals(value);
@@ -2885,6 +2918,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         cachedContentFrameRate = 0;
         cachedDecoderDroppedFrames = 0;
         cachedOutputDroppedFrames = 0;
+        observedDroppedFrames = false;
         cachedMistimedFrames = 0;
         cachedDelayedFrames = 0;
         cachedDisplaySyncActive = false;

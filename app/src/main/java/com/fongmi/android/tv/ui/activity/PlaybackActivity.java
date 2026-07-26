@@ -29,6 +29,7 @@ import androidx.media3.ui.PlayerView;
 import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.bean.Result;
 import com.fongmi.android.tv.player.PlaybackAutoContext;
+import com.fongmi.android.tv.player.PlaybackTelemetry;
 import com.fongmi.android.tv.player.PlayerManager;
 import com.fongmi.android.tv.player.engine.PlaySpec;
 import com.fongmi.android.tv.player.exo.ExoOutputModeManager;
@@ -610,6 +611,46 @@ public abstract class PlaybackActivity extends BaseActivity implements MediaCont
         player().publishPlaybackDisplayFacts(
                 toDisplayMode(result.currentMode()),
                 toDisplayMode(result.requestedMode()));
+        ExoOutputModePolicy.Decision decision = result.decision();
+        boolean hasTarget = decision != null && decision.mode() != null;
+        PlaybackTelemetry.DecisionOutcome outcome = result.applied()
+                ? PlaybackTelemetry.DecisionOutcome.REQUESTED
+                : !hasTarget ? PlaybackTelemetry.DecisionOutcome.SUPPRESSED
+                : decision.changeRequired() ? PlaybackTelemetry.DecisionOutcome.SELECTED
+                : PlaybackTelemetry.DecisionOutcome.HELD;
+        player().publishPlaybackDecision(new PlaybackTelemetry.DecisionEvent(
+                PlaybackTelemetry.DecisionDomain.DISPLAY_MODE,
+                outcome,
+                displayModeLabel(result.currentMode()),
+                displayModeLabel(result.requestedMode()),
+                result.applied() ? "window-requested" : displayModeLabel(result.currentMode()),
+                result.reason(),
+                result.applied() ? "none" : result.reason(),
+                java.util.List.of(
+                        displayModeInput("current_mode_id", result.currentMode() == null ? null : result.currentMode().id(), PlaybackAutoContext.ValueSource.SYSTEM_API),
+                        displayModeInput("current_width", result.currentMode() == null ? null : result.currentMode().width(), PlaybackAutoContext.ValueSource.SYSTEM_API),
+                        displayModeInput("current_height", result.currentMode() == null ? null : result.currentMode().height(), PlaybackAutoContext.ValueSource.SYSTEM_API),
+                        displayModeInput("current_refresh_millihz", result.currentMode() == null ? null : result.currentMode().refreshRateMilliHz(), PlaybackAutoContext.ValueSource.SYSTEM_API),
+                        displayModeInput("target_mode_id", result.requestedMode() == null ? null : result.requestedMode().id(), PlaybackAutoContext.ValueSource.PLAYER_MANAGER),
+                        displayModeInput("target_width", result.requestedMode() == null ? null : result.requestedMode().width(), PlaybackAutoContext.ValueSource.PLAYER_MANAGER),
+                        displayModeInput("target_height", result.requestedMode() == null ? null : result.requestedMode().height(), PlaybackAutoContext.ValueSource.PLAYER_MANAGER),
+                        displayModeInput("target_refresh_millihz", result.requestedMode() == null ? null : result.requestedMode().refreshRateMilliHz(), PlaybackAutoContext.ValueSource.PLAYER_MANAGER),
+                        PlaybackTelemetry.DecisionInput.bool("change_required", decision != null && decision.changeRequired(),
+                                PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH),
+                        PlaybackTelemetry.DecisionInput.bool("window_request", result.applied(),
+                                PlaybackAutoContext.ValueSource.SYSTEM_API, PlaybackAutoContext.Confidence.HIGH))));
+    }
+
+    private static PlaybackTelemetry.DecisionInput displayModeInput(
+            String name, Integer value, PlaybackAutoContext.ValueSource source) {
+        return value == null
+                ? PlaybackTelemetry.DecisionInput.unknown(name)
+                : PlaybackTelemetry.DecisionInput.number(name, value,
+                source, PlaybackAutoContext.Confidence.HIGH);
+    }
+
+    private static String displayModeLabel(ExoOutputModePolicy.Mode mode) {
+        return mode == null ? "unknown" : "mode-" + mode.id();
     }
 
     private void publishRenderTarget(View surface) {

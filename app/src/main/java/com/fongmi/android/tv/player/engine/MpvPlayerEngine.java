@@ -221,6 +221,23 @@ public class MpvPlayerEngine implements PlayerEngine {
     }
 
     @Override
+    public RuntimeMetrics getRuntimeMetrics() {
+        PlayerCacheState cache = player.getCachedCacheState();
+        long inputBytesPerSecond = cache.rawInputBytesPerSecond();
+        long bandwidth = inputBytesPerSecond > Long.MAX_VALUE / 8L
+                ? Long.MAX_VALUE : inputBytesPerSecond * 8L;
+        Format video = TrackUtil.explicitlySelectedFormat(getCurrentTracks(), C.TRACK_TYPE_VIDEO);
+        Format audio = TrackUtil.explicitlySelectedFormat(getCurrentTracks(), C.TRACK_TYPE_AUDIO);
+        long mediaBitrate = safeAdd(formatBitrate(video), formatBitrate(audio));
+        float frameRate = player.getObservedDisplayFrameRate();
+        return new RuntimeMetrics(
+                bandwidth > 0 ? bandwidth : null,
+                mediaBitrate > 0 ? mediaBitrate : null,
+                frameRate > 0 ? frameRate : null,
+                player.hasObservedDroppedFrames() ? player.getObservedDroppedFrames() : null);
+    }
+
+    @Override
     public boolean supportsNativeLut() {
         return !surfaceDirect;
     }
@@ -513,5 +530,18 @@ public class MpvPlayerEngine implements PlayerEngine {
 
     private int getDemuxerReadAheadSeconds() {
         return Math.min(60, Math.max(15, PlayerSetting.getBuffer(PlayerSetting.MPV) * 3));
+    }
+
+    private static long formatBitrate(Format format) {
+        if (format == null) return 0;
+        if (format.averageBitrate > 0) return format.averageBitrate;
+        if (format.peakBitrate > 0) return format.peakBitrate;
+        return Math.max(0, format.bitrate);
+    }
+
+    private static long safeAdd(long first, long second) {
+        if (first <= 0) return Math.max(0, second);
+        if (second <= 0) return first;
+        return first > Long.MAX_VALUE - second ? Long.MAX_VALUE : first + second;
     }
 }

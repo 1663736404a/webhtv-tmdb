@@ -163,6 +163,19 @@ public class IjkPlayerEngine implements PlayerEngine {
     }
 
     @Override
+    public RuntimeMetrics getRuntimeMetrics() {
+        long tcpBytesPerSecond = player.getTcpSpeedSnapshot();
+        long bandwidth = tcpBytesPerSecond > Long.MAX_VALUE / 8L
+                ? Long.MAX_VALUE : tcpBytesPerSecond * 8L;
+        long bitrate = player.getBitrateSnapshot();
+        return new RuntimeMetrics(
+                bandwidth > 0 ? bandwidth : null,
+                bitrate > 0 ? bitrate : null,
+                null,
+                null);
+    }
+
+    @Override
     public String getPlaybackTraceId() {
         return spec == null ? PlaybackTrace.NONE : spec.getPlaybackTraceId();
     }

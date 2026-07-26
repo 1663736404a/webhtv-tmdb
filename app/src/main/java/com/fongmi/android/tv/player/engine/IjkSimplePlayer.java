@@ -189,6 +189,24 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         }
     }
 
+    long getTcpSpeedSnapshot() {
+        try {
+            return Math.max(0, ijk.getTcpSpeed());
+        } catch (Throwable error) {
+            if (SpiderDebug.isEnabled()) SpiderDebug.log("ijk", "tcp speed fact unavailable type=%s", error.getClass().getSimpleName());
+            return 0;
+        }
+    }
+
+    long getBitrateSnapshot() {
+        try {
+            return Math.max(0, ijk.getBitRate());
+        } catch (Throwable error) {
+            if (SpiderDebug.isEnabled()) SpiderDebug.log("ijk", "bitrate fact unavailable type=%s", error.getClass().getSimpleName());
+            return 0;
+        }
+    }
+
     void setDecode(int decode) {
         this.decode = decode;
     }
