@@ -11,12 +11,26 @@ final class ExoPlaybackDiagnostics {
     private ExoPlaybackDiagnostics() {
     }
 
-    static void logLoadControl(int profile, ExoLoadControlPolicy.BufferDurations durations, ExoBufferBudget.Budget budget, int startBufferMs, int rebufferMs, int backBufferMs, boolean prioritizeTime) {
+    static void logLoadControl(int profile, ExoLoadControlPolicy.BufferDurations durations, ExoBufferBudget.Budget budget, int startBufferMs, int rebufferMs, int backBufferMs, boolean prioritizeTime, boolean dynamicTarget) {
         if (!SpiderDebug.isEnabled()) return;
-        SpiderDebug.log("exo-buffer", "loadControl profile=%s min=%d max=%d start=%d rebuffer=%d back=%d requestedBytes=%d heapBudgetBytes=%d effectiveBytes=%d heapLimitBytes=%d reserveBytes=%d availableAfterReserveBytes=%d memoryClassMb=%d largeMemoryClassMb=%d largeHeap=%s lowRam=%s prioritizeTime=%s",
+        SpiderDebug.log("exo-buffer", "loadControl profile=%s min=%d max=%d start=%d rebuffer=%d back=%d targetMode=%s requestedBytes=%d heapBudgetBytes=%d fallbackEffectiveBytes=%d heapLimitBytes=%d reserveBytes=%d availableAfterReserveBytes=%d memoryClassMb=%d largeMemoryClassMb=%d largeHeap=%s lowRam=%s prioritizeTime=%s",
                 profileName(profile), durations.minBufferMs(), durations.maxBufferMs(), startBufferMs, rebufferMs, backBufferMs,
+                dynamicTarget ? "dynamic" : "fixed",
                 budget.requestedTargetBytes(), budget.heapBudgetBytes(), budget.effectiveTargetBytes(), budget.heapLimitBytes(), budget.reservedHeadroomBytes(), budget.availableAfterReserveBytes(),
                 budget.memoryClassMb(), budget.largeMemoryClassMb(), budget.largeHeap(), budget.lowRamDevice(), prioritizeTime);
+    }
+
+    static void logTargetDecision(ExoTargetBufferPolicy.Decision decision) {
+        if (!SpiderDebug.isEnabled() || decision == null) return;
+        ExoTargetBufferPolicy.MediaDemand media = decision.mediaDemand();
+        SpiderDebug.log("exo-buffer", "target selectedBytes=%d mediaTierBytes=%d safeTierBytes=%d factor=%s averageBps=%d averageSource=%s averageConfidence=%s burstBps=%d burstSource=%s burstConfidence=%s averageNeedBytes=%d burstNeedBytes=%d payloadNeedBytes=%d deviceBudgetBytes=%d heapBudgetBytes=%d javaHeadroomBudgetBytes=%d systemBudgetBytes=%d configuredCapBytes=%d guardBytes=%d reserveBytes=%d lowRam=%s snapshotUsable=%s pressureUsable=%s pressure=%s",
+                decision.targetBytes(), decision.mediaTierBytes(), decision.safeTierBytes(), decision.limitingFactor().label(),
+                media.averageBitsPerSecond(), media.averageSource().label(), media.averageConfidence().label(),
+                media.burstBitsPerSecond(), media.burstSource().label(), media.burstConfidence().label(),
+                decision.averageDemandBytes(), decision.burstDemandBytes(), decision.payloadDemandBytes(),
+                decision.deviceBudgetBytes(), decision.heapBudgetBytes(), decision.javaHeadroomBudgetBytes(), decision.systemBudgetBytes(),
+                decision.configuredCapBytes(), ExoTargetBufferPolicy.GUARD_TARGET_BYTES, decision.reserveBytes(), decision.lowRamDevice(),
+                decision.memorySnapshotUsable(), decision.memoryPressureUsable(), decision.memoryPressure().label());
     }
 
     static void logDefaultLoadControl(int profile) {

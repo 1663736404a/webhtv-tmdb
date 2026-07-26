@@ -339,7 +339,7 @@ public class PreCache implements Player.Listener {
         long remainingMs = durationMs > 0 && positionMs >= 0 ? Math.max(0, durationMs - positionMs) : C.TIME_UNSET;
         boolean recovery = bufferGate == BufferGate.RECOVERY;
         long bitrate = getSelectedBitrate();
-        int effectiveCapacityBytes = ExoUtil.getBufferBudget().effectiveTargetBytes();
+        int effectiveCapacityBytes = ExoUtil.getEffectiveTargetBufferBytes();
         long requiredMs = PreCachePolicy.safeBufferTargetMs(recovery, remainingMs, bitrate, effectiveCapacityBytes);
         long bufferedMs = player.getTotalBufferedDuration();
         boolean loading = player.isLoading();
