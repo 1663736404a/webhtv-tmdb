@@ -85,6 +85,40 @@ public final class PlaybackAutoContextStore {
         return update(session, publishedAtElapsedMs, context -> context.withRuntimeFacts(runtime));
     }
 
+    public boolean publishMediaEngineFacts(
+            PlaybackAutoContext.SessionToken session,
+            long trackSequence,
+            PlaybackAutoContext.TrackFacts videoTrack,
+            PlaybackAutoContext.TrackFacts audioTrack,
+            PlaybackAutoContext.DecoderFacts decoder,
+            PlaybackAutoContext.OutputFacts output,
+            long publishedAtElapsedMs) {
+        if (trackSequence < 0 || videoTrack == null && audioTrack == null && decoder == null && output == null) return false;
+        return update(session, publishedAtElapsedMs, context -> {
+            PlaybackAutoContext.MediaFacts media = context.media().withEngineFacts(
+                    trackSequence, videoTrack, audioTrack, decoder, output);
+            return media == null ? null : context.withMediaFacts(media);
+        });
+    }
+
+    public boolean publishRenderTargetFact(
+            PlaybackAutoContext.SessionToken session,
+            PlaybackAutoContext.Fact<PlaybackAutoContext.RenderTarget> renderTarget,
+            long publishedAtElapsedMs) {
+        if (renderTarget == null) return false;
+        return update(session, publishedAtElapsedMs,
+                context -> context.withMediaFacts(context.media().withRenderTarget(renderTarget)));
+    }
+
+    public boolean publishDisplayFacts(
+            PlaybackAutoContext.SessionToken session,
+            PlaybackAutoContext.DisplayFacts display,
+            long publishedAtElapsedMs) {
+        if (display == null) return false;
+        return update(session, publishedAtElapsedMs,
+                context -> context.withMediaFacts(context.media().withDisplayFacts(display)));
+    }
+
     public boolean clear(PlaybackAutoContext.SessionToken session) {
         if (session == null || !session.active()) return false;
         while (true) {

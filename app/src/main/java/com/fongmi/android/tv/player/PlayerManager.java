@@ -117,6 +117,7 @@ public class PlayerManager implements ParseCallback {
     private final PlaybackBufferingTracker playbackBufferingTracker;
     private final PlaybackTrace playbackTrace;
     private final PlaybackAutoContextStore playbackAutoContextStore;
+    private final PlaybackMediaFactsCoordinator playbackMediaFactsCoordinator;
     private final ExoNetworkGuardController networkProtectionController;
     private final ForwardBufferTrend networkProtectionTrend;
     private final LiveDanmakuBatcher liveDanmakuBatcher;
@@ -134,6 +135,7 @@ public class PlayerManager implements ParseCallback {
     private String loadingDanmakuKey;
     private String lastLoggedRouteTraceId = PlaybackTrace.NONE;
     private PlaybackAutoContext.SessionToken playbackAutoSession = PlaybackAutoContext.SessionToken.none();
+    private long playbackTrackSequence;
     private long danmakuLoadStartedAtMs;
     private volatile long liveDanmakuGeneration;
     private volatile boolean liveDanmakuPlaybackActive;
@@ -190,6 +192,7 @@ public class PlayerManager implements ParseCallback {
         this.playbackBufferingTracker = new PlaybackBufferingTracker();
         this.playbackTrace = new PlaybackTrace();
         this.playbackAutoContextStore = PlaybackAutoContextStore.process();
+        this.playbackMediaFactsCoordinator = new PlaybackMediaFactsCoordinator(playbackAutoContextStore);
         this.networkProtectionController = new ExoNetworkGuardController();
         this.networkProtectionTrend = new ForwardBufferTrend();
         this.liveDanmakuBuffer = new LiveDanmakuBuffer();
@@ -295,6 +298,18 @@ public class PlayerManager implements ParseCallback {
 
     public PlaybackAutoContext getPlaybackAutoContext() {
         return playbackAutoContextStore.snapshot();
+    }
+
+    public void publishPlaybackRenderTarget(PlaybackAutoContext.RenderTarget renderTarget) {
+        playbackMediaFactsCoordinator.publishRenderTarget(
+                playbackAutoSession, renderTarget, SystemClock.elapsedRealtime());
+    }
+
+    public void publishPlaybackDisplayFacts(
+            PlaybackAutoContext.DisplayMode currentMode,
+            PlaybackAutoContext.DisplayMode requestedMode) {
+        playbackMediaFactsCoordinator.publishDisplayFacts(
+                playbackAutoSession, currentMode, requestedMode, SystemClock.elapsedRealtime());
     }
 
     public int getPlaybackState() {
@@ -1474,7 +1489,7 @@ public class PlayerManager implements ParseCallback {
         if (spec == null || spec.getUrl() == null || engine == null) return;
         spec.setPlaybackTraceId(playbackTrace.ensure());
         spec.refreshPlaybackRoute();
-        publishPlaybackAutoContext();
+        publishPlaybackAutoContext(false);
         logPlaybackRoute();
         if (SpiderDebug.isEnabled()) SpiderDebug.log("player", "setMediaItem timeout=%d notify=%s spec=%s", timeout, notifyPrepare, debugSpec());
         resetNetworkProtectionSession("new-media");
@@ -2306,6 +2321,8 @@ public class PlayerManager implements ParseCallback {
         playbackBufferingTracker.reset();
         playbackTrace.begin();
         playbackAutoSession = playbackAutoContextStore.beginSession(playbackTrace.current(), SystemClock.elapsedRealtime());
+        playbackTrackSequence = 1;
+        playbackMediaFactsCoordinator.beginSession(playbackAutoSession);
         PlaybackMemoryMonitor.process().beginSession(playbackAutoSession);
         PlaybackSystemConditionMonitor.process().beginSession(playbackAutoSession);
         lastLoggedRouteTraceId = PlaybackTrace.NONE;
@@ -2317,7 +2334,7 @@ public class PlayerManager implements ParseCallback {
         if (spec != null) spec.setPlaybackTraceId(playbackTrace.current());
     }
 
-    private void publishPlaybackAutoContext() {
+    private void publishPlaybackAutoContext(boolean acceptDecoder) {
         if (spec == null || engine == null || !playbackAutoSession.active()) return;
         PlaybackResourceClassifier.Classification requestClassification = PlaybackResourceClassifier.classifyRequest(
                 spec.getUrl(), spec.getFormat(), spec.getFormat());
@@ -2330,10 +2347,21 @@ public class PlayerManager implements ParseCallback {
                 playbackAutoKernel(playerType), PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH, now);
         PlaybackAutoContext.Fact<PlaybackAutoContext.DecodeMode> decode = PlaybackAutoContext.Fact.forSession(
                 engine.isHard() ? PlaybackAutoContext.DecodeMode.HARDWARE : PlaybackAutoContext.DecodeMode.SOFTWARE,
-                PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH, now);
+                PlaybackAutoContext.ValueSource.PLAYBACK_REQUEST, PlaybackAutoContext.Confidence.HIGH, now);
         PlaybackAutoContext.PathFacts path = classification.toPathFacts(observedRoute, now);
         PlaybackAutoContext.ResourceFacts resource = classification.toResourceFacts(now);
         if (!playbackAutoContextStore.publishPlaybackFacts(playbackAutoSession, kernel, decode, resource, path, now)) return;
+        try {
+            playbackMediaFactsCoordinator.publishEngineFacts(
+                    playbackAutoSession,
+                    playbackTrackSequence,
+                    engine.getPlaybackFactsSnapshot(),
+                    acceptDecoder,
+                    now);
+        } catch (Throwable error) {
+            PlaybackTrace.log("playback-auto-context", playbackTrace.current(),
+                    "media facts unavailable type=%s action=keep-partial", error.getClass().getSimpleName());
+        }
         PlaybackAutoContext snapshot = playbackAutoContextStore.snapshot();
         if (playbackAutoSession.equals(snapshot.session())) {
             PlaybackTrace.log("playback-auto-context", playbackTrace.current(), "%s", snapshot.logSummary());
@@ -2344,8 +2372,10 @@ public class PlayerManager implements ParseCallback {
     private void clearPlaybackAutoContext() {
         PlaybackSystemConditionMonitor.process().endSession(playbackAutoSession);
         PlaybackMemoryMonitor.process().endSession(playbackAutoSession);
+        playbackMediaFactsCoordinator.endSession(playbackAutoSession);
         playbackAutoContextStore.clear(playbackAutoSession);
         playbackAutoSession = PlaybackAutoContext.SessionToken.none();
+        playbackTrackSequence = 0;
     }
 
     private static PlaybackAutoContext.Kernel playbackAutoKernel(int playerType) {
@@ -2518,7 +2548,7 @@ public class PlayerManager implements ParseCallback {
         public void onPlaybackStateChanged(int state) {
             if (state != Player.STATE_IDLE) App.removeCallbacks(runnable);
             if (SpiderDebug.isEnabled()) SpiderDebug.log("player", "state=%s spec=%s", stateName(state), debugSpec());
-            publishPlaybackAutoContext();
+            publishPlaybackAutoContext(state != Player.STATE_IDLE);
             if (state == Player.STATE_READY) {
                 playbackTrace.mark(PlaybackTrace.Stage.READY, "player=" + playerType);
                 markStartupCompletion(true, getCurrentTracks());
@@ -2548,13 +2578,15 @@ public class PlayerManager implements ParseCallback {
         @Override
         public void onVideoSizeChanged(@NonNull VideoSize size) {
             videoSize = size;
+            publishPlaybackAutoContext(true);
             applyLutForCurrentItem();
             scheduleMpvAutoOutputEvaluation();
         }
 
         @Override
         public void onTracksChanged(@NonNull Tracks tracks) {
-            publishPlaybackAutoContext();
+            if (playbackTrackSequence < Long.MAX_VALUE) playbackTrackSequence++;
+            publishPlaybackAutoContext(false);
             if (!tracks.isEmpty() && !initTrack) {
                 playbackTrace.mark(PlaybackTrace.Stage.TRACKS, trackSummary(tracks));
                 restoreTrackSelection(Track.find(getKey()));
@@ -2569,7 +2601,7 @@ public class PlayerManager implements ParseCallback {
         @Override
         public void onRenderedFirstFrame() {
             playbackTrace.mark(PlaybackTrace.Stage.FIRST_FRAME, "source=media3 player=" + playerType);
-            publishPlaybackAutoContext();
+            publishPlaybackAutoContext(true);
         }
 
         @Override

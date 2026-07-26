@@ -86,6 +86,8 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
     private PlaybackParameters playbackParameters;
     private PlaybackException playerError;
     private Tracks currentTracks;
+    private Format selectedVideoFormat;
+    private Format selectedAudioFormat;
     private VideoSize videoSize;
     private int playbackState;
     private int bufferingPercent;
@@ -160,6 +162,33 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         return currentTracks;
     }
 
+    @Nullable
+    Format getSelectedVideoFormatSnapshot() {
+        return selectedVideoFormat;
+    }
+
+    @Nullable
+    Format getSelectedAudioFormatSnapshot() {
+        return selectedAudioFormat;
+    }
+
+    String getVideoCodecInfoSnapshot() {
+        return ijk.getVideoCodecInfo();
+    }
+
+    String getAudioCodecInfoSnapshot() {
+        return ijk.getAudioCodecInfo();
+    }
+
+    int getVideoDecoderSnapshot() {
+        try {
+            return ijk.getVideoDecoder();
+        } catch (Throwable error) {
+            if (SpiderDebug.isEnabled()) SpiderDebug.log("ijk", "decoder fact unavailable type=%s", error.getClass().getSimpleName());
+            return IjkMediaPlayer.FFP_PROPV_DECODER_UNKNOWN;
+        }
+    }
+
     void setDecode(int decode) {
         this.decode = decode;
     }
@@ -171,6 +200,8 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         playbackState = mediaItem == null ? Player.STATE_IDLE : Player.STATE_IDLE;
         loading = false;
         currentTracks = Tracks.EMPTY;
+        selectedVideoFormat = null;
+        selectedAudioFormat = null;
         playerError = null;
         return Futures.immediateVoidFuture();
     }
@@ -234,6 +265,8 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         loading = false;
         playWhenReady = false;
         currentTracks = Tracks.EMPTY;
+        selectedVideoFormat = null;
+        selectedAudioFormat = null;
         videoSize = VideoSize.UNKNOWN;
         try {
             ijk.resetListeners();
@@ -434,6 +467,8 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         loading = false;
         bufferingPercent = 0;
         currentTracks = Tracks.EMPTY;
+        selectedVideoFormat = null;
+        selectedAudioFormat = null;
         videoSize = VideoSize.UNKNOWN;
         if (resetState) playbackState = Player.STATE_IDLE;
         stopStateRefresh();
@@ -712,9 +747,15 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
             List<ITrackInfo> infos = ijk.getTrackInfo();
             if (infos == null || infos.isEmpty()) {
                 currentTracks = Tracks.EMPTY;
+                selectedVideoFormat = null;
+                selectedAudioFormat = null;
                 return;
             }
             List<Tracks.Group> groups = new java.util.ArrayList<>();
+            int selectedVideoStream = selectedStream(ITrackInfo.MEDIA_TRACK_TYPE_VIDEO);
+            int selectedAudioStream = selectedStream(ITrackInfo.MEDIA_TRACK_TYPE_AUDIO);
+            Format actualVideo = null;
+            Format actualAudio = null;
             boolean selectedVideo = false;
             boolean selectedAudio = false;
             boolean selectedText = false;
@@ -734,14 +775,29 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
                     else if (type == C.TRACK_TYPE_TEXT) selectedText = true;
                 }
                 Format format = buildFormat(info, type, ++index);
+                if (type == C.TRACK_TYPE_VIDEO && info.getStreamIndex() == selectedVideoStream) actualVideo = format;
+                if (type == C.TRACK_TYPE_AUDIO && info.getStreamIndex() == selectedAudioStream) actualAudio = format;
                 TrackGroup group = new TrackGroup("ijk:" + type + ":" + index, format);
                 groups.add(new Tracks.Group(group, false, new int[]{C.FORMAT_HANDLED}, new boolean[]{selected}));
             }
             currentTracks = groups.isEmpty() ? Tracks.EMPTY : new Tracks(groups);
+            selectedVideoFormat = actualVideo;
+            selectedAudioFormat = actualAudio;
             if (SpiderDebug.isEnabled()) SpiderDebug.log("ijk", "tracks refreshed count=%d groups=%d", infos.size(), groups.size());
         } catch (Throwable e) {
             currentTracks = Tracks.EMPTY;
-            SpiderDebug.log("ijk", "tracks refresh failed error=%s", e.getMessage());
+            selectedVideoFormat = null;
+            selectedAudioFormat = null;
+            SpiderDebug.log("ijk", "tracks refresh failed type=%s", e.getClass().getSimpleName());
+        }
+    }
+
+    private int selectedStream(int type) {
+        try {
+            return ijk.getSelectedTrack(type);
+        } catch (Throwable error) {
+            if (SpiderDebug.isEnabled()) SpiderDebug.log("ijk", "selected track fact unavailable type=%s", error.getClass().getSimpleName());
+            return -1;
         }
     }
 

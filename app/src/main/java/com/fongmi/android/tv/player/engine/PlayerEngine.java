@@ -93,6 +93,11 @@ public interface PlayerEngine {
         return null;
     }
 
+    /** Returns only runtime-observed playback facts; requested decode/output values must not be substituted. */
+    default PlaybackFactsSnapshot getPlaybackFactsSnapshot() {
+        return PlaybackFactsSnapshot.empty();
+    }
+
     default PlayerCacheState getCacheState() {
         return PlayerCacheState.empty();
     }
@@ -176,5 +181,38 @@ public interface PlayerEngine {
         RELOAD,
         DECODE,
         FATAL
+    }
+
+    enum DecoderKind {
+        HARDWARE,
+        SOFTWARE,
+        UNKNOWN
+    }
+
+    record PlaybackFactsSnapshot(
+            Format selectedVideoFormat,
+            Format selectedAudioFormat,
+            Format videoDecoderFormat,
+            Format audioDecoderFormat,
+            String videoDecoderName,
+            String audioDecoderName,
+            DecoderKind videoDecoderKind,
+            Boolean secureVideoDecoder,
+            String hwdecCurrent,
+            String currentVideoOutput,
+            Boolean tunneling) {
+
+        public PlaybackFactsSnapshot {
+            videoDecoderName = videoDecoderName == null ? "" : videoDecoderName;
+            audioDecoderName = audioDecoderName == null ? "" : audioDecoderName;
+            videoDecoderKind = videoDecoderKind == null ? DecoderKind.UNKNOWN : videoDecoderKind;
+            hwdecCurrent = hwdecCurrent == null ? "" : hwdecCurrent;
+            currentVideoOutput = currentVideoOutput == null ? "" : currentVideoOutput;
+        }
+
+        public static PlaybackFactsSnapshot empty() {
+            return new PlaybackFactsSnapshot(null, null, null, null, "", "",
+                    DecoderKind.UNKNOWN, null, "", "", null);
+        }
     }
 }

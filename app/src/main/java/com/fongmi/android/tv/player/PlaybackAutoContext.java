@@ -13,7 +13,23 @@ public record PlaybackAutoContext(
         DeviceFacts device,
         ResourceFacts resource,
         PathFacts path,
-        RuntimeFacts runtime) {
+        RuntimeFacts runtime,
+        MediaFacts media) {
+
+    public PlaybackAutoContext(
+            SessionToken session,
+            long startedAtElapsedMs,
+            long revision,
+            long publishedAtElapsedMs,
+            Fact<Kernel> kernel,
+            Fact<DecodeMode> decodeMode,
+            DeviceFacts device,
+            ResourceFacts resource,
+            PathFacts path,
+            RuntimeFacts runtime) {
+        this(session, startedAtElapsedMs, revision, publishedAtElapsedMs, kernel, decodeMode,
+                device, resource, path, runtime, MediaFacts.unknown());
+    }
 
     public PlaybackAutoContext {
         session = session == null ? SessionToken.none() : session;
@@ -23,6 +39,7 @@ public record PlaybackAutoContext(
         resource = resource == null ? ResourceFacts.unknown() : resource;
         path = path == null ? PathFacts.unknown() : path;
         runtime = runtime == null ? RuntimeFacts.unknown() : runtime;
+        media = media == null ? MediaFacts.unknown() : media;
     }
 
     public static PlaybackAutoContext empty() {
@@ -32,7 +49,8 @@ public record PlaybackAutoContext(
                 DeviceFacts.unknown(),
                 ResourceFacts.unknown(),
                 PathFacts.unknown(),
-                RuntimeFacts.unknown());
+                RuntimeFacts.unknown(),
+                MediaFacts.unknown());
     }
 
     static PlaybackAutoContext begin(SessionToken session, long startedAtElapsedMs) {
@@ -43,7 +61,8 @@ public record PlaybackAutoContext(
                 DeviceFacts.unknown(),
                 ResourceFacts.unknown(),
                 PathFacts.unknown(),
-                RuntimeFacts.unknown());
+                RuntimeFacts.unknown(),
+                MediaFacts.unknown());
     }
 
     public boolean active() {
@@ -52,23 +71,23 @@ public record PlaybackAutoContext(
 
     PlaybackAutoContext withPlaybackFacts(Fact<Kernel> kernel, Fact<DecodeMode> decodeMode, PathFacts path) {
         return new PlaybackAutoContext(session, startedAtElapsedMs, revision, publishedAtElapsedMs,
-                kernel, decodeMode, device, resource, path, runtime);
+                kernel, decodeMode, device, resource, path, runtime, media);
     }
 
     PlaybackAutoContext withPlaybackFacts(Fact<Kernel> kernel, Fact<DecodeMode> decodeMode, ResourceFacts resource, PathFacts path) {
         return new PlaybackAutoContext(session, startedAtElapsedMs, revision, publishedAtElapsedMs,
-                kernel, decodeMode, device, resource, path, runtime);
+                kernel, decodeMode, device, resource, path, runtime, media);
     }
 
     PlaybackAutoContext withDeviceFacts(DeviceFacts device) {
         return new PlaybackAutoContext(session, startedAtElapsedMs, revision, publishedAtElapsedMs,
-                kernel, decodeMode, device, resource, path, runtime);
+                kernel, decodeMode, device, resource, path, runtime, media);
     }
 
     PlaybackAutoContext withMemoryFacts(Fact<MemoryPressure> pressure, Fact<MemorySnapshot> snapshot,
                                         Fact<Long> diagnosticPssBytes) {
         return new PlaybackAutoContext(session, startedAtElapsedMs, revision, publishedAtElapsedMs,
-                kernel, decodeMode, device.withMemoryFacts(pressure, snapshot, diagnosticPssBytes), resource, path, runtime);
+                kernel, decodeMode, device.withMemoryFacts(pressure, snapshot, diagnosticPssBytes), resource, path, runtime, media);
     }
 
     PlaybackAutoContext withSystemConditionFacts(
@@ -79,27 +98,32 @@ public record PlaybackAutoContext(
         return new PlaybackAutoContext(session, startedAtElapsedMs, revision, publishedAtElapsedMs,
                 kernel, decodeMode,
                 device.withSystemConditionFacts(thermal, power, networkCost, networkSnapshot),
-                resource, path, runtime);
+                resource, path, runtime, media);
     }
 
     PlaybackAutoContext withResourceFacts(ResourceFacts resource) {
         return new PlaybackAutoContext(session, startedAtElapsedMs, revision, publishedAtElapsedMs,
-                kernel, decodeMode, device, resource, path, runtime);
+                kernel, decodeMode, device, resource, path, runtime, media);
     }
 
     PlaybackAutoContext withPathFacts(PathFacts path) {
         return new PlaybackAutoContext(session, startedAtElapsedMs, revision, publishedAtElapsedMs,
-                kernel, decodeMode, device, resource, path, runtime);
+                kernel, decodeMode, device, resource, path, runtime, media);
     }
 
     PlaybackAutoContext withRuntimeFacts(RuntimeFacts runtime) {
         return new PlaybackAutoContext(session, startedAtElapsedMs, revision, publishedAtElapsedMs,
-                kernel, decodeMode, device, resource, path, runtime);
+                kernel, decodeMode, device, resource, path, runtime, media);
+    }
+
+    PlaybackAutoContext withMediaFacts(MediaFacts media) {
+        return new PlaybackAutoContext(session, startedAtElapsedMs, revision, publishedAtElapsedMs,
+                kernel, decodeMode, device, resource, path, runtime, media);
     }
 
     PlaybackAutoContext withPublication(long revision, long publishedAtElapsedMs) {
         return new PlaybackAutoContext(session, startedAtElapsedMs, Math.max(0, revision),
-                Math.max(startedAtElapsedMs, publishedAtElapsedMs), kernel, decodeMode, device, resource, path, runtime);
+                Math.max(startedAtElapsedMs, publishedAtElapsedMs), kernel, decodeMode, device, resource, path, runtime, media);
     }
 
     public String logSummary() {
@@ -115,12 +139,29 @@ public record PlaybackAutoContext(
                 " runtime=" + factLabel(runtime.phase(), runtime.phase().value().label()) +
                 " memory=" + factLabel(device.memoryPressure(), device.memoryPressure().value().label()) +
                 " " + device.memoryLogSummary() +
-                " " + device.systemConditionLogSummary();
+                " " + device.systemConditionLogSummary() +
+                " " + media.logSummary();
     }
 
     private static String factLabel(Fact<?> fact, String value) {
         String safeValue = fact.hasValue() ? value : "unknown";
         return safeValue + "/" + fact.source().label() + "/" + fact.confidence().label() + "/" + fact.expiryRule().label();
+    }
+
+    private static String safeRuntimeLabel(String value) {
+        if (value == null) return "unknown";
+        String normalized = value.trim();
+        if (normalized.isEmpty() || normalized.length() > 128) return "unknown";
+        boolean mimeLike = normalized.matches("[A-Za-z0-9.+_-]+/[A-Za-z0-9.+_-]+");
+        if (normalized.contains("://") || (!mimeLike && normalized.indexOf('/') >= 0) || normalized.indexOf('\\') >= 0
+                || normalized.indexOf('?') >= 0 || normalized.indexOf('@') >= 0) return "unknown";
+        for (int i = 0; i < normalized.length(); i++) {
+            char c = normalized.charAt(i);
+            if (Character.isLetterOrDigit(c) || c == '.' || c == '_' || c == '-' || c == '+' || (mimeLike && c == '/')
+                    || c == ':' || c == ',' || c == ' ' || c == '(' || c == ')') continue;
+            return "unknown";
+        }
+        return normalized;
     }
 
     public record SessionToken(String traceId, long generation) {
@@ -631,6 +672,257 @@ public record PlaybackAutoContext(
         }
     }
 
+    public record MediaFacts(
+            long trackSequence,
+            TrackFacts videoTrack,
+            TrackFacts audioTrack,
+            DecoderFacts decoder,
+            OutputFacts output,
+            DisplayFacts display) {
+
+        public MediaFacts {
+            trackSequence = Math.max(0, trackSequence);
+            videoTrack = videoTrack == null ? TrackFacts.unknown() : videoTrack;
+            audioTrack = audioTrack == null ? TrackFacts.unknown() : audioTrack;
+            decoder = decoder == null ? DecoderFacts.unknown(trackSequence) : decoder;
+            output = output == null ? OutputFacts.unknown() : output;
+            display = display == null ? DisplayFacts.unknown() : display;
+        }
+
+        public static MediaFacts unknown() {
+            return new MediaFacts(0, TrackFacts.unknown(), TrackFacts.unknown(),
+                    DecoderFacts.unknown(0), OutputFacts.unknown(), DisplayFacts.unknown());
+        }
+
+        MediaFacts withEngineFacts(
+                long observedTrackSequence,
+                TrackFacts observedVideoTrack,
+                TrackFacts observedAudioTrack,
+                DecoderFacts observedDecoder,
+                OutputFacts observedOutput) {
+            if (observedTrackSequence < trackSequence) return null;
+            boolean sequenceAdvanced = observedTrackSequence > trackSequence;
+            TrackFacts nextVideo = observedVideoTrack != null
+                    ? observedVideoTrack : sequenceAdvanced ? TrackFacts.unknown() : videoTrack;
+            TrackFacts nextAudio = observedAudioTrack != null
+                    ? observedAudioTrack : sequenceAdvanced ? TrackFacts.unknown() : audioTrack;
+            DecoderFacts nextDecoder = observedDecoder != null
+                    ? observedDecoder : sequenceAdvanced ? DecoderFacts.unknown(observedTrackSequence) : decoder;
+            if (nextDecoder.trackSequence() != observedTrackSequence) {
+                nextDecoder = DecoderFacts.unknown(observedTrackSequence);
+            }
+            OutputFacts nextOutput = observedOutput == null ? output : output.withEngineFacts(observedOutput);
+            return new MediaFacts(observedTrackSequence, nextVideo, nextAudio, nextDecoder, nextOutput, display);
+        }
+
+        MediaFacts withRenderTarget(Fact<RenderTarget> renderTarget) {
+            if (renderTarget == null) return this;
+            return new MediaFacts(trackSequence, videoTrack, audioTrack, decoder,
+                    output.withRenderTarget(renderTarget), display);
+        }
+
+        MediaFacts withDisplayFacts(DisplayFacts display) {
+            if (display == null) return this;
+            return new MediaFacts(trackSequence, videoTrack, audioTrack, decoder, output, display);
+        }
+
+        private String logSummary() {
+            String videoMime = videoTrack.mimeType().hasValue()
+                    ? safeRuntimeLabel(videoTrack.mimeType().value()) : "unknown";
+            String videoCodec = videoTrack.codecs().hasValue()
+                    ? safeRuntimeLabel(videoTrack.codecs().value()) : "unknown";
+            String decoderName = decoder.videoDecoderName().hasValue()
+                    ? safeRuntimeLabel(decoder.videoDecoderName().value()) : "unknown";
+            String hwdec = output.hwdecCurrent().hasValue()
+                    ? safeRuntimeLabel(output.hwdecCurrent().value()) : "unknown";
+            String vo = output.currentVideoOutput().hasValue()
+                    ? safeRuntimeLabel(output.currentVideoOutput().value()) : "unknown";
+            DisplayMode currentMode = display.currentMode().hasValue()
+                    ? display.currentMode().value() : DisplayMode.unknown();
+            DisplayMode requestedMode = display.requestedMode().hasValue()
+                    ? display.requestedMode().value() : DisplayMode.unknown();
+            return "trackSeq=" + trackSequence
+                    + " videoMime=" + videoMime
+                    + " videoCodec=" + videoCodec
+                    + " videoSize=" + safeInt(videoTrack.width()) + "x" + safeInt(videoTrack.height())
+                    + " videoFps=" + safeFloat(videoTrack.frameRate())
+                    + " hdr=" + (videoTrack.hdrType().hasValue() ? videoTrack.hdrType().value().label() : "unknown")
+                    + " avgBitrate=" + safeLong(videoTrack.averageBitrateBitsPerSecond())
+                    + " peakBitrate=" + safeLong(videoTrack.peakBitrateBitsPerSecond())
+                    + " decoderSeq=" + decoder.trackSequence()
+                    + " decoder=" + decoderName
+                    + " actualDecode=" + (decoder.videoDecodeMode().hasValue() ? decoder.videoDecodeMode().value().label() : "unknown")
+                    + " secure=" + safeBoolean(decoder.secureVideoDecoder())
+                    + " renderPath=" + (output.renderPath().hasValue() ? output.renderPath().value().label() : "unknown")
+                    + " renderTarget=" + (output.renderTarget().hasValue() ? output.renderTarget().value().label() : "unknown")
+                    + " tunneling=" + safeBoolean(output.tunneling())
+                    + " hwdec=" + hwdec
+                    + " vo=" + vo
+                    + " display=" + currentMode.logSummary()
+                    + " requestedDisplay=" + requestedMode.logSummary();
+        }
+
+        private static int safeInt(Fact<Integer> fact) {
+            return fact.hasValue() ? fact.value() : -1;
+        }
+
+        private static long safeLong(Fact<Long> fact) {
+            return fact.hasValue() ? fact.value() : -1;
+        }
+
+        private static float safeFloat(Fact<Float> fact) {
+            return fact.hasValue() ? fact.value() : -1f;
+        }
+
+        private static String safeBoolean(Fact<Boolean> fact) {
+            return fact.hasValue() ? fact.value().toString() : "unknown";
+        }
+    }
+
+    public record TrackFacts(
+            Fact<String> mimeType,
+            Fact<String> codecs,
+            Fact<Integer> profile,
+            Fact<Integer> level,
+            Fact<Integer> width,
+            Fact<Integer> height,
+            Fact<Float> frameRate,
+            Fact<HdrType> hdrType,
+            Fact<ColorSnapshot> color,
+            Fact<Long> averageBitrateBitsPerSecond,
+            Fact<Long> peakBitrateBitsPerSecond) {
+
+        public TrackFacts {
+            mimeType = mimeType == null ? Fact.unknown("") : mimeType;
+            codecs = codecs == null ? Fact.unknown("") : codecs;
+            profile = profile == null ? Fact.unknown(-1) : profile;
+            level = level == null ? Fact.unknown(-1) : level;
+            width = width == null ? Fact.unknown(-1) : width;
+            height = height == null ? Fact.unknown(-1) : height;
+            frameRate = frameRate == null ? Fact.unknown(-1f) : frameRate;
+            hdrType = hdrType == null ? Fact.unknown(HdrType.UNKNOWN) : hdrType;
+            color = color == null ? Fact.unknown(ColorSnapshot.unknown()) : color;
+            averageBitrateBitsPerSecond = averageBitrateBitsPerSecond == null ? Fact.unknown(-1L) : averageBitrateBitsPerSecond;
+            peakBitrateBitsPerSecond = peakBitrateBitsPerSecond == null ? Fact.unknown(-1L) : peakBitrateBitsPerSecond;
+        }
+
+        public static TrackFacts unknown() {
+            return new TrackFacts(
+                    Fact.unknown(""), Fact.unknown(""), Fact.unknown(-1), Fact.unknown(-1),
+                    Fact.unknown(-1), Fact.unknown(-1), Fact.unknown(-1f),
+                    Fact.unknown(HdrType.UNKNOWN), Fact.unknown(ColorSnapshot.unknown()),
+                    Fact.unknown(-1L), Fact.unknown(-1L));
+        }
+
+        public boolean hasEvidence() {
+            return mimeType.hasValue() || codecs.hasValue() || width.hasValue() || height.hasValue()
+                    || frameRate.hasValue() || hdrType.hasValue() || color.hasValue()
+                    || averageBitrateBitsPerSecond.hasValue() || peakBitrateBitsPerSecond.hasValue();
+        }
+    }
+
+    public record DecoderFacts(
+            long trackSequence,
+            Fact<String> videoDecoderName,
+            Fact<String> audioDecoderName,
+            Fact<DecodeMode> videoDecodeMode,
+            Fact<Boolean> secureVideoDecoder) {
+
+        public DecoderFacts {
+            trackSequence = Math.max(0, trackSequence);
+            videoDecoderName = videoDecoderName == null ? Fact.unknown("") : videoDecoderName;
+            audioDecoderName = audioDecoderName == null ? Fact.unknown("") : audioDecoderName;
+            videoDecodeMode = videoDecodeMode == null ? Fact.unknown(DecodeMode.UNKNOWN) : videoDecodeMode;
+            secureVideoDecoder = secureVideoDecoder == null ? Fact.unknown(false) : secureVideoDecoder;
+        }
+
+        public static DecoderFacts unknown(long trackSequence) {
+            return new DecoderFacts(trackSequence, Fact.unknown(""), Fact.unknown(""),
+                    Fact.unknown(DecodeMode.UNKNOWN), Fact.unknown(false));
+        }
+
+        public boolean hasEvidence() {
+            return videoDecoderName.hasValue() || audioDecoderName.hasValue()
+                    || videoDecodeMode.hasValue() || secureVideoDecoder.hasValue();
+        }
+    }
+
+    public record OutputFacts(
+            Fact<RenderPath> renderPath,
+            Fact<RenderTarget> renderTarget,
+            Fact<Boolean> tunneling,
+            Fact<String> hwdecCurrent,
+            Fact<String> currentVideoOutput) {
+
+        public OutputFacts {
+            renderPath = renderPath == null ? Fact.unknown(RenderPath.UNKNOWN) : renderPath;
+            renderTarget = renderTarget == null ? Fact.unknown(RenderTarget.UNKNOWN) : renderTarget;
+            tunneling = tunneling == null ? Fact.unknown(false) : tunneling;
+            hwdecCurrent = hwdecCurrent == null ? Fact.unknown("") : hwdecCurrent;
+            currentVideoOutput = currentVideoOutput == null ? Fact.unknown("") : currentVideoOutput;
+        }
+
+        public static OutputFacts unknown() {
+            return new OutputFacts(Fact.unknown(RenderPath.UNKNOWN), Fact.unknown(RenderTarget.UNKNOWN),
+                    Fact.unknown(false), Fact.unknown(""), Fact.unknown(""));
+        }
+
+        OutputFacts withEngineFacts(OutputFacts observed) {
+            if (observed == null) return this;
+            return new OutputFacts(observed.renderPath, renderTarget, observed.tunneling,
+                    observed.hwdecCurrent, observed.currentVideoOutput);
+        }
+
+        OutputFacts withRenderTarget(Fact<RenderTarget> observedRenderTarget) {
+            return new OutputFacts(renderPath, observedRenderTarget, tunneling, hwdecCurrent, currentVideoOutput);
+        }
+    }
+
+    public record DisplayFacts(Fact<DisplayMode> currentMode, Fact<DisplayMode> requestedMode) {
+
+        public DisplayFacts {
+            currentMode = currentMode == null ? Fact.unknown(DisplayMode.unknown()) : currentMode;
+            requestedMode = requestedMode == null ? Fact.unknown(DisplayMode.unknown()) : requestedMode;
+        }
+
+        public static DisplayFacts unknown() {
+            return new DisplayFacts(Fact.unknown(DisplayMode.unknown()), Fact.unknown(DisplayMode.unknown()));
+        }
+    }
+
+    public record ColorSnapshot(int colorSpace, int colorRange, int colorTransfer, boolean hdrStaticMetadata) {
+
+        public static ColorSnapshot unknown() {
+            return new ColorSnapshot(-1, -1, -1, false);
+        }
+
+        public boolean hasEvidence() {
+            return colorSpace >= 0 || colorRange >= 0 || colorTransfer >= 0 || hdrStaticMetadata;
+        }
+    }
+
+    public record DisplayMode(int modeId, int width, int height, int refreshRateMilliHz) {
+
+        public DisplayMode {
+            modeId = modeId > 0 ? modeId : -1;
+            width = width > 0 ? width : -1;
+            height = height > 0 ? height : -1;
+            refreshRateMilliHz = refreshRateMilliHz > 0 ? refreshRateMilliHz : -1;
+        }
+
+        public static DisplayMode unknown() {
+            return new DisplayMode(-1, -1, -1, -1);
+        }
+
+        public boolean hasEvidence() {
+            return modeId > 0 && width > 0 && height > 0 && refreshRateMilliHz > 0;
+        }
+
+        private String logSummary() {
+            return hasEvidence() ? width + "x" + height + "@" + refreshRateMilliHz + "mHz#" + modeId : "unknown";
+        }
+    }
+
     public enum Kernel {
         EXO("exo"),
         IJK("ijk"),
@@ -664,6 +956,60 @@ public record PlaybackAutoContext(
         }
     }
 
+    public enum HdrType {
+        SDR("sdr"),
+        HDR10("hdr10"),
+        HLG("hlg"),
+        DOLBY_VISION("dolby-vision"),
+        HDR_OTHER("hdr-other"),
+        UNKNOWN("unknown");
+
+        private final String label;
+
+        HdrType(String label) {
+            this.label = label;
+        }
+
+        public String label() {
+            return label;
+        }
+    }
+
+    public enum RenderPath {
+        EXO_TUNNELING("exo-tunneling"),
+        MPV_SURFACE_DIRECT("mpv-surface-direct"),
+        MPV_GPU("mpv-gpu"),
+        IJK_NATIVE("ijk-native"),
+        UNKNOWN("unknown");
+
+        private final String label;
+
+        RenderPath(String label) {
+            this.label = label;
+        }
+
+        public String label() {
+            return label;
+        }
+    }
+
+    public enum RenderTarget {
+        SURFACE_VIEW("surface-view"),
+        TEXTURE_VIEW("texture-view"),
+        DETACHED("detached"),
+        UNKNOWN("unknown");
+
+        private final String label;
+
+        RenderTarget(String label) {
+            this.label = label;
+        }
+
+        public String label() {
+            return label;
+        }
+    }
+
     public enum ValueSource {
         PLAYER_MANAGER("player-manager"),
         PLAYBACK_REQUEST("playback-request"),
@@ -674,6 +1020,8 @@ public record PlaybackAutoContext(
         PLAYER_CALLBACK("player-callback"),
         SYSTEM_CALLBACK("system-callback"),
         SYSTEM_API("system-api"),
+        CODEC_STRING("codec-string"),
+        NATIVE_RUNTIME("native-runtime"),
         ESTIMATOR("estimator"),
         UNKNOWN("unknown");
 

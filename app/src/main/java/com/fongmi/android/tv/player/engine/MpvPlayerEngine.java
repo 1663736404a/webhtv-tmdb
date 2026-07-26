@@ -201,6 +201,26 @@ public class MpvPlayerEngine implements PlayerEngine {
     }
 
     @Override
+    public PlaybackFactsSnapshot getPlaybackFactsSnapshot() {
+        Format video = TrackUtil.explicitlySelectedFormat(getCurrentTracks(), C.TRACK_TYPE_VIDEO);
+        Format audio = TrackUtil.explicitlySelectedFormat(getCurrentTracks(), C.TRACK_TYPE_AUDIO);
+        String hwdec = player.getObservedHwdecCurrent();
+        String currentVo = player.getObservedCurrentVideoOutput();
+        return new PlaybackFactsSnapshot(
+                video,
+                audio,
+                video,
+                audio,
+                "",
+                "",
+                decoderKind(hwdec, player.hasObservedHwdecCurrent()),
+                null,
+                hwdec,
+                currentVo,
+                null);
+    }
+
+    @Override
     public boolean supportsNativeLut() {
         return !surfaceDirect;
     }
@@ -399,6 +419,14 @@ public class MpvPlayerEngine implements PlayerEngine {
 
     private boolean startsWith(String message, String prefix) {
         return message != null && message.startsWith(prefix);
+    }
+
+    private DecoderKind decoderKind(String hwdec, boolean observed) {
+        if (!observed) return DecoderKind.UNKNOWN;
+        if (hwdec == null || hwdec.isBlank()) return DecoderKind.SOFTWARE;
+        String value = hwdec.trim().toLowerCase(java.util.Locale.US);
+        return value.equals("no") || value.equals("none") || value.equals("software")
+                ? DecoderKind.SOFTWARE : DecoderKind.HARDWARE;
     }
 
     private MpvPlayer buildPlayer(Player.Listener listener) {

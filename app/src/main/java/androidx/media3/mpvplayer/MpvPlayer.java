@@ -208,6 +208,8 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     private boolean cachedCacheUnderrun;
     private boolean cachedCacheBof;
     private boolean cachedCacheEof;
+    private boolean observedCurrentVo;
+    private boolean observedHwdecCurrent;
     private boolean preferAacApplied;
     private boolean audioTrackManuallySelected;
     private BiConsumer<Integer, Integer> videoSizeProbeListener;
@@ -597,6 +599,24 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
                 formatShader());
     }
 
+    /** Cached values from mpv runtime property observers; never falls back to requested config. */
+    public String getObservedHwdecCurrent() {
+        return !observedHwdecCurrent || cachedHwdecCurrent == null ? "" : cachedHwdecCurrent;
+    }
+
+    public boolean hasObservedHwdecCurrent() {
+        return observedHwdecCurrent;
+    }
+
+    /** Cached values from mpv runtime property observers; never falls back to requested config. */
+    public String getObservedCurrentVideoOutput() {
+        return !observedCurrentVo || cachedCurrentVo == null ? "" : cachedCurrentVo;
+    }
+
+    public boolean hasObservedCurrentVideoOutput() {
+        return observedCurrentVo;
+    }
+
     public long getDroppedFrames() {
         refreshRuntimeDiagnostics(MpvDiagnosticsPolicy.Request.PANEL);
         return Math.max(0, cachedDecoderDroppedFrames) + Math.max(0, cachedOutputDroppedFrames);
@@ -974,12 +994,18 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
                 scheduleTrackRefresh();
             }
             case "video-params/primaries", "video-params/gamma", "video-params/colorlevels", "video-params/colormatrix" -> scheduleTrackRefresh();
-            case "current-vo" -> cachedCurrentVo = stringValue(value, cachedCurrentVo);
+            case "current-vo" -> {
+                observedCurrentVo = value instanceof String;
+                cachedCurrentVo = value instanceof String text ? text : cachedCurrentVo;
+            }
             case "current-gpu-context" -> cachedCurrentGpuContext = stringValue(value, cachedCurrentGpuContext);
             case "gpu-api" -> cachedGpuApi = stringValue(value, cachedGpuApi);
             case "current-ao" -> cachedCurrentAo = stringValue(value, cachedCurrentAo);
             case "audio-device" -> cachedAudioDevice = stringValue(value, cachedAudioDevice);
-            case "hwdec-current" -> cachedHwdecCurrent = stringValue(value, cachedHwdecCurrent);
+            case "hwdec-current" -> {
+                observedHwdecCurrent = value instanceof String;
+                cachedHwdecCurrent = value instanceof String text ? text : cachedHwdecCurrent;
+            }
             case "avsync" -> cachedAvSyncSeconds = doubleValue(value, cachedAvSyncSeconds);
             case "display-fps" -> cachedDisplayFps = doubleValue(value, cachedDisplayFps);
             case "estimated-display-fps" -> cachedEstimatedDisplayFps = doubleValue(value, cachedEstimatedDisplayFps);
@@ -2845,6 +2871,8 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     }
 
     private void resetRuntimeDiagnostics() {
+        observedCurrentVo = false;
+        observedHwdecCurrent = false;
         cachedCurrentVo = null;
         cachedCurrentGpuContext = null;
         cachedGpuApi = null;

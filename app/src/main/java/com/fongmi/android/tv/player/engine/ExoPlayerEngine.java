@@ -364,6 +364,31 @@ public class ExoPlayerEngine implements PlayerEngine {
     }
 
     @Override
+    public PlaybackFactsSnapshot getPlaybackFactsSnapshot() {
+        PlaybackAnalyticsListener.Snapshot analytics = PlaybackAnalyticsListener.getSnapshot();
+        boolean currentAnalyticsSession = !PlaybackTrace.NONE.equals(getPlaybackTraceId())
+                && getPlaybackTraceId().equals(PlaybackAnalyticsListener.getPlaybackTraceId());
+        Format analyticsVideo = currentAnalyticsSession ? analytics.videoFormat() : null;
+        Format analyticsAudio = currentAnalyticsSession ? analytics.audioFormat() : null;
+        Format selectedVideo = analyticsVideo != null
+                ? analyticsVideo : TrackUtil.explicitlySelectedFormat(getCurrentTracks(), C.TRACK_TYPE_VIDEO);
+        Format selectedAudio = analyticsAudio != null
+                ? analyticsAudio : TrackUtil.explicitlySelectedFormat(getCurrentTracks(), C.TRACK_TYPE_AUDIO);
+        return new PlaybackFactsSnapshot(
+                selectedVideo,
+                selectedAudio,
+                analyticsVideo,
+                analyticsAudio,
+                currentAnalyticsSession ? analytics.videoDecoderName() : "",
+                currentAnalyticsSession ? analytics.audioDecoderName() : "",
+                DecoderKind.UNKNOWN,
+                null,
+                "",
+                "",
+                currentAnalyticsSession ? tunnelingEnabledForSession : null);
+    }
+
+    @Override
     public long getDroppedFrames() {
         return PlaybackAnalyticsListener.getSnapshot().droppedFrames();
     }

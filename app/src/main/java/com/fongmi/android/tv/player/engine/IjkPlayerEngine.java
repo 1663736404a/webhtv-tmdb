@@ -21,6 +21,8 @@ import com.fongmi.android.tv.utils.ResUtil;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
+import tv.danmaku.ijk.media.player.IjkMediaPlayer;
+
 @UnstableApi
 public class IjkPlayerEngine implements PlayerEngine {
 
@@ -143,6 +145,24 @@ public class IjkPlayerEngine implements PlayerEngine {
     }
 
     @Override
+    public PlaybackFactsSnapshot getPlaybackFactsSnapshot() {
+        Format video = player.getSelectedVideoFormatSnapshot();
+        Format audio = player.getSelectedAudioFormatSnapshot();
+        return new PlaybackFactsSnapshot(
+                video,
+                audio,
+                video,
+                audio,
+                player.getVideoCodecInfoSnapshot(),
+                player.getAudioCodecInfoSnapshot(),
+                decoderKind(player.getVideoDecoderSnapshot()),
+                null,
+                "",
+                "",
+                null);
+    }
+
+    @Override
     public String getPlaybackTraceId() {
         return spec == null ? PlaybackTrace.NONE : spec.getPlaybackTraceId();
     }
@@ -162,5 +182,13 @@ public class IjkPlayerEngine implements PlayerEngine {
         IjkSimplePlayer player = new IjkSimplePlayer(decode);
         player.addListener(listener);
         return player;
+    }
+
+    private DecoderKind decoderKind(int decoder) {
+        return switch (decoder) {
+            case IjkMediaPlayer.FFP_PROPV_DECODER_MEDIACODEC -> DecoderKind.HARDWARE;
+            case IjkMediaPlayer.FFP_PROPV_DECODER_AVCODEC -> DecoderKind.SOFTWARE;
+            default -> DecoderKind.UNKNOWN;
+        };
     }
 }
