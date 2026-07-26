@@ -124,6 +124,51 @@ public class PlaybackAutoContextStoreTest {
     }
 
     @Test
+    public void selectiveSystemConditionPublicationPreservesMemoryFacts() {
+        PlaybackAutoContextStore store = new PlaybackAutoContextStore();
+        PlaybackAutoContext.SessionToken session = store.beginSession("p-system-selective", 395);
+        PlaybackAutoContext.MemorySnapshot memorySnapshot = new PlaybackAutoContext.MemorySnapshot(
+                PlaybackAutoContext.MemoryTrigger.PERIODIC,
+                50L, 100L, 50L, false, 2_000L, 1_000L, 100L, false, null, 100, 10L);
+        PlaybackAutoContext.Fact<PlaybackAutoContext.MemoryPressure> pressure = PlaybackAutoContext.Fact.withTtl(
+                PlaybackAutoContext.MemoryPressure.NORMAL, PlaybackAutoContext.ValueSource.SYSTEM_API,
+                PlaybackAutoContext.Confidence.HIGH, 396, 60_000);
+        PlaybackAutoContext.Fact<PlaybackAutoContext.MemorySnapshot> memory = PlaybackAutoContext.Fact.withTtl(
+                memorySnapshot, PlaybackAutoContext.ValueSource.SYSTEM_API,
+                PlaybackAutoContext.Confidence.HIGH, 396, 60_000);
+        PlaybackAutoContext.Fact<Long> pss = PlaybackAutoContext.Fact.withTtl(
+                4_096L, PlaybackAutoContext.ValueSource.SYSTEM_API,
+                PlaybackAutoContext.Confidence.LOW, 396, 600_000);
+        assertTrue(store.publishMemoryFacts(session, pressure, memory, pss, 396));
+
+        PlaybackAutoContext.NetworkSnapshot networkSnapshot = new PlaybackAutoContext.NetworkSnapshot(
+                true, true, false, false, PlaybackAutoContext.NetworkTransport.ETHERNET,
+                PlaybackAutoContext.DataSaverState.DISABLED);
+        PlaybackAutoContext.Fact<PlaybackAutoContext.NetworkSnapshot> network = PlaybackAutoContext.Fact.withTtl(
+                networkSnapshot, PlaybackAutoContext.ValueSource.SYSTEM_API,
+                PlaybackAutoContext.Confidence.HIGH, 397, 120_000);
+        PlaybackAutoContext.Fact<PlaybackAutoContext.NetworkCost> cost = PlaybackAutoContext.Fact.withTtl(
+                PlaybackAutoContext.NetworkCost.UNMETERED, PlaybackAutoContext.ValueSource.SYSTEM_API,
+                PlaybackAutoContext.Confidence.HIGH, 397, 120_000);
+        assertTrue(store.publishSystemConditionFacts(session, null, null, cost, network, 397));
+        PlaybackAutoContext.Fact<PlaybackAutoContext.PowerState> power = PlaybackAutoContext.Fact.withTtl(
+                PlaybackAutoContext.PowerState.POWER_SAVE, PlaybackAutoContext.ValueSource.SYSTEM_CALLBACK,
+                PlaybackAutoContext.Confidence.HIGH, 398, 120_000);
+        assertTrue(store.publishSystemConditionFacts(session, null, power, null, null, 398));
+
+        PlaybackAutoContext.DeviceFacts device = store.snapshot().device();
+        assertEquals(pressure, device.memoryPressure());
+        assertEquals(memory, device.memorySnapshot());
+        assertEquals(pss, device.diagnosticPssBytes());
+        assertEquals(cost, device.networkCost());
+        assertEquals(network, device.networkSnapshot());
+        assertEquals(power, device.powerState());
+        assertFalse(device.thermalState().hasValue());
+        assertEquals(3, store.snapshot().revision());
+        assertFalse(store.publishSystemConditionFacts(session, null, null, null, null, 399));
+    }
+
+    @Test
     public void concurrentPublishersKeepAllCategoriesAndUseMonotonicRevisions() throws Exception {
         PlaybackAutoContextStore store = new PlaybackAutoContextStore();
         PlaybackAutoContext.SessionToken session = store.beginSession("p-abc-4", 400);

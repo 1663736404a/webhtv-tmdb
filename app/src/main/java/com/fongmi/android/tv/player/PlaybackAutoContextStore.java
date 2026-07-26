@@ -61,6 +61,18 @@ public final class PlaybackAutoContextStore {
                 context -> context.withMemoryFacts(pressure, snapshot, diagnosticPssBytes));
     }
 
+    public boolean publishSystemConditionFacts(
+            PlaybackAutoContext.SessionToken session,
+            PlaybackAutoContext.Fact<PlaybackAutoContext.ThermalState> thermal,
+            PlaybackAutoContext.Fact<PlaybackAutoContext.PowerState> power,
+            PlaybackAutoContext.Fact<PlaybackAutoContext.NetworkCost> networkCost,
+            PlaybackAutoContext.Fact<PlaybackAutoContext.NetworkSnapshot> networkSnapshot,
+            long publishedAtElapsedMs) {
+        if (thermal == null && power == null && networkCost == null && networkSnapshot == null) return false;
+        return update(session, publishedAtElapsedMs,
+                context -> context.withSystemConditionFacts(thermal, power, networkCost, networkSnapshot));
+    }
+
     public boolean publishResourceFacts(PlaybackAutoContext.SessionToken session, PlaybackAutoContext.ResourceFacts resource, long publishedAtElapsedMs) {
         return update(session, publishedAtElapsedMs, context -> context.withResourceFacts(resource));
     }

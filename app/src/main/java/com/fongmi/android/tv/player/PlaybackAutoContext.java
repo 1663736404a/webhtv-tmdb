@@ -71,6 +71,17 @@ public record PlaybackAutoContext(
                 kernel, decodeMode, device.withMemoryFacts(pressure, snapshot, diagnosticPssBytes), resource, path, runtime);
     }
 
+    PlaybackAutoContext withSystemConditionFacts(
+            Fact<ThermalState> thermal,
+            Fact<PowerState> power,
+            Fact<NetworkCost> networkCost,
+            Fact<NetworkSnapshot> networkSnapshot) {
+        return new PlaybackAutoContext(session, startedAtElapsedMs, revision, publishedAtElapsedMs,
+                kernel, decodeMode,
+                device.withSystemConditionFacts(thermal, power, networkCost, networkSnapshot),
+                resource, path, runtime);
+    }
+
     PlaybackAutoContext withResourceFacts(ResourceFacts resource) {
         return new PlaybackAutoContext(session, startedAtElapsedMs, revision, publishedAtElapsedMs,
                 kernel, decodeMode, device, resource, path, runtime);
@@ -103,7 +114,8 @@ public record PlaybackAutoContext(
                 " manifest=" + factLabel(resource.manifest(), resource.manifest().value().kind().label()) +
                 " runtime=" + factLabel(runtime.phase(), runtime.phase().value().label()) +
                 " memory=" + factLabel(device.memoryPressure(), device.memoryPressure().value().label()) +
-                " " + device.memoryLogSummary();
+                " " + device.memoryLogSummary() +
+                " " + device.systemConditionLogSummary();
     }
 
     private static String factLabel(Fact<?> fact, String value) {
@@ -199,7 +211,8 @@ public record PlaybackAutoContext(
             Fact<Long> diagnosticPssBytes,
             Fact<ThermalState> thermalState,
             Fact<PowerState> powerState,
-            Fact<NetworkCost> networkCost) {
+            Fact<NetworkCost> networkCost,
+            Fact<NetworkSnapshot> networkSnapshot) {
 
         public DeviceFacts(
                 Fact<MemoryPressure> memoryPressure,
@@ -207,7 +220,18 @@ public record PlaybackAutoContext(
                 Fact<PowerState> powerState,
                 Fact<NetworkCost> networkCost) {
             this(memoryPressure, Fact.unknown(MemorySnapshot.unknown()), Fact.unknown(-1L),
-                    thermalState, powerState, networkCost);
+                    thermalState, powerState, networkCost, Fact.unknown(NetworkSnapshot.unknown()));
+        }
+
+        public DeviceFacts(
+                Fact<MemoryPressure> memoryPressure,
+                Fact<MemorySnapshot> memorySnapshot,
+                Fact<Long> diagnosticPssBytes,
+                Fact<ThermalState> thermalState,
+                Fact<PowerState> powerState,
+                Fact<NetworkCost> networkCost) {
+            this(memoryPressure, memorySnapshot, diagnosticPssBytes, thermalState, powerState,
+                    networkCost, Fact.unknown(NetworkSnapshot.unknown()));
         }
 
         public DeviceFacts {
@@ -217,6 +241,7 @@ public record PlaybackAutoContext(
             thermalState = thermalState == null ? Fact.unknown(ThermalState.UNKNOWN) : thermalState;
             powerState = powerState == null ? Fact.unknown(PowerState.UNKNOWN) : powerState;
             networkCost = networkCost == null ? Fact.unknown(NetworkCost.UNKNOWN) : networkCost;
+            networkSnapshot = networkSnapshot == null ? Fact.unknown(NetworkSnapshot.unknown()) : networkSnapshot;
         }
 
         public static DeviceFacts unknown() {
@@ -226,7 +251,8 @@ public record PlaybackAutoContext(
                     Fact.unknown(-1L),
                     Fact.unknown(ThermalState.UNKNOWN),
                     Fact.unknown(PowerState.UNKNOWN),
-                    Fact.unknown(NetworkCost.UNKNOWN));
+                    Fact.unknown(NetworkCost.UNKNOWN),
+                    Fact.unknown(NetworkSnapshot.unknown()));
         }
 
         DeviceFacts withMemoryFacts(Fact<MemoryPressure> pressure, Fact<MemorySnapshot> snapshot,
@@ -237,13 +263,38 @@ public record PlaybackAutoContext(
                     pssBytes == null ? diagnosticPssBytes : pssBytes,
                     thermalState,
                     powerState,
-                    networkCost);
+                    networkCost,
+                    networkSnapshot);
+        }
+
+        DeviceFacts withSystemConditionFacts(
+                Fact<ThermalState> thermal,
+                Fact<PowerState> power,
+                Fact<NetworkCost> cost,
+                Fact<NetworkSnapshot> network) {
+            return new DeviceFacts(
+                    memoryPressure,
+                    memorySnapshot,
+                    diagnosticPssBytes,
+                    thermal == null ? thermalState : thermal,
+                    power == null ? powerState : power,
+                    cost == null ? networkCost : cost,
+                    network == null ? networkSnapshot : network);
         }
 
         private String memoryLogSummary() {
             String snapshot = memorySnapshot.hasValue() ? memorySnapshot.value().logSummary() : MemorySnapshot.unknown().logSummary();
             long pss = diagnosticPssBytes.hasValue() ? diagnosticPssBytes.value() : -1;
             return snapshot + " pssBytes=" + pss;
+        }
+
+        private String systemConditionLogSummary() {
+            NetworkSnapshot snapshot = networkSnapshot.hasValue()
+                    ? networkSnapshot.value() : NetworkSnapshot.unknown();
+            return "thermal=" + factLabel(thermalState, thermalState.value().label())
+                    + " power=" + factLabel(powerState, powerState.value().label())
+                    + " networkCost=" + factLabel(networkCost, networkCost.value().label())
+                    + " " + snapshot.logSummary();
         }
     }
 
@@ -329,6 +380,52 @@ public record PlaybackAutoContext(
 
         private static int safeInt(Integer value) {
             return value == null ? -1 : value;
+        }
+
+        private static String safeBoolean(Boolean value) {
+            return value == null ? "unknown" : value.toString();
+        }
+    }
+
+    public record NetworkSnapshot(
+            Boolean available,
+            Boolean validated,
+            Boolean metered,
+            Boolean roaming,
+            NetworkTransport transport,
+            DataSaverState dataSaverState) {
+
+        public NetworkSnapshot {
+            transport = transport == null ? NetworkTransport.UNKNOWN : transport;
+            dataSaverState = dataSaverState == null ? DataSaverState.UNKNOWN : dataSaverState;
+        }
+
+        public static NetworkSnapshot unknown() {
+            return new NetworkSnapshot(null, null, null, null,
+                    NetworkTransport.UNKNOWN, DataSaverState.UNKNOWN);
+        }
+
+        public boolean hasEvidence() {
+            return available != null
+                    || validated != null
+                    || metered != null
+                    || roaming != null
+                    || transport != NetworkTransport.UNKNOWN
+                    || dataSaverState != DataSaverState.UNKNOWN;
+        }
+
+        public boolean hasCoreEvidence() {
+            if (available == null || validated == null || dataSaverState == DataSaverState.UNKNOWN) return false;
+            return !available || metered != null;
+        }
+
+        private String logSummary() {
+            return "networkAvailable=" + safeBoolean(available)
+                    + " validated=" + safeBoolean(validated)
+                    + " metered=" + safeBoolean(metered)
+                    + " roaming=" + safeBoolean(roaming)
+                    + " transport=" + transport.label()
+                    + " dataSaver=" + dataSaverState.label();
         }
 
         private static String safeBoolean(Boolean value) {
@@ -695,6 +792,62 @@ public record PlaybackAutoContext(
         private final String label;
 
         PowerState(String label) {
+            this.label = label;
+        }
+
+        public String label() {
+            return label;
+        }
+    }
+
+    public enum SystemConditionTrigger {
+        SESSION_START("session-start"),
+        PERIODIC("periodic"),
+        NETWORK_CALLBACK("network-callback"),
+        DATA_SAVER_CALLBACK("data-saver-callback"),
+        POWER_CALLBACK("power-callback"),
+        THERMAL_CALLBACK("thermal-callback"),
+        UNKNOWN("unknown");
+
+        private final String label;
+
+        SystemConditionTrigger(String label) {
+            this.label = label;
+        }
+
+        public String label() {
+            return label;
+        }
+    }
+
+    public enum DataSaverState {
+        DISABLED("disabled"),
+        ENABLED("enabled"),
+        WHITELISTED("whitelisted"),
+        UNKNOWN("unknown");
+
+        private final String label;
+
+        DataSaverState(String label) {
+            this.label = label;
+        }
+
+        public String label() {
+            return label;
+        }
+    }
+
+    public enum NetworkTransport {
+        WIFI("wifi"),
+        ETHERNET("ethernet"),
+        CELLULAR("cellular"),
+        VPN("vpn"),
+        OTHER("other"),
+        UNKNOWN("unknown");
+
+        private final String label;
+
+        NetworkTransport(String label) {
             this.label = label;
         }
 
