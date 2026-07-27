@@ -266,6 +266,19 @@ public final class MpvPerformanceSetting {
         applyRebufferPreset(PlaybackPerformanceSetting.PROFILE_RECOMMENDED);
     }
 
+    public static void applyAuto() {
+        Prefers.put(KEY_OUTPUT_MODE, OUTPUT_AUTO);
+        Prefers.put(KEY_HWDEC, HWDEC_AUTO);
+        Prefers.put(KEY_SYNC, SYNC_AUDIO);
+        Prefers.put(KEY_FRAME_DROP, FRAME_DROP_OUTPUT);
+        Prefers.put(KEY_INTERPOLATION, false);
+        Prefers.put(KEY_SOFT_TUNE, SOFT_TUNE_MILD);
+        Prefers.put(KEY_VERBOSE_LOG, false);
+        Prefers.put(KEY_FRAME_RATE, FRAME_RATE_SEAMLESS);
+        Prefers.put(KEY_HLS_BITRATE, HLS_HIGHEST);
+        applyRebufferPreset(PlaybackPerformanceSetting.PROFILE_AUTO);
+    }
+
     public static void applyCompatible() {
         Prefers.put(KEY_OUTPUT_MODE, OUTPUT_GPU);
         Prefers.put(KEY_HWDEC, HWDEC_COPY);

@@ -141,6 +141,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     private final Runnable trackRefreshRunnable;
     private final Runnable isoTrackMetadataReadyListener;
     private final MpvHlsProxy hlsProxy;
+    private final MpvAutoCacheBaselineState autoCacheBaselineState;
     private final MpvCacheObserverState cacheObserverState;
     private final MpvMediaReplacementCoordinator mediaReplacementCoordinator;
     private final List<String> recentLogs;
@@ -260,6 +261,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         trackRefreshRunnable = this::runScheduledTrackRefresh;
         isoTrackMetadataReadyListener = this::onIsoTrackMetadataReady;
         hlsProxy = new MpvHlsProxy();
+        autoCacheBaselineState = new MpvAutoCacheBaselineState();
         recentLogs = new ArrayList<>();
         contentFds = new ArrayList<>();
         File externalFiles = this.context.getExternalFilesDir(null);
@@ -546,6 +548,57 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     public void setLutShader(@Nullable MpvLutShader shader) {
         lutShader = shader;
         applyShaderPipeline(false);
+    }
+
+    public AutoCacheBaselineResult applyAutoCacheBaseline(long forwardBytes, long backBytes) {
+        if (!autoCacheBaselineState.stage(
+                config.performanceOptionsPriority(), forwardBytes, backBytes)) {
+            return AutoCacheBaselineResult.REJECTED;
+        }
+        if (!initialized) {
+            PlaybackTrace.log("mpv-auto", playbackTraceId,
+                    "action=initial-cache result=staged forwardBytes=%d backBytes=%d",
+                    forwardBytes, backBytes);
+            return AutoCacheBaselineResult.STAGED;
+        }
+        boolean applied = applyAutoCacheBaselineToNative();
+        PlaybackTrace.log("mpv-auto", playbackTraceId,
+                "action=initial-cache result=%s forwardBytes=%d backBytes=%d",
+                applied ? "applied" : "failed", forwardBytes, backBytes);
+        return applied ? AutoCacheBaselineResult.APPLIED : AutoCacheBaselineResult.FAILED;
+    }
+
+    public void clearAutoCacheBaseline() {
+        autoCacheBaselineState.clear();
+    }
+
+    public enum AutoCacheBaselineResult {
+        REJECTED("rejected", false, false),
+        STAGED("staged", true, true),
+        APPLIED("applied", true, false),
+        FAILED("failed", false, false);
+
+        private final String label;
+        private final boolean accepted;
+        private final boolean staged;
+
+        AutoCacheBaselineResult(String label, boolean accepted, boolean staged) {
+            this.label = label;
+            this.accepted = accepted;
+            this.staged = staged;
+        }
+
+        public String label() {
+            return label;
+        }
+
+        public boolean accepted() {
+            return accepted;
+        }
+
+        public boolean staged() {
+            return staged;
+        }
     }
 
     public PlayerCacheState getCacheState() {
@@ -892,7 +945,23 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         setRuntimeString("force-window", "no");
         setRuntimeString("idle", "yes");
         int overlayCount = applyPerformanceOptionOverlay();
+        boolean autoCacheApplied = applyAutoCacheBaselineToNative();
+        if (!autoCacheBaselineState.snapshot().isEmpty()) {
+            PlaybackTrace.log("mpv-auto", playbackTraceId,
+                    "action=initial-cache result=%s phase=post-init",
+                    autoCacheApplied ? "applied" : "failed");
+        }
         if (shouldCollectDebugDetails()) PlaybackTrace.log("mpv", playbackTraceId, "option priority=%s overlayCount=%d effective cache maxBytes=%s backBytes=%s cacheSecs=%s readaheadSecs=%s initial=%s rebufferWait=%s", MpvOptionPriorityPolicy.priorityName(config.performanceOptionsPriority()), overlayCount, stringProperty("demuxer-max-bytes", "?"), stringProperty("demuxer-max-back-bytes", "?"), stringProperty("cache-secs", "?"), stringProperty("demuxer-readahead-secs", "?"), stringProperty("cache-pause-initial", "?"), stringProperty("cache-pause-wait", "?"));
+    }
+
+    private boolean applyAutoCacheBaselineToNative() {
+        Map<String, String> options = autoCacheBaselineState.snapshot();
+        if (options.isEmpty() || !initialized) return false;
+        boolean applied = true;
+        for (Map.Entry<String, String> entry : options.entrySet()) {
+            applied &= setRuntimeStringChecked(entry.getKey(), entry.getValue());
+        }
+        return applied;
     }
 
     private int applyPerformanceOptionOverlay() {
@@ -3087,15 +3156,18 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     }
 
     private void setRuntimeString(String name, String value) {
+        setRuntimeStringChecked(name, value);
+    }
+
+    private boolean setRuntimeStringChecked(String name, String value) {
         if (value == null) value = "";
-        if (initialized) {
-            try {
-                MPVLib.setPropertyString(name, value);
-                return;
-            } catch (Throwable ignored) {
-            }
+        if (!initialized) return false;
+        try {
+            MPVLib.setPropertyString(name, value);
+            return true;
+        } catch (Throwable ignored) {
+            return false;
         }
-        setOption(name, value);
     }
 
     private void observe(String property, int format) {

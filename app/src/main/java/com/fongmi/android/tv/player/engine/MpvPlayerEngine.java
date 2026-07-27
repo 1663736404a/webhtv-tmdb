@@ -26,8 +26,10 @@ import com.fongmi.android.tv.player.exo.ExoUtil;
 import com.fongmi.android.tv.player.exo.TrackUtil;
 import com.fongmi.android.tv.player.lut.MpvLutShader;
 import com.fongmi.android.tv.player.mpv.MpvConfigStore;
+import com.fongmi.android.tv.player.mpv.MpvAutoControlPolicy;
 import com.fongmi.android.tv.setting.PlayerSetting;
 import com.fongmi.android.tv.setting.MpvPerformanceSetting;
+import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
 import com.fongmi.android.tv.utils.ResUtil;
 import com.fongmi.android.tv.utils.Util;
 import com.github.catvod.crawler.SpiderDebug;
@@ -248,6 +250,16 @@ public class MpvPlayerEngine implements PlayerEngine {
 
     public void setSurfaceDirectOverride(@Nullable Boolean value) {
         surfaceDirectOverride = value;
+    }
+
+    public MpvPlayer.AutoCacheBaselineResult applyAutoCacheBaseline(
+            String traceId, long forwardBytes, long backBytes) {
+        player.setPlaybackTraceId(traceId);
+        return player.applyAutoCacheBaseline(forwardBytes, backBytes);
+    }
+
+    public void clearAutoCacheBaseline() {
+        player.clearAutoCacheBaseline();
     }
 
     @Override
@@ -513,11 +525,17 @@ public class MpvPlayerEngine implements PlayerEngine {
     }
 
     private long getDemuxerMaxBytes() {
+        if (PlaybackPerformanceSetting.isAuto(PlayerSetting.MPV)) {
+            return MpvAutoControlPolicy.MIN_FORWARD_BYTES;
+        }
         int bytes = PlayerSetting.getBufferBytes(PlayerSetting.MPV);
         return bytes > 0 ? bytes : MpvPlayerConfig.DEFAULT_DEMUXER_BYTES;
     }
 
     private long getDemuxerMaxBackBytes() {
+        if (PlaybackPerformanceSetting.isAuto(PlayerSetting.MPV)) {
+            return MpvAutoControlPolicy.INITIAL_BACK_BYTES;
+        }
         if (PlayerSetting.getBackBufferMs(PlayerSetting.MPV) <= 0) return 0;
         long forward = getDemuxerMaxBytes();
         return switch (PlayerSetting.getBackBufferOption(PlayerSetting.MPV)) {

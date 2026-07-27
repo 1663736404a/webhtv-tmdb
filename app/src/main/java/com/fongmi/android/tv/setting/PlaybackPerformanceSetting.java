@@ -23,6 +23,7 @@ public class PlaybackPerformanceSetting {
     private static final String KEY_EXO_BACK_BUFFER_MIGRATED = "playback_performance_exo_back_buffer_v1";
     private static final String KEY_EXO_REBUFFER_MIGRATED = "playback_performance_exo_rebuffer_v3";
     private static final String KEY_MPV_REBUFFER_MIGRATED = "playback_performance_mpv_rebuffer_v1";
+    private static final String KEY_MPV_AUTO_BASELINE_MIGRATED = "playback_performance_mpv_auto_baseline_v1";
     private static final String KEY_CODEC_ASYNC_QUEUEING = "perf_codec_async_queueing";
     private static final String KEY_DYNAMIC_SCHEDULING = "perf_dynamic_scheduling";
     private static final String KEY_VIDEO_DURATION_PROGRESS = "perf_video_duration_progress";
@@ -49,6 +50,7 @@ public class PlaybackPerformanceSetting {
         migrateExoBackBuffer();
         migrateExoRebuffer();
         migrateMpvRebuffer();
+        migrateMpvAutoBaseline();
     }
 
     public static int getProfile() {
@@ -70,7 +72,7 @@ public class PlaybackPerformanceSetting {
             Prefers.put("tunnel", false);
             Prefers.put("exo_4k_compat", true);
         } else if (kernel == PlayerSetting.MPV) {
-            MpvPerformanceSetting.applyRecommended();
+            MpvPerformanceSetting.applyAuto();
         } else {
             IjkPerformanceSetting.applyRecommended();
         }
@@ -103,7 +105,7 @@ public class PlaybackPerformanceSetting {
         }
         putRecommendedFlags();
         ExoPerformanceSetting.applyAuto();
-        MpvPerformanceSetting.applyRecommended();
+        MpvPerformanceSetting.applyAuto();
         IjkPerformanceSetting.applyRecommended();
         Prefers.put("render", PlayerSetting.RENDER_SURFACE);
         Prefers.put("tunnel", false);
@@ -452,6 +454,19 @@ public class PlaybackPerformanceSetting {
         return clampProfile(profile) != PROFILE_CUSTOM;
     }
 
+    private static void migrateMpvAutoBaseline() {
+        if (Prefers.getBoolean(KEY_MPV_AUTO_BASELINE_MIGRATED)) return;
+        int profile = clampProfile(Prefers.getInt(profileKey(PlayerSetting.MPV), PROFILE_RECOMMENDED));
+        if (shouldMigrateMpvAutoBaseline(profile)) {
+            KernelPerformanceSetting.applyMpvAutoBaselinePreset();
+        }
+        Prefers.put(KEY_MPV_AUTO_BASELINE_MIGRATED, true);
+    }
+
+    static boolean shouldMigrateMpvAutoBaseline(int profile) {
+        return clampProfile(profile) == PROFILE_AUTO;
+    }
+
     private static void applyKernelSpecificPreset(int kernel, int profile) {
         if (kernel == PlayerSetting.EXO) {
             if (profile == PROFILE_COMPATIBLE) ExoPerformanceSetting.applyCompatible();
@@ -461,6 +476,7 @@ public class PlaybackPerformanceSetting {
         } else if (kernel == PlayerSetting.MPV) {
             if (profile == PROFILE_COMPATIBLE) MpvPerformanceSetting.applyCompatible();
             else if (profile == PROFILE_LIGHTWEIGHT) MpvPerformanceSetting.applyLightweight();
+            else if (profile == PROFILE_AUTO) MpvPerformanceSetting.applyAuto();
             else MpvPerformanceSetting.applyRecommended();
         } else {
             if (profile == PROFILE_COMPATIBLE) IjkPerformanceSetting.applyCompatible();

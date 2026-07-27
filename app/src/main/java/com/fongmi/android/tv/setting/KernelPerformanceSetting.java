@@ -133,9 +133,12 @@ public final class KernelPerformanceSetting {
 
     public static void applyPreset(int kernel, int profile) {
         if (profile == PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT) {
-            putBuffer(kernel, kernel == PlayerSetting.EXO ? exoBufferForPreset(profile) : 5);
-            putBufferBytesOption(kernel, kernel == PlayerSetting.EXO ? exoBufferBytesOptionForPreset(profile) : 1);
-            putBackBufferOption(kernel, 0);
+            putBuffer(kernel, kernel == PlayerSetting.EXO ? exoBufferForPreset(profile)
+                    : kernel == PlayerSetting.MPV ? mpvBufferForPreset(profile) : 5);
+            putBufferBytesOption(kernel, kernel == PlayerSetting.EXO ? exoBufferBytesOptionForPreset(profile)
+                    : kernel == PlayerSetting.MPV ? mpvBufferBytesOptionForPreset(profile) : 1);
+            putBackBufferOption(kernel, kernel == PlayerSetting.MPV
+                    ? mpvBackBufferOptionForPreset(profile) : 0);
             putPlayCacheOption(kernel, 0);
             putPreload(kernel, false);
             putPreloadThreads(kernel, preloadThreadsForPreset(profile));
@@ -146,9 +149,12 @@ public final class KernelPerformanceSetting {
             putAudioPrefer(kernel, false);
             putVideoPrefer(kernel, false);
         } else if (profile == PlaybackPerformanceSetting.PROFILE_COMPATIBLE) {
-            putBuffer(kernel, kernel == PlayerSetting.EXO ? exoBufferForPreset(profile) : 5);
-            putBufferBytesOption(kernel, kernel == PlayerSetting.EXO ? exoBufferBytesOptionForPreset(profile) : 1);
-            putBackBufferOption(kernel, 1);
+            putBuffer(kernel, kernel == PlayerSetting.EXO ? exoBufferForPreset(profile)
+                    : kernel == PlayerSetting.MPV ? mpvBufferForPreset(profile) : 5);
+            putBufferBytesOption(kernel, kernel == PlayerSetting.EXO ? exoBufferBytesOptionForPreset(profile)
+                    : kernel == PlayerSetting.MPV ? mpvBufferBytesOptionForPreset(profile) : 1);
+            putBackBufferOption(kernel, kernel == PlayerSetting.MPV
+                    ? mpvBackBufferOptionForPreset(profile) : 1);
             putPlayCacheOption(kernel, 1);
             putPreload(kernel, false);
             putPreloadThreads(kernel, preloadThreadsForPreset(profile));
@@ -159,9 +165,12 @@ public final class KernelPerformanceSetting {
             putAudioPrefer(kernel, false);
             putVideoPrefer(kernel, false);
         } else {
-            putBuffer(kernel, kernel == PlayerSetting.EXO ? exoBufferForPreset(profile) : 10);
-            putBufferBytesOption(kernel, kernel == PlayerSetting.EXO ? exoBufferBytesOptionForPreset(profile) : 3);
-            putBackBufferOption(kernel, kernel == PlayerSetting.EXO ? exoBackBufferOptionForPreset(profile) : 2);
+            putBuffer(kernel, kernel == PlayerSetting.EXO ? exoBufferForPreset(profile)
+                    : kernel == PlayerSetting.MPV ? mpvBufferForPreset(profile) : 10);
+            putBufferBytesOption(kernel, kernel == PlayerSetting.EXO ? exoBufferBytesOptionForPreset(profile)
+                    : kernel == PlayerSetting.MPV ? mpvBufferBytesOptionForPreset(profile) : 3);
+            putBackBufferOption(kernel, kernel == PlayerSetting.EXO ? exoBackBufferOptionForPreset(profile)
+                    : kernel == PlayerSetting.MPV ? mpvBackBufferOptionForPreset(profile) : 2);
             putPlayCacheOption(kernel, 2);
             putPreload(kernel, true);
             putPreloadThreads(kernel, preloadThreadsForPreset(profile));
@@ -203,6 +212,14 @@ public final class KernelPerformanceSetting {
         putBackBufferOption(PlayerSetting.EXO, exoBackBufferOptionForPreset(profile));
     }
 
+    static void applyMpvAutoBaselinePreset() {
+        putBuffer(PlayerSetting.MPV, mpvBufferForPreset(PlaybackPerformanceSetting.PROFILE_AUTO));
+        putBufferBytesOption(PlayerSetting.MPV,
+                mpvBufferBytesOptionForPreset(PlaybackPerformanceSetting.PROFILE_AUTO));
+        putBackBufferOption(PlayerSetting.MPV,
+                mpvBackBufferOptionForPreset(PlaybackPerformanceSetting.PROFILE_AUTO));
+    }
+
     static int exoBufferForPreset(int profile) {
         return switch (profile) {
             case PlaybackPerformanceSetting.PROFILE_COMPATIBLE -> 4;
@@ -221,6 +238,29 @@ public final class KernelPerformanceSetting {
 
     static int exoBackBufferOptionForPreset(int profile) {
         return profile == PlaybackPerformanceSetting.PROFILE_COMPATIBLE ? 1 : 0;
+    }
+
+    static int mpvBufferForPreset(int profile) {
+        return profile == PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT
+                || profile == PlaybackPerformanceSetting.PROFILE_COMPATIBLE ? 5 : 10;
+    }
+
+    static int mpvBufferBytesOptionForPreset(int profile) {
+        return switch (profile) {
+            case PlaybackPerformanceSetting.PROFILE_AUTO -> 0;
+            case PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT,
+                 PlaybackPerformanceSetting.PROFILE_COMPATIBLE -> 1;
+            default -> 3;
+        };
+    }
+
+    static int mpvBackBufferOptionForPreset(int profile) {
+        return switch (profile) {
+            case PlaybackPerformanceSetting.PROFILE_AUTO,
+                 PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT -> 0;
+            case PlaybackPerformanceSetting.PROFILE_COMPATIBLE -> 1;
+            default -> 2;
+        };
     }
 
     private static synchronized void ensureMigrated() {
