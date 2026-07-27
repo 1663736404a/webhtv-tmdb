@@ -20,6 +20,7 @@ import androidx.media3.common.MediaItem;
 import androidx.media3.common.MediaMetadata;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
+import androidx.media3.common.Timeline;
 import androidx.media3.common.Tracks;
 import androidx.media3.common.VideoSize;
 import androidx.media3.effect.ColorLut;
@@ -45,6 +46,8 @@ import com.fongmi.android.tv.player.engine.PlayerEngine;
 import com.fongmi.android.tv.player.exo.ExoNetworkGuardBufferPolicy;
 import com.fongmi.android.tv.player.exo.ExoNetworkGuardController;
 import com.fongmi.android.tv.player.exo.ExoNetworkGuardEligibility;
+import com.fongmi.android.tv.player.exo.ExoRtspLiveLagController;
+import com.fongmi.android.tv.player.exo.ExoRtspLiveLagPolicy;
 import com.fongmi.android.tv.player.exo.ForwardBufferTrend;
 import com.fongmi.android.tv.player.exo.PlaybackAnalyticsListener;
 import com.fongmi.android.tv.player.danmaku.DanmakuUrlPolicy;
@@ -67,6 +70,7 @@ import com.fongmi.android.tv.player.mpv.MpvConfigStore;
 import com.fongmi.android.tv.setting.DanmakuSetting;
 import com.fongmi.android.tv.setting.ExoPerformanceSetting;
 import com.fongmi.android.tv.setting.MpvPerformanceSetting;
+import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
 import com.fongmi.android.tv.setting.PlayerSetting;
 import com.fongmi.android.tv.utils.LocalProxyDebug;
 import com.fongmi.android.tv.utils.Notify;
@@ -123,6 +127,7 @@ public class PlayerManager implements ParseCallback {
     private final PlaybackTelemetryCoordinator playbackTelemetryCoordinator;
     private final PlaybackMediaFactsCoordinator playbackMediaFactsCoordinator;
     private final ExoNetworkGuardController networkProtectionController;
+    private final ExoRtspLiveLagController rtspLiveLagController;
     private final ForwardBufferTrend networkProtectionTrend;
     private final LiveDanmakuBatcher liveDanmakuBatcher;
     private final LiveDanmakuBuffer liveDanmakuBuffer;
@@ -200,6 +205,7 @@ public class PlayerManager implements ParseCallback {
         this.playbackTelemetryCoordinator = PlaybackTelemetryCoordinator.process();
         this.playbackMediaFactsCoordinator = new PlaybackMediaFactsCoordinator(playbackAutoContextStore);
         this.networkProtectionController = new ExoNetworkGuardController();
+        this.rtspLiveLagController = new ExoRtspLiveLagController();
         this.networkProtectionTrend = new ForwardBufferTrend();
         this.liveDanmakuBuffer = new LiveDanmakuBuffer();
         this.liveDanmakuMetrics = new LiveDanmakuMetrics();
@@ -958,6 +964,8 @@ public class PlayerManager implements ParseCallback {
     }
 
     public void seekTo(long time) {
+        rtspLiveLagController.onUserSeek(
+                playbackAutoSession, SystemClock.elapsedRealtime());
         player.seekTo(time);
     }
 
@@ -2403,6 +2411,7 @@ public class PlayerManager implements ParseCallback {
         playbackTrace.begin();
         long now = SystemClock.elapsedRealtime();
         playbackAutoSession = playbackAutoContextStore.beginSession(playbackTrace.current(), now);
+        rtspLiveLagController.beginSession(playbackAutoSession);
         playbackTrackSequence = 1;
         playbackMediaFactsCoordinator.beginSession(playbackAutoSession);
         PlaybackMemoryMonitor.process().beginSession(playbackAutoSession);
@@ -2419,12 +2428,19 @@ public class PlayerManager implements ParseCallback {
         if (spec != null) spec.setPlaybackTraceId(playbackTrace.current());
     }
 
+    private PlaybackResourceClassifier.Classification currentResourceClassification() {
+        PlaybackResourceClassifier.Classification request = PlaybackResourceClassifier.classifyRequest(
+                spec == null ? null : spec.getUrl(),
+                spec == null ? null : spec.getFormat(),
+                spec == null ? null : spec.getFormat());
+        PlaybackResourceClassifier.Classification observed =
+                engine == null ? null : engine.getResourceClassification();
+        return PlaybackResourceClassifier.merge(request, observed);
+    }
+
     private void publishPlaybackAutoContext(boolean acceptDecoder) {
         if (spec == null || engine == null || !playbackAutoSession.active()) return;
-        PlaybackResourceClassifier.Classification requestClassification = PlaybackResourceClassifier.classifyRequest(
-                spec.getUrl(), spec.getFormat(), spec.getFormat());
-        PlaybackResourceClassifier.Classification observedClassification = engine.getResourceClassification();
-        PlaybackResourceClassifier.Classification classification = PlaybackResourceClassifier.merge(requestClassification, observedClassification);
+        PlaybackResourceClassifier.Classification classification = currentResourceClassification();
         PlaybackRoute.Resolution observedRoute = engine.getEffectivePlaybackRoute();
         if (observedRoute == null || observedRoute.route() == PlaybackRoute.OTHER) observedRoute = spec.getPlaybackRoute();
         long now = SystemClock.elapsedRealtime();
@@ -2467,8 +2483,11 @@ public class PlayerManager implements ParseCallback {
     private void publishPlaybackTelemetry(PlaybackAutoContext.PlaybackPhase phaseOverride) {
         if (!playbackAutoSession.active()) return;
         long now = SystemClock.elapsedRealtime();
+        PlaybackTelemetry.RuntimeObservation observation =
+                collectPlaybackTelemetry(phaseOverride, now);
         playbackTelemetryCoordinator.publishRuntime(
-                playbackAutoSession, collectPlaybackTelemetry(phaseOverride, now), now);
+                playbackAutoSession, observation, now);
+        evaluateExoRtspLiveLag(observation, now);
     }
 
     private void schedulePlaybackTelemetry() {
@@ -2483,6 +2502,7 @@ public class PlayerManager implements ParseCallback {
         long now = SystemClock.elapsedRealtime();
         playbackTelemetryCoordinator.endSession(
                 playbackAutoSession, reason, collectPlaybackTelemetry(null, now), now);
+        rtspLiveLagController.endSession(playbackAutoSession);
     }
 
     private PlaybackTelemetry.RuntimeObservation collectPlaybackTelemetry(
@@ -2598,6 +2618,263 @@ public class PlayerManager implements ParseCallback {
                         PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH),
                 firstFrame,
                 liveLag);
+    }
+
+    private void evaluateExoRtspLiveLag(
+            PlaybackTelemetry.RuntimeObservation observation,
+            long nowMs) {
+        if (!playbackAutoSession.active()) return;
+        boolean automatic = PlaybackPerformanceSetting.isAuto(PlayerSetting.EXO);
+        boolean exo = isExo() && engine instanceof ExoPlayerEngine;
+        PlaybackResourceClassifier.Classification classification =
+                currentResourceClassification();
+        boolean rtsp = classification.protocol() == PlaybackAutoContext.Protocol.RTSP;
+        boolean classifiedLive = classification.streamKind() == PlaybackAutoContext.StreamKind.LIVE
+                || classification.streamKind() == PlaybackAutoContext.StreamKind.LOW_LATENCY_LIVE;
+        boolean mediaItemLive = false;
+        boolean active = false;
+        boolean loading = false;
+        boolean seekAvailable = false;
+        if (player != null) {
+            try {
+                mediaItemLive = player.isCurrentMediaItemLive();
+            } catch (Throwable ignored) {
+            }
+            try {
+                int state = player.getPlaybackState();
+                active = player.getPlayWhenReady()
+                        && (player.isPlaying()
+                        || state == Player.STATE_READY
+                        || state == Player.STATE_BUFFERING);
+            } catch (Throwable ignored) {
+            }
+            try {
+                loading = player.isLoading();
+            } catch (Throwable ignored) {
+            }
+            try {
+                seekAvailable = player.isCommandAvailable(
+                        Player.COMMAND_SEEK_TO_DEFAULT_POSITION);
+            } catch (Throwable ignored) {
+            }
+        }
+        boolean live = classifiedLive && mediaItemLive;
+        boolean startupComplete = playbackTrace.hasStage(PlaybackTrace.Stage.FIRST_FRAME)
+                || playbackTrace.hasStage(PlaybackTrace.Stage.AUDIO_PLAYABLE);
+        long liveLagMs = metricLong(observation == null ? null : observation.liveLagMs());
+        long bufferedMs = metricLong(observation == null ? null : observation.bufferedDurationMs());
+        boolean liveEdgeReliable = isReliableDynamicLiveEdge(
+                live, seekAvailable, liveLagMs);
+        ExoRtspLiveLagPolicy.Decision decision = rtspLiveLagController.evaluate(
+                new ExoRtspLiveLagController.Input(
+                        playbackAutoSession,
+                        automatic,
+                        exo,
+                        rtsp,
+                        live,
+                        active,
+                        startupComplete,
+                        false,
+                        loading,
+                        liveEdgeReliable,
+                        seekAvailable,
+                        liveLagMs,
+                        bufferedMs,
+                        nowMs));
+        ExoRtspLiveLagController.Snapshot stateAtDecision =
+                rtspLiveLagController.snapshot();
+
+        // Do not fill the shared decision log with inapplicable HLS/DASH/native observations.
+        if (!automatic || !exo || !rtsp) return;
+        if (!decision.requestsRecovery()) {
+            publishExoRtspLiveLagDecision(
+                    decision,
+                    PlaybackTelemetry.DecisionOutcome.HELD,
+                    false,
+                    active,
+                    loading,
+                    seekAvailable,
+                    liveEdgeReliable,
+                    stateAtDecision,
+                    nowMs);
+            return;
+        }
+
+        boolean started = rtspLiveLagController.beginAction(
+                playbackAutoSession, decision.action(), nowMs);
+        boolean succeeded = started && executeExoRtspLiveLagRecovery(decision.action());
+        if (started) {
+            rtspLiveLagController.completeAction(
+                    playbackAutoSession, decision.action(), succeeded);
+        }
+        publishExoRtspLiveLagDecision(
+                decision,
+                succeeded ? PlaybackTelemetry.DecisionOutcome.APPLIED
+                        : PlaybackTelemetry.DecisionOutcome.FAILED,
+                succeeded,
+                active,
+                loading,
+                seekAvailable,
+                liveEdgeReliable,
+                stateAtDecision,
+                nowMs);
+    }
+
+    private boolean executeExoRtspLiveLagRecovery(
+            ExoRtspLiveLagPolicy.Action action) {
+        try {
+            return switch (action) {
+                case SEEK_LIVE_EDGE -> engine instanceof ExoPlayerEngine exo
+                        && exo.recoverRtspLiveEdge();
+                case REBUILD_SESSION -> restartExoRtspLiveSession();
+                case HOLD -> false;
+            };
+        } catch (Throwable error) {
+            PlaybackTrace.log("exo-rtsp-live", playbackTrace.current(),
+                    "action=%s result=failed errorType=%s",
+                    action.label(), error.getClass().getSimpleName());
+            return false;
+        }
+    }
+
+    private boolean restartExoRtspLiveSession() {
+        if (!(engine instanceof ExoPlayerEngine)
+                || player == null
+                || spec == null
+                || TextUtils.isEmpty(spec.getUrl())) {
+            return false;
+        }
+        boolean wasPlayWhenReady = player.getPlayWhenReady();
+        float speed = getSpeed();
+        boolean repeat = isRepeatOne();
+        prepareSeq++;
+        App.removeCallbacks(runnable);
+        App.removeCallbacks(networkProtectionRunnable);
+        resetNetworkProtectionSession("rtsp-live-rebuild");
+        setDanmakus(spec.getDanmakus());
+        initTrack = false;
+        waitingLutBeforePlay = false;
+        playWhenReady = wasPlayWhenReady;
+        applySubtitleStyle();
+        PlaybackTrace.log("exo-rtsp-live", playbackTrace.current(),
+                "action=rebuild-session play=%s speed=%.3f repeat=%s",
+                wasPlayWhenReady, speed, repeat);
+        engine.restart(spec.checkUa(), C.TIME_UNSET, wasPlayWhenReady);
+        if (speed != 1f) setSpeed(speed);
+        setRepeatOne(repeat);
+        App.post(runnable, Constant.TIMEOUT_PLAY);
+        callback.onPrepare();
+        return true;
+    }
+
+    private boolean isReliableDynamicLiveEdge(
+            boolean live,
+            boolean seekAvailable,
+            long liveLagMs) {
+        if (!live || !seekAvailable || liveLagMs < 0 || player == null) return false;
+        try {
+            Timeline timeline = player.getCurrentTimeline();
+            int index = player.getCurrentMediaItemIndex();
+            if (timeline == null || timeline.isEmpty()
+                    || index < 0 || index >= timeline.getWindowCount()) {
+                return false;
+            }
+            Timeline.Window window = timeline.getWindow(index, new Timeline.Window());
+            return window.isLive() && window.isDynamic;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private void publishExoRtspLiveLagDecision(
+            ExoRtspLiveLagPolicy.Decision decision,
+            PlaybackTelemetry.DecisionOutcome outcome,
+            boolean succeeded,
+            boolean active,
+            boolean loading,
+            boolean seekAvailable,
+            boolean liveEdgeReliable,
+            ExoRtspLiveLagController.Snapshot stateAtDecision,
+            long nowMs) {
+        ExoRtspLiveLagController.Snapshot snapshot =
+                rtspLiveLagController.snapshot();
+        ExoRtspLiveLagController.Snapshot decisionState = stateAtDecision == null
+                ? snapshot : stateAtDecision;
+        List<PlaybackTelemetry.DecisionInput> inputs = new ArrayList<>();
+        inputs.add(PlaybackTelemetry.DecisionInput.text(
+                "trigger", decision.trigger().label(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH));
+        inputs.add(decision.liveLagMs() < 0
+                ? PlaybackTelemetry.DecisionInput.unknown("live_lag_ms")
+                : PlaybackTelemetry.DecisionInput.number(
+                "live_lag_ms", decision.liveLagMs(),
+                PlaybackAutoContext.ValueSource.PLAYER_CALLBACK,
+                PlaybackAutoContext.Confidence.HIGH));
+        inputs.add(decision.lagGrowthMsPerSecond() == Long.MIN_VALUE
+                ? PlaybackTelemetry.DecisionInput.unknown("lag_growth_msps")
+                : PlaybackTelemetry.DecisionInput.number(
+                "lag_growth_msps", decision.lagGrowthMsPerSecond(),
+                PlaybackAutoContext.ValueSource.ESTIMATOR,
+                PlaybackAutoContext.Confidence.MEDIUM));
+        inputs.add(decision.bufferedMs() < 0
+                ? PlaybackTelemetry.DecisionInput.unknown("buffered_ms")
+                : PlaybackTelemetry.DecisionInput.number(
+                "buffered_ms", decision.bufferedMs(),
+                PlaybackAutoContext.ValueSource.PLAYER_CALLBACK,
+                PlaybackAutoContext.Confidence.HIGH));
+        inputs.add(decision.bufferGrowthMsPerSecond() == Long.MIN_VALUE
+                ? PlaybackTelemetry.DecisionInput.unknown("buffer_growth_msps")
+                : PlaybackTelemetry.DecisionInput.number(
+                "buffer_growth_msps", decision.bufferGrowthMsPerSecond(),
+                PlaybackAutoContext.ValueSource.ESTIMATOR,
+                PlaybackAutoContext.Confidence.MEDIUM));
+        inputs.add(PlaybackTelemetry.DecisionInput.bool(
+                "active", active,
+                PlaybackAutoContext.ValueSource.PLAYER_CALLBACK,
+                PlaybackAutoContext.Confidence.HIGH));
+        inputs.add(PlaybackTelemetry.DecisionInput.bool(
+                "loading", loading,
+                PlaybackAutoContext.ValueSource.PLAYER_CALLBACK,
+                PlaybackAutoContext.Confidence.HIGH));
+        inputs.add(PlaybackTelemetry.DecisionInput.bool(
+                "edge_reliable", liveEdgeReliable,
+                PlaybackAutoContext.ValueSource.PLAYER_CALLBACK,
+                PlaybackAutoContext.Confidence.HIGH));
+        inputs.add(PlaybackTelemetry.DecisionInput.bool(
+                "seek_available", seekAvailable,
+                PlaybackAutoContext.ValueSource.PLAYER_CALLBACK,
+                PlaybackAutoContext.Confidence.HIGH));
+        inputs.add(PlaybackTelemetry.DecisionInput.number(
+                "risk_samples", decisionState.consecutiveRiskSamples(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH));
+        inputs.add(PlaybackTelemetry.DecisionInput.number(
+                "recoveries", snapshot.recoveryAttempts(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH));
+        inputs.add(PlaybackTelemetry.DecisionInput.number(
+                "cooldown_ms", decision.cooldownRemainingMs(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH));
+        playbackTelemetryCoordinator.publishDecision(
+                playbackAutoSession,
+                new PlaybackTelemetry.DecisionEvent(
+                        PlaybackTelemetry.DecisionDomain.RTSP_LIVE_RECOVERY,
+                        outcome,
+                        decisionState.lastAction().label(),
+                        decision.action().label(),
+                        succeeded ? decision.action().label() : "hold",
+                        decision.reason().label(),
+                        decision.requestsRecovery() ? succeeded ? "none" : "action-failed"
+                                : decision.reason().label(),
+                        inputs),
+                nowMs);
+    }
+
+    private static long metricLong(PlaybackTelemetry.Metric<Long> metric) {
+        return metric == null || !metric.known() || metric.value() < 0
+                ? -1 : metric.value();
     }
 
     private PlaybackAutoContext.PlaybackPhase playbackPhaseSnapshot() {
@@ -2826,6 +3103,7 @@ public class PlayerManager implements ParseCallback {
 
         @Override
         public void onPositionDiscontinuity(@NonNull Player.PositionInfo oldPosition, @NonNull Player.PositionInfo newPosition, int reason) {
+            rtspLiveLagController.onPositionDiscontinuity(playbackAutoSession);
             resetNetworkProtectionSession("discontinuity-" + reason);
             scheduleNetworkProtection(ExoNetworkGuardController.OBSERVE_INTERVAL_MS);
         }
@@ -2871,6 +3149,7 @@ public class PlayerManager implements ParseCallback {
         public void onPlayerError(@NonNull PlaybackException e) {
             App.removeCallbacks(runnable);
             App.removeCallbacks(networkProtectionRunnable);
+            rtspLiveLagController.onPlaybackError(playbackAutoSession);
             publishPlaybackTelemetry(PlaybackAutoContext.PlaybackPhase.ERROR);
             if (retryMpvSurfaceDirectFailure(e)) return;
             PlaybackErrorClassifier.Failure failure = PlaybackErrorClassifier.classify(e, getEffectivePlaybackRoute());

@@ -93,6 +93,7 @@ public final class PlaybackTelemetry {
         PRELOAD("preload"),
         CACHE("cache"),
         DECODE("decode"),
+        RTSP_LIVE_RECOVERY("rtsp-live-recovery"),
         OTHER("other");
 
         private final String label;

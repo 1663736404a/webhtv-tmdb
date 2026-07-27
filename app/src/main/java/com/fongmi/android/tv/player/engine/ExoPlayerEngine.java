@@ -8,6 +8,7 @@ import androidx.media3.common.MediaItem;
 import androidx.media3.common.MediaMetadata;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
+import androidx.media3.common.Timeline;
 import androidx.media3.common.Tracks;
 import androidx.media3.exoplayer.ExoPlayer;
 
@@ -531,6 +532,26 @@ public class ExoPlayerEngine implements PlayerEngine {
         return decoderRuntimeEnabledForPlayer
                 && isHard()
                 && decoderRuntimeSession.prepareRuntimeFallback();
+    }
+
+    /** Discards the stale RTSP queue and seeks only when Media3 exposes a live default edge. */
+    public boolean recoverRtspLiveEdge() {
+        if (player == null
+                || !player.isCurrentMediaItemLive()
+                || !player.isCommandAvailable(Player.COMMAND_SEEK_TO_DEFAULT_POSITION)) {
+            return false;
+        }
+        Timeline timeline = player.getCurrentTimeline();
+        int index = player.getCurrentMediaItemIndex();
+        if (timeline.isEmpty() || index < 0 || index >= timeline.getWindowCount()) return false;
+        Timeline.Window window = timeline.getWindow(index, new Timeline.Window());
+        if (!window.isLive() || !window.isDynamic) return false;
+        preCache.stop("rtsp-live-edge-recovery");
+        PlaybackTrace.log("exo-rtsp-live", getPlaybackTraceId(),
+                "action=seek-live-edge");
+        player.seekToDefaultPosition();
+        player.prepare();
+        return true;
     }
 
     private void startInternal() {
