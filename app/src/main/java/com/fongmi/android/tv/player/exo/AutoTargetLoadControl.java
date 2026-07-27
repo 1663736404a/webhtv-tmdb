@@ -9,6 +9,7 @@ import androidx.media3.exoplayer.LoadControl;
 import androidx.media3.exoplayer.analytics.PlayerId;
 import androidx.media3.exoplayer.source.TrackGroupArray;
 import androidx.media3.exoplayer.trackselection.ExoTrackSelection;
+import androidx.media3.exoplayer.upstream.Allocator;
 import androidx.media3.exoplayer.upstream.DefaultAllocator;
 
 import com.fongmi.android.tv.player.PlaybackAutoContext;
@@ -18,6 +19,7 @@ import com.fongmi.android.tv.player.PlaybackTelemetryCoordinator;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /** DefaultLoadControl extension that calculates automatic target bytes at track-selection edges. */
@@ -27,8 +29,11 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
     private final ExoBufferBudget.Budget fallbackBudget;
     private final int configuredTargetBytes;
     private final ExoTargetBufferCoordinator coordinator;
+    private final ExoMemoryPressureCoordinator memoryPressureCoordinator;
     private final ConcurrentHashMap<PlayerId, TargetState> targetStates;
     private final ConcurrentHashMap<PlayerId, ModeState> modeStates;
+    private final Set<PlayerId> preparedPlayers;
+    private volatile ExoMemoryPressureCoordinator.Registration memoryPressureRegistration;
 
     AutoTargetLoadControl(
             ExoLoadControlPolicy.AutomaticConfiguration configuration,
@@ -41,7 +46,8 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
                 backBufferMs,
                 configuredTargetBytes,
                 fallbackBudget,
-                ExoTargetBufferCoordinator.process());
+                ExoTargetBufferCoordinator.process(),
+                ExoMemoryPressureCoordinator.process());
     }
 
     AutoTargetLoadControl(
@@ -51,6 +57,24 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
             int configuredTargetBytes,
             ExoBufferBudget.Budget fallbackBudget,
             ExoTargetBufferCoordinator coordinator) {
+        this(
+                allocator,
+                configuration,
+                backBufferMs,
+                configuredTargetBytes,
+                fallbackBudget,
+                coordinator,
+                ExoMemoryPressureCoordinator.process());
+    }
+
+    AutoTargetLoadControl(
+            DefaultAllocator allocator,
+            ExoLoadControlPolicy.AutomaticConfiguration configuration,
+            int backBufferMs,
+            int configuredTargetBytes,
+            ExoBufferBudget.Budget fallbackBudget,
+            ExoTargetBufferCoordinator coordinator,
+            ExoMemoryPressureCoordinator memoryPressureCoordinator) {
         super(
                 allocator,
                 configuration.streaming().minBufferMs(),
@@ -71,14 +95,18 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
         this.configuredTargetBytes = Math.max(0, configuredTargetBytes);
         this.fallbackBudget = fallbackBudget;
         this.coordinator = coordinator;
+        this.memoryPressureCoordinator = memoryPressureCoordinator;
         this.targetStates = new ConcurrentHashMap<>();
         this.modeStates = new ConcurrentHashMap<>();
+        this.preparedPlayers = ConcurrentHashMap.newKeySet();
     }
 
     @Override
     public void onPrepared(PlayerId playerId) {
         targetStates.remove(playerId);
         modeStates.remove(playerId);
+        preparedPlayers.add(playerId);
+        ensureMemoryPressureRegistration();
         super.onPrepared(playerId);
     }
 
@@ -116,26 +144,47 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
                     modeContext,
                     now);
         }
+        applyAllocatorTarget();
     }
 
     @Override
     public void onStopped(PlayerId playerId) {
         targetStates.remove(playerId);
         modeStates.remove(playerId);
+        preparedPlayers.remove(playerId);
         super.onStopped(playerId);
+        applyAllocatorTarget();
+        if (preparedPlayers.isEmpty()) closeMemoryPressureRegistration();
     }
 
     @Override
     public void onReleased(PlayerId playerId) {
         targetStates.remove(playerId);
         modeStates.remove(playerId);
+        preparedPlayers.remove(playerId);
         super.onReleased(playerId);
+        applyAllocatorTarget();
+        if (preparedPlayers.isEmpty()) closeMemoryPressureRegistration();
     }
 
     @Override
     public boolean shouldContinueLoading(LoadControl.Parameters parameters) {
         boolean delegateLoading = super.shouldContinueLoading(parameters);
-        if (delegateLoading || PlayerId.PRELOAD.equals(parameters.playerId)) return delegateLoading;
+        applyAllocatorTarget();
+        if (PlayerId.PRELOAD.equals(parameters.playerId)) {
+            return delegateLoading && !isPreloadPaused();
+        }
+        ExoMemoryPressurePolicy.Decision memory = currentMemoryDecision(parameters.playerId);
+        if (memory != null && memory.degraded()) {
+            Allocator playerAllocator = getAllocator(parameters.playerId);
+            if (!ExoLoadControlModePolicy.canAllocate(
+                    playerAllocator.getTotalBytesAllocated(),
+                    playerAllocator.getIndividualAllocationLength(),
+                    memory.effectiveTargetBytes())) {
+                return false;
+            }
+        }
+        if (delegateLoading) return true;
         ExoLoadControlModePolicy.Decision mode = currentModeDecision(parameters.playerId);
         if (!mode.mode().controlledTimePriority()) return false;
         if (AutoLoadControl.reachedAdaptiveThreshold(
@@ -149,7 +198,25 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
     }
 
     boolean canContinueControlledRescue(PlayerId playerId) {
-        return canContinueControlledRescue(currentModeDecision(playerId));
+        ExoMemoryPressurePolicy.Decision memory = currentMemoryDecision(playerId);
+        return (memory == null || memory.expansionAllowed())
+                && canContinueControlledRescue(currentModeDecision(playerId));
+    }
+
+    ExoMemoryPressurePolicy.Decision currentMemoryDecision(PlayerId playerId) {
+        TargetState targetState = targetStates.get(playerId);
+        if (targetState == null || !targetState.session().active()) return null;
+        return memoryPressureCoordinator.currentDecision(targetState.session());
+    }
+
+    boolean isBackBufferSuppressed(PlayerId playerId) {
+        ExoMemoryPressurePolicy.Decision decision = currentMemoryDecision(playerId);
+        return decision != null && decision.backBufferSuppressed();
+    }
+
+    boolean isPreloadPaused() {
+        ExoMemoryPressurePolicy.Decision decision = memoryPressureCoordinator.currentDecision();
+        return decision != null && decision.preloadPaused();
     }
 
     ExoLoadControlModePolicy.Decision currentModeDecision(PlayerId playerId) {
@@ -180,17 +247,38 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
         PlaybackAutoContext.SessionToken session = currentExoSession(context);
         PlaybackAutoContext.DeviceFacts device = session.active()
                 ? context.device() : PlaybackAutoContext.DeviceFacts.unknown();
-        ExoTargetBufferPolicy.Decision previous = coordinator.currentDecision(session);
-        ExoTargetBufferPolicy.Decision decision = calculateDecision(
-                trackSelections,
-                PlaybackAnalyticsListener.getMediaBitrateEstimate(),
+        ObservedMediaBitrateEstimator.Estimate estimate =
+                PlaybackAnalyticsListener.getMediaBitrateEstimate();
+        ExoTargetBufferPolicy.MediaDemand mediaDemand =
+                resolveMediaDemand(trackSelections, estimate);
+        ExoTargetBufferPolicy.Decision baseline = calculateDecision(
+                mediaDemand,
+                PlaybackAutoContext.DeviceFacts.unknown(),
+                now);
+        ExoTargetBufferPolicy.Decision observed = calculateDecision(
+                mediaDemand,
                 device,
                 now);
-        boolean published = coordinator.publish(session, decision, now);
-        targetStates.put(parameters.playerId, new TargetState(session, decision));
-        ExoPlaybackDiagnostics.logTargetDecision(decision);
-        if (published) publishTelemetry(session, previous, decision, context, now);
-        return decision.targetBytes();
+        TargetState previousState = targetStates.get(parameters.playerId);
+        ExoTargetBufferPolicy.Decision previousObserved = previousState != null
+                && session.equals(previousState.session())
+                ? previousState.observedDecision() : null;
+        boolean published = coordinator.publish(session, baseline, now);
+        targetStates.put(
+                parameters.playerId,
+                new TargetState(session, baseline, observed));
+        memoryPressureCoordinator.publishBaseline(
+                session,
+                baseline,
+                configuredTargetBytes,
+                fallbackBudget,
+                device,
+                now);
+        ExoPlaybackDiagnostics.logTargetDecision(observed);
+        if (published) {
+            publishTelemetry(session, previousObserved, observed, context, now);
+        }
+        return baseline.targetBytes();
     }
 
     private ExoLoadControlModePolicy.Decision resolveMode(
@@ -230,6 +318,119 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
                         allocator.getTotalBytesAllocated(),
                         allocator.getIndividualAllocationLength(),
                         mode.hardCapacityBytes());
+    }
+
+    private void ensureMemoryPressureRegistration() {
+        if (memoryPressureRegistration != null) return;
+        synchronized (this) {
+            if (memoryPressureRegistration == null) {
+                memoryPressureRegistration = memoryPressureCoordinator.addListener(
+                        this::onMemoryPressureDecision);
+            }
+        }
+    }
+
+    private void closeMemoryPressureRegistration() {
+        ExoMemoryPressureCoordinator.Registration registration;
+        synchronized (this) {
+            registration = memoryPressureRegistration;
+            memoryPressureRegistration = null;
+        }
+        if (registration != null) registration.close();
+    }
+
+    private void onMemoryPressureDecision(ExoMemoryPressureCoordinator.Update update) {
+        if (update == null || update.decision() == null) return;
+        boolean relevant = false;
+        for (TargetState targetState : targetStates.values()) {
+            if (update.session().equals(targetState.session())) {
+                relevant = true;
+                break;
+            }
+        }
+        if (!relevant) return;
+        coordinator.publishEffectiveTarget(
+                update.session(),
+                update.decision().effectiveTargetBytes(),
+                update.decision().degraded(),
+                update.publishedAtElapsedMs());
+        applyAllocatorTarget();
+        ExoPlaybackDiagnostics.logMemoryPressureDecision(
+                update.decision(),
+                allocator.getTotalBytesAllocated(),
+                allocator.getUnusedBytesAllocated());
+        publishMemoryPressureTelemetry(update);
+    }
+
+    private void applyAllocatorTarget() {
+        if (targetStates.isEmpty()) return;
+        int targetBytes = 0;
+        boolean preloadPaused = false;
+        for (TargetState targetState : targetStates.values()) {
+            ExoMemoryPressurePolicy.Decision memory =
+                    memoryPressureCoordinator.currentDecision(targetState.session());
+            int effective = memory == null
+                    ? targetState.decision().targetBytes()
+                    : Math.min(
+                            targetState.decision().targetBytes(),
+                            memory.effectiveTargetBytes());
+            targetBytes = saturatedAdd(targetBytes, effective);
+            preloadPaused |= memory != null && memory.preloadPaused();
+        }
+        // Media3 applies PRELOAD through the constructor overwrite, so it never
+        // enters targetStates and must be added exactly once here.
+        if (preparedPlayers.contains(PlayerId.PRELOAD) && !preloadPaused) {
+            targetBytes = saturatedAdd(
+                    targetBytes,
+                    DEFAULT_TARGET_BUFFER_BYTES_FOR_PRELOAD);
+        }
+        allocator.setTargetBufferSize(targetBytes);
+        if (preloadPaused) allocator.trim();
+    }
+
+    private void publishMemoryPressureTelemetry(
+            ExoMemoryPressureCoordinator.Update update) {
+        ExoMemoryPressurePolicy.Decision previous = update.previous();
+        ExoMemoryPressurePolicy.Decision decision = update.decision();
+        if (previous == null && !decision.degraded()) return;
+        long now = Math.max(0, update.publishedAtElapsedMs());
+        PlaybackAutoContext context = PlaybackAutoContextStore.process().snapshot();
+        PlaybackAutoContext.Fact<PlaybackAutoContext.MemoryPressure> pressureFact =
+                context.device().memoryPressure();
+        boolean changed = previous == null
+                || previous.effectiveTargetBytes() != decision.effectiveTargetBytes()
+                || previous.mode() != decision.mode();
+        PlaybackTelemetryCoordinator.process().publishDecision(
+                update.session(),
+                new PlaybackTelemetry.DecisionEvent(
+                        PlaybackTelemetry.DecisionDomain.LOAD_CONTROL,
+                        changed
+                                ? PlaybackTelemetry.DecisionOutcome.APPLIED
+                                : PlaybackTelemetry.DecisionOutcome.HELD,
+                        previous == null
+                                ? "unknown" : Integer.toString(previous.effectiveTargetBytes()),
+                        Integer.toString(decision.effectiveTargetBytes()),
+                        decision.mode().label(),
+                        decision.reason().label(),
+                        decision.degraded() ? decision.reason().label() : "none",
+                        List.of(
+                                PlaybackTelemetry.DecisionInput.text("memory_mode", decision.mode().label(), PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.number("baseline_bytes", decision.baselineTargetBytes(), PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.number("safe_bytes", decision.safeTargetBytes(), PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.number("effective_bytes", decision.effectiveTargetBytes(), PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH),
+                                factInput("memory_pressure", decision.observedPressure().label(), pressureFact, now),
+                                PlaybackTelemetry.DecisionInput.number("normal_samples", decision.normalSamples(), PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.number("cooldown_remaining_ms", decision.cooldownRemainingMs(now), PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.number("allocator_allocated", allocator.getTotalBytesAllocated(), PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.number("allocator_unused", allocator.getUnusedBytesAllocated(), PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.bool("preload_paused", decision.preloadPaused(), PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.bool("back_suppressed", decision.backBufferSuppressed(), PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH))),
+                now);
+    }
+
+    private static int saturatedAdd(int first, int second) {
+        if (first >= Integer.MAX_VALUE - second) return Integer.MAX_VALUE;
+        return first + Math.max(0, second);
     }
 
     private static void publishModeTelemetry(
@@ -338,8 +539,28 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
             ObservedMediaBitrateEstimator.Estimate estimate,
             PlaybackAutoContext.DeviceFacts deviceFacts,
             long elapsedRealtimeMs) {
-        return ExoTargetBufferPolicy.resolve(
+        return calculateDecision(
                 resolveMediaDemand(trackSelections, estimate),
+                deviceFacts,
+                elapsedRealtimeMs);
+    }
+
+    ExoTargetBufferPolicy.Decision calculateBaselineDecision(
+            ExoTrackSelection[] trackSelections,
+            ObservedMediaBitrateEstimator.Estimate estimate,
+            long elapsedRealtimeMs) {
+        return calculateDecision(
+                resolveMediaDemand(trackSelections, estimate),
+                PlaybackAutoContext.DeviceFacts.unknown(),
+                elapsedRealtimeMs);
+    }
+
+    private ExoTargetBufferPolicy.Decision calculateDecision(
+            ExoTargetBufferPolicy.MediaDemand mediaDemand,
+            PlaybackAutoContext.DeviceFacts deviceFacts,
+            long elapsedRealtimeMs) {
+        return ExoTargetBufferPolicy.resolve(
+                mediaDemand,
                 configuredTargetBytes,
                 fallbackBudget,
                 deviceFacts,
@@ -562,10 +783,12 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
 
     private record TargetState(
             PlaybackAutoContext.SessionToken session,
-            ExoTargetBufferPolicy.Decision decision) {
+            ExoTargetBufferPolicy.Decision decision,
+            ExoTargetBufferPolicy.Decision observedDecision) {
 
         private TargetState {
             session = session == null ? PlaybackAutoContext.SessionToken.none() : session;
+            observedDecision = observedDecision == null ? decision : observedDecision;
         }
     }
 

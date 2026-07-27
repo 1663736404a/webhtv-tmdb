@@ -6,7 +6,7 @@ import com.fongmi.android.tv.player.PlaybackAutoContextStore;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** Session-safe process state for the target bytes actually selected by automatic LoadControl. */
+/** Session-safe automatic LoadControl baseline plus its runtime-effective target bytes. */
 final class ExoTargetBufferCoordinator {
 
     private static final ExoTargetBufferCoordinator PROCESS =
@@ -30,11 +30,54 @@ final class ExoTargetBufferCoordinator {
             long publishedAtElapsedMs) {
         if (session == null || !session.active() || decision == null) return false;
         if (!isCurrentExoSession(session)) return false;
-        State next = new State(session, decision, Math.max(0, publishedAtElapsedMs));
-        state.set(next);
-        if (isCurrentExoSession(session)) return true;
-        state.compareAndSet(next, State.empty());
-        return false;
+        while (true) {
+            State current = state.get();
+            boolean runtimeLimited = session.equals(current.session())
+                    && current.decision() != null
+                    && current.runtimeLimited();
+            int effective = runtimeLimited
+                    ? Math.min(decision.targetBytes(), current.effectiveTargetBytes())
+                    : decision.targetBytes();
+            long publishedAt = session.equals(current.session())
+                    ? Math.max(current.publishedAtElapsedMs(), publishedAtElapsedMs)
+                    : Math.max(0, publishedAtElapsedMs);
+            State next = new State(
+                    session,
+                    decision,
+                    effective,
+                    runtimeLimited,
+                    publishedAt);
+            if (!state.compareAndSet(current, next)) continue;
+            if (isCurrentExoSession(session)) return true;
+            state.compareAndSet(next, State.empty());
+            return false;
+        }
+    }
+
+    boolean publishEffectiveTarget(
+            PlaybackAutoContext.SessionToken session,
+            int effectiveTargetBytes,
+            boolean runtimeLimited,
+            long publishedAtElapsedMs) {
+        if (session == null || !session.active() || !isCurrentExoSession(session)) return false;
+        while (true) {
+            State current = state.get();
+            if (!session.equals(current.session()) || current.decision() == null) return false;
+            int effective = Math.min(
+                    current.decision().targetBytes(),
+                    ExoTargetBufferPolicy.tierForCapacity(
+                            Math.max(ExoTargetBufferPolicy.MIN_TARGET_BYTES, effectiveTargetBytes)));
+            State next = new State(
+                    session,
+                    current.decision(),
+                    effective,
+                    runtimeLimited,
+                    Math.max(current.publishedAtElapsedMs(), publishedAtElapsedMs));
+            if (!state.compareAndSet(current, next)) continue;
+            if (isCurrentExoSession(session)) return true;
+            state.compareAndSet(next, State.empty());
+            return false;
+        }
     }
 
     ExoTargetBufferPolicy.Decision currentDecision() {
@@ -50,8 +93,14 @@ final class ExoTargetBufferCoordinator {
     }
 
     int currentTargetBytesOr(int fallbackBytes) {
-        ExoTargetBufferPolicy.Decision decision = currentDecision();
-        return decision == null ? fallbackBytes : decision.targetBytes();
+        PlaybackAutoContext.SessionToken session = store.snapshot().session();
+        State current = state.get();
+        if (session == null || !session.active()
+                || !session.equals(current.session())
+                || !isCurrentExoSession(session)) {
+            return fallbackBytes;
+        }
+        return current.effectiveTargetBytes();
     }
 
     private boolean isCurrentExoSession(PlaybackAutoContext.SessionToken session) {
@@ -64,10 +113,17 @@ final class ExoTargetBufferCoordinator {
     private record State(
             PlaybackAutoContext.SessionToken session,
             ExoTargetBufferPolicy.Decision decision,
+            int effectiveTargetBytes,
+            boolean runtimeLimited,
             long publishedAtElapsedMs) {
 
         private static State empty() {
-            return new State(PlaybackAutoContext.SessionToken.none(), null, -1);
+            return new State(
+                    PlaybackAutoContext.SessionToken.none(),
+                    null,
+                    0,
+                    false,
+                    -1);
         }
     }
 }

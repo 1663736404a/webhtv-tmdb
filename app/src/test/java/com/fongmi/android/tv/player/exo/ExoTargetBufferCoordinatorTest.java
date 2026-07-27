@@ -53,6 +53,52 @@ public class ExoTargetBufferCoordinatorTest {
         assertEquals(mib(24), coordinator.currentTargetBytesOr(mib(24)));
     }
 
+    @Test
+    public void effectiveRuntimeTargetCanShrinkWithoutReplacingBaselineDecision() {
+        PlaybackAutoContextStore store = new PlaybackAutoContextStore();
+        ExoTargetBufferCoordinator coordinator = new ExoTargetBufferCoordinator(store);
+        PlaybackAutoContext.SessionToken session = store.beginSession("p-target-4", 10);
+        ExoTargetBufferPolicy.Decision baseline = decision(20_000_000L);
+        assertTrue(coordinator.publish(session, baseline, 20));
+
+        assertTrue(coordinator.publishEffectiveTarget(session, mib(24), true, 30));
+
+        assertEquals(baseline, coordinator.currentDecision(session));
+        assertEquals(mib(24), coordinator.currentTargetBytesOr(mib(16)));
+        assertFalse(coordinator.publishEffectiveTarget(
+                PlaybackAutoContext.SessionToken.none(), mib(16), true, 40));
+    }
+
+    @Test
+    public void baselineRefreshCannotBrieflyUndoRuntimePressureLimit() {
+        PlaybackAutoContextStore store = new PlaybackAutoContextStore();
+        ExoTargetBufferCoordinator coordinator = new ExoTargetBufferCoordinator(store);
+        PlaybackAutoContext.SessionToken session = store.beginSession("p-target-5", 10);
+        assertTrue(coordinator.publish(session, decision(20_000_000L), 20));
+        assertTrue(coordinator.publishEffectiveTarget(session, mib(24), true, 30));
+
+        ExoTargetBufferPolicy.Decision larger = decision(30_000_000L);
+        assertTrue(coordinator.publish(session, larger, 40));
+
+        assertEquals(larger, coordinator.currentDecision(session));
+        assertEquals(mib(24), coordinator.currentTargetBytesOr(mib(16)));
+    }
+
+    @Test
+    public void runtimePressureFlagIsPreservedEvenAtTheCurrentBaselineFloor() {
+        PlaybackAutoContextStore store = new PlaybackAutoContextStore();
+        ExoTargetBufferCoordinator coordinator = new ExoTargetBufferCoordinator(store);
+        PlaybackAutoContext.SessionToken session = store.beginSession("p-target-6", 10);
+        ExoTargetBufferPolicy.Decision floor = decision(1_000_000L);
+        assertEquals(mib(16), floor.targetBytes());
+        assertTrue(coordinator.publish(session, floor, 20));
+        assertTrue(coordinator.publishEffectiveTarget(session, mib(16), true, 30));
+
+        assertTrue(coordinator.publish(session, decision(20_000_000L), 40));
+
+        assertEquals(mib(16), coordinator.currentTargetBytesOr(mib(24)));
+    }
+
     private static ExoTargetBufferPolicy.Decision decision(long averageBitrate) {
         ExoTargetBufferPolicy.MediaDemand demand = new ExoTargetBufferPolicy.MediaDemand(
                 averageBitrate,

@@ -51,4 +51,14 @@ public class AutoLoadControlTest {
         assertTrue(AutoLoadControl.shouldStartControlledPlayback(
                 false, true, true, true, false));
     }
+
+    @Test
+    public void memoryPressureSuppressesBackBufferAndPreloading() {
+        assertEquals(15_000_000L, AutoLoadControl.effectiveBackBufferDurationUs(15_000_000L, false));
+        assertEquals(0L, AutoLoadControl.effectiveBackBufferDurationUs(15_000_000L, true));
+        assertEquals(0L, AutoLoadControl.effectiveBackBufferDurationUs(-1L, false));
+        assertTrue(AutoLoadControl.shouldContinuePreloading(true, false));
+        assertFalse(AutoLoadControl.shouldContinuePreloading(true, true));
+        assertFalse(AutoLoadControl.shouldContinuePreloading(false, false));
+    }
 }

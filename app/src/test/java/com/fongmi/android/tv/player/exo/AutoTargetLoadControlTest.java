@@ -2,9 +2,13 @@ package com.fongmi.android.tv.player.exo;
 
 import androidx.media3.common.C;
 import androidx.media3.common.Format;
+import androidx.media3.exoplayer.analytics.PlayerId;
 import androidx.media3.exoplayer.trackselection.ExoTrackSelection;
+import androidx.media3.exoplayer.upstream.DefaultAllocator;
 
 import com.fongmi.android.tv.player.PlaybackAutoContext;
+import com.fongmi.android.tv.player.PlaybackAutoContextStore;
+import com.fongmi.android.tv.player.PlaybackMemoryCoordinator;
 
 import org.junit.Test;
 
@@ -94,6 +98,53 @@ public class AutoTargetLoadControlTest {
         assertEquals(ExoTargetBufferPolicy.DemandSource.UNKNOWN, demand.averageSource());
     }
 
+    @Test
+    public void memoryListenerClosesOnStopAndRebindsOnPrepare() {
+        PlaybackAutoContextStore store = new PlaybackAutoContextStore();
+        PlaybackMemoryCoordinator memory = new PlaybackMemoryCoordinator(store);
+        ExoMemoryPressureCoordinator pressure = new ExoMemoryPressureCoordinator(store, memory);
+        AutoTargetLoadControl loadControl = loadControl(store, pressure);
+        PlayerId playerId = new PlayerId("main");
+
+        loadControl.onPrepared(playerId);
+        assertEquals(1, pressure.listenerCount());
+        loadControl.onStopped(playerId);
+        assertEquals(0, pressure.listenerCount());
+
+        loadControl.onPrepared(playerId);
+        assertEquals(1, pressure.listenerCount());
+        loadControl.onReleased(playerId);
+        assertEquals(0, pressure.listenerCount());
+        pressure.close();
+    }
+
+    @Test
+    public void pressureAtTrackSelectionDoesNotReplaceRecoveryBaseline() {
+        PlaybackAutoContextStore store = new PlaybackAutoContextStore();
+        PlaybackMemoryCoordinator memory = new PlaybackMemoryCoordinator(store);
+        ExoMemoryPressureCoordinator pressure = new ExoMemoryPressureCoordinator(store, memory);
+        AutoTargetLoadControl loadControl = loadControl(store, pressure);
+        ExoTrackSelection[] selections = {
+                selection(new Format.Builder()
+                        .setAverageBitrate(20_000_000)
+                        .setPeakBitrate(20_000_000)
+                        .build())};
+
+        ExoTargetBufferPolicy.Decision observed = loadControl.calculateDecision(
+                selections,
+                ObservedMediaBitrateEstimator.Estimate.unknown(),
+                criticalDevice(),
+                100);
+        ExoTargetBufferPolicy.Decision baseline = loadControl.calculateBaselineDecision(
+                selections,
+                ObservedMediaBitrateEstimator.Estimate.unknown(),
+                100);
+
+        assertEquals(mib(16), observed.targetBytes());
+        assertEquals(mib(96), baseline.targetBytes());
+        pressure.close();
+    }
+
     private static ObservedMediaBitrateEstimator.Estimate estimate(
             long average,
             ObservedMediaBitrateEstimator.Source averageSource,
@@ -118,6 +169,49 @@ public class AutoTargetLoadControlTest {
                 30_000,
                 0,
                 C.TIME_UNSET);
+    }
+
+    private static AutoTargetLoadControl loadControl(
+            PlaybackAutoContextStore store,
+            ExoMemoryPressureCoordinator pressure) {
+        return new AutoTargetLoadControl(
+                new DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE),
+                ExoLoadControlPolicy.automatic(1_000),
+                0,
+                0,
+                ExoBufferBudget.calculate(
+                        ExoBufferBudget.MAX_TARGET_BYTES,
+                        1024L * 1024L * 1024L,
+                        false),
+                new ExoTargetBufferCoordinator(store),
+                pressure);
+    }
+
+    private static PlaybackAutoContext.DeviceFacts criticalDevice() {
+        PlaybackAutoContext.Fact<PlaybackAutoContext.MemoryPressure> pressure =
+                PlaybackAutoContext.Fact.withTtl(
+                        PlaybackAutoContext.MemoryPressure.CRITICAL,
+                        PlaybackAutoContext.ValueSource.SYSTEM_CALLBACK,
+                        PlaybackAutoContext.Confidence.HIGH,
+                        0,
+                        1_000);
+        return new PlaybackAutoContext.DeviceFacts(
+                pressure,
+                PlaybackAutoContext.Fact.unknown(
+                        PlaybackAutoContext.MemorySnapshot.unknown()),
+                PlaybackAutoContext.Fact.unknown(-1L),
+                PlaybackAutoContext.Fact.unknown(
+                        PlaybackAutoContext.ThermalState.UNKNOWN),
+                PlaybackAutoContext.Fact.unknown(
+                        PlaybackAutoContext.PowerState.UNKNOWN),
+                PlaybackAutoContext.Fact.unknown(
+                        PlaybackAutoContext.NetworkCost.UNKNOWN),
+                PlaybackAutoContext.Fact.unknown(
+                        PlaybackAutoContext.NetworkSnapshot.unknown()));
+    }
+
+    private static int mib(int value) {
+        return value * 1024 * 1024;
     }
 
     private static ObservedMediaBitrateEstimator.Confidence lower(

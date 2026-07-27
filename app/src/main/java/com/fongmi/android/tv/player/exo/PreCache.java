@@ -82,8 +82,10 @@ public class PreCache implements Player.Listener {
     private boolean playable;
     private boolean externalPreloadCircuitOpen;
     private boolean diskPreloadCircuitOpen;
+    private boolean memoryPreloadPaused;
     private BufferGate bufferGate;
     private AutoPreloadPolicy autoPolicy;
+    private ExoMemoryPressureCoordinator.Registration memoryPressureRegistration;
 
     public void start(Player player, MediaItem mediaItem, String playbackTraceId, PlaybackRoute.Resolution routeResolution) {
         stop("replace-media");
@@ -95,6 +97,7 @@ public class PreCache implements Player.Listener {
         this.routeResolution = routeResolution == null ? PlaybackRoute.resolve(mediaItem.localConfiguration.uri.toString()) : routeResolution;
         this.route = this.routeResolution.route();
         this.autoPolicy = PlaybackPerformanceSetting.isAuto(PlayerSetting.EXO) ? new AutoPreloadPolicy() : null;
+        bindMemoryPressure();
         this.helper = createHelper(mediaItem);
         clearSeek();
         lastStartMs = C.TIME_UNSET;
@@ -124,6 +127,7 @@ public class PreCache implements Player.Listener {
         }
         if (player != null) player.removeListener(this);
         if (helper != null) helper.release(false);
+        unbindMemoryPressure();
         handler = null;
         helper = null;
         player = null;
@@ -136,6 +140,7 @@ public class PreCache implements Player.Listener {
         playable = false;
         externalPreloadCircuitOpen = false;
         diskPreloadCircuitOpen = false;
+        memoryPreloadPaused = false;
         bufferGate = BufferGate.FIRST_FRAME;
     }
 
@@ -238,6 +243,10 @@ public class PreCache implements Player.Listener {
         if (!playable) {
             transition(PreloadLifecycleTracker.State.WAIT_FIRST_FRAME, "first-frame", "generation=%d position=%d buffered=%d loading=%s", generation, player.getCurrentPosition(), player.getTotalBufferedDuration(), player.isLoading());
             return true;
+        }
+        if (memoryPreloadPaused) {
+            transition(PreloadLifecycleTracker.State.PAUSED_MEMORY, "memory-pressure", "generation=%d position=%d buffered=%d", generation, player.getCurrentPosition(), player.getTotalBufferedDuration());
+            return false;
         }
         if (bufferGate != BufferGate.OPEN) {
             SafeBufferStatus status = getSafeBufferStatus();
@@ -360,6 +369,59 @@ public class PreCache implements Player.Listener {
             playable = true;
             bufferGate = BufferGate.INITIAL;
         }
+        check();
+    }
+
+    private void bindMemoryPressure() {
+        memoryPreloadPaused = false;
+        if (autoPolicy == null) return;
+        ExoMemoryPressureCoordinator coordinator = ExoMemoryPressureCoordinator.process();
+        memoryPressureRegistration = coordinator.addListener(this::onMemoryPressureDecision);
+        ExoMemoryPressurePolicy.Decision current = coordinator.currentDecision(playbackTraceId);
+        memoryPreloadPaused = current != null && current.preloadPaused();
+    }
+
+    private void unbindMemoryPressure() {
+        ExoMemoryPressureCoordinator.Registration registration = memoryPressureRegistration;
+        memoryPressureRegistration = null;
+        if (registration != null) registration.close();
+    }
+
+    private void onMemoryPressureDecision(ExoMemoryPressureCoordinator.Update update) {
+        if (update == null || update.decision() == null || handler == null) return;
+        String expectedTraceId = playbackTraceId;
+        if (!update.session().traceId().equals(expectedTraceId)) return;
+        Handler currentHandler = handler;
+        currentHandler.post(() -> applyMemoryPressureDecision(expectedTraceId, update.decision()));
+    }
+
+    private void applyMemoryPressureDecision(
+            String expectedTraceId,
+            ExoMemoryPressurePolicy.Decision decision) {
+        if (player == null || handler == null
+                || !playbackTraceId.equals(expectedTraceId)
+                || decision == null) {
+            return;
+        }
+        boolean paused = decision.preloadPaused();
+        if (paused == memoryPreloadPaused) return;
+        memoryPreloadPaused = paused;
+        if (paused) {
+            if (lifecycle.hasActiveTask()) stopCurrentTask("memory-pressure");
+            else cancel();
+            transition(PreloadLifecycleTracker.State.PAUSED_MEMORY, decision.reason().label(), "generation=%d mode=%s effectiveBytes=%d", generation, decision.mode().label(), decision.effectiveTargetBytes());
+            publishMemoryPreloadDecision(
+                    decision,
+                    PlaybackTelemetry.DecisionOutcome.SUPPRESSED,
+                    "memory-pressure");
+            return;
+        }
+        bufferGate = BufferGate.RECOVERY;
+        transition(PreloadLifecycleTracker.State.WAIT_RECOVERY_BUFFER, "memory-recovered", "generation=%d effectiveBytes=%d", generation, decision.effectiveTargetBytes());
+        publishMemoryPreloadDecision(
+                decision,
+                PlaybackTelemetry.DecisionOutcome.APPLIED,
+                "memory-recovered");
         check();
     }
 
@@ -501,6 +563,31 @@ public class PreCache implements Player.Listener {
                                 PlaybackTelemetry.DecisionInput.number("rebuffer_count", snapshot.rebufferCount(), PlaybackAutoContext.ValueSource.PLAYER_CALLBACK, PlaybackAutoContext.Confidence.HIGH),
                                 PlaybackTelemetry.DecisionInput.bool("loading", player.isLoading(), PlaybackAutoContext.ValueSource.PLAYER_CALLBACK, PlaybackAutoContext.Confidence.HIGH),
                                 trend.known() ? PlaybackTelemetry.DecisionInput.number("buffer_slope_msps", trend.slopeMsPerSecond(), PlaybackAutoContext.ValueSource.ESTIMATOR, PlaybackAutoContext.Confidence.MEDIUM) : PlaybackTelemetry.DecisionInput.unknown("buffer_slope_msps"))),
+                SystemClock.elapsedRealtime());
+    }
+
+    private void publishMemoryPreloadDecision(
+            ExoMemoryPressurePolicy.Decision decision,
+            PlaybackTelemetry.DecisionOutcome outcome,
+            String reason) {
+        if (decision == null) return;
+        PlaybackTelemetryCoordinator.process().publishDecision(playbackTraceId,
+                new PlaybackTelemetry.DecisionEvent(
+                        PlaybackTelemetry.DecisionDomain.PRELOAD,
+                        outcome,
+                        outcome == PlaybackTelemetry.DecisionOutcome.SUPPRESSED
+                                ? "preload-active" : "memory-paused",
+                        decision.preloadPaused() ? "memory-paused" : "preload-eligible",
+                        decision.preloadPaused() ? "paused" : "recheck-buffer",
+                        reason,
+                        decision.preloadPaused() ? decision.reason().label() : "none",
+                        List.of(
+                                PlaybackTelemetry.DecisionInput.text("memory_mode", decision.mode().label(), PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.number("baseline_bytes", decision.baselineTargetBytes(), PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.number("effective_bytes", decision.effectiveTargetBytes(), PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.bool("preload_paused", decision.preloadPaused(), PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.number("buffered_ms", Math.max(0, player == null ? 0 : player.getTotalBufferedDuration()), PlaybackAutoContext.ValueSource.PLAYER_CALLBACK, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.number("normal_samples", decision.normalSamples(), PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH))),
                 SystemClock.elapsedRealtime());
     }
 

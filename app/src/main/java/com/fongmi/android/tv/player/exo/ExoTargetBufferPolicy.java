@@ -98,6 +98,26 @@ final class ExoTargetBufferPolicy {
         return selected;
     }
 
+    static int previousTierBytes(int targetBytes) {
+        int normalized = tierForCapacity(Math.max(MIN_TARGET_BYTES, targetBytes));
+        int previous = MIN_TARGET_BYTES;
+        for (int tier : TARGET_TIERS_BYTES) {
+            if (tier >= normalized) return previous;
+            previous = tier;
+        }
+        return previous;
+    }
+
+    static int nextTierBytes(int currentBytes, int ceilingBytes) {
+        int current = tierForCapacity(Math.max(MIN_TARGET_BYTES, currentBytes));
+        int ceiling = tierForCapacity(Math.max(MIN_TARGET_BYTES, ceilingBytes));
+        if (current >= ceiling) return ceiling;
+        for (int tier : TARGET_TIERS_BYTES) {
+            if (tier > current) return Math.min(tier, ceiling);
+        }
+        return ceiling;
+    }
+
     static long bytesForDuration(long bitrateBitsPerSecond, long durationMs) {
         if (bitrateBitsPerSecond <= 0 || durationMs <= 0) return 0;
         return saturatingMultiplyDivide(bitrateBitsPerSecond, durationMs, 8_000L);

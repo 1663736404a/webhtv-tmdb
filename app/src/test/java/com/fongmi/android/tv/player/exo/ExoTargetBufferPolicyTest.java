@@ -11,6 +11,15 @@ import static org.junit.Assert.assertTrue;
 public class ExoTargetBufferPolicyTest {
 
     @Test
+    public void tierNeighborsSupportOneStepPressureRecovery() {
+        assertEquals(mib(16), ExoTargetBufferPolicy.previousTierBytes(mib(16)));
+        assertEquals(mib(64), ExoTargetBufferPolicy.previousTierBytes(mib(96)));
+        assertEquals(mib(24), ExoTargetBufferPolicy.nextTierBytes(mib(16), mib(96)));
+        assertEquals(mib(48), ExoTargetBufferPolicy.nextTierBytes(mib(24), mib(48)));
+        assertEquals(mib(48), ExoTargetBufferPolicy.nextTierBytes(mib(64), mib(48)));
+    }
+
+    @Test
     public void averageDemandUsesThirtySecondsAndFifteenPercentHeadroom() {
         ExoTargetBufferPolicy.Decision eightMbps = resolve(demand(8_000_000L, 8_000_000L), 0, budget(1024, false));
         ExoTargetBufferPolicy.Decision twentyMbps = resolve(demand(20_000_000L, 20_000_000L), 0, budget(1024, false));

@@ -51,12 +51,15 @@ final class AutoLoadControl implements LoadControl {
 
     @Override
     public long getBackBufferDurationUs(PlayerId playerId) {
-        return delegate.getBackBufferDurationUs(playerId);
+        return effectiveBackBufferDurationUs(
+                delegate.getBackBufferDurationUs(playerId),
+                delegate.isBackBufferSuppressed(playerId));
     }
 
     @Override
     public boolean retainBackBufferFromKeyframe(PlayerId playerId) {
-        return delegate.retainBackBufferFromKeyframe(playerId);
+        return !delegate.isBackBufferSuppressed(playerId)
+                && delegate.retainBackBufferFromKeyframe(playerId);
     }
 
     @Override
@@ -97,7 +100,10 @@ final class AutoLoadControl implements LoadControl {
 
     @Override
     public boolean shouldContinuePreloading(PlayerId playerId, Timeline timeline, MediaSource.MediaPeriodId mediaPeriodId, long bufferedDurationUs) {
-        return delegate.shouldContinuePreloading(playerId, timeline, mediaPeriodId, bufferedDurationUs);
+        return shouldContinuePreloading(
+                delegate.shouldContinuePreloading(
+                        playerId, timeline, mediaPeriodId, bufferedDurationUs),
+                delegate.isPreloadPaused());
     }
 
     static boolean reachedAdaptiveThreshold(long bufferedDurationUs, float playbackSpeed, long targetLiveOffsetUs, int rebufferMs) {
@@ -122,5 +128,17 @@ final class AutoLoadControl implements LoadControl {
         if (controlledReady || rescueCanContinue) return controlledReady;
         if (!rebuffering || delegateReady) return delegateReady;
         return adaptiveReady;
+    }
+
+    static long effectiveBackBufferDurationUs(
+            long configuredDurationUs,
+            boolean suppressed) {
+        return suppressed ? 0 : Math.max(0, configuredDurationUs);
+    }
+
+    static boolean shouldContinuePreloading(
+            boolean delegateAllowed,
+            boolean memoryPaused) {
+        return delegateAllowed && !memoryPaused;
     }
 }

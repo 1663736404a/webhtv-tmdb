@@ -96,4 +96,19 @@ public class PreloadLifecycleTrackerTest {
         assertEquals(PreloadLifecycleTracker.State.PAUSED_STORAGE, paused.to());
         assertEquals("storage-reclaim-required", paused.reason());
     }
+
+    @Test
+    public void memoryPauseIsDistinctFromNetworkAndStoragePauses() {
+        PreloadLifecycleTracker tracker = new PreloadLifecycleTracker();
+        tracker.beginSession();
+        tracker.startTask(4, 20_000, 10_000);
+        tracker.endTask(PreloadLifecycleTracker.TaskEvent.Outcome.CANCELLED);
+
+        PreloadLifecycleTracker.StateEvent paused = tracker.transition(
+                PreloadLifecycleTracker.State.PAUSED_MEMORY,
+                "critical-pressure");
+
+        assertEquals(PreloadLifecycleTracker.State.PAUSED_MEMORY, paused.to());
+        assertEquals("critical-pressure", paused.reason());
+    }
 }

@@ -63,6 +63,21 @@ final class ExoPlaybackDiagnostics {
                 decision.hardProtectionAvailable(), decision.memoryPressure().label());
     }
 
+    static void logMemoryPressureDecision(
+            ExoMemoryPressurePolicy.Decision decision,
+            int allocatorAllocatedBytes,
+            int allocatorUnusedBytes) {
+        if (!SpiderDebug.isEnabled() || decision == null) return;
+        SpiderDebug.log("exo-buffer", "memoryMode=%s reason=%s pressure=%s recoveryClass=%s baselineBytes=%d safeBytes=%d effectiveBytes=%d normalSamples=%d cooldownRemainingMs=%d preloadPaused=%s backSuppressed=%s allocatorAllocatedBytes=%d allocatorUnusedBytes=%d",
+                decision.mode().label(), decision.reason().label(),
+                decision.observedPressure().label(), decision.recoveryClass().label(),
+                decision.baselineTargetBytes(), decision.safeTargetBytes(),
+                decision.effectiveTargetBytes(), decision.normalSamples(),
+                decision.cooldownRemainingMs(android.os.SystemClock.elapsedRealtime()),
+                decision.preloadPaused(), decision.backBufferSuppressed(),
+                Math.max(0, allocatorAllocatedBytes), Math.max(0, allocatorUnusedBytes));
+    }
+
     static void logDefaultLoadControl(int profile) {
         if (SpiderDebug.isEnabled()) SpiderDebug.log("exo-buffer", "loadControl profile=%s mode=media3-default", profileName(profile));
     }
