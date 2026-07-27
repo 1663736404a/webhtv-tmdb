@@ -11,10 +11,32 @@ import static org.junit.Assert.assertTrue;
 public class ExoLoadControlPolicyTest {
 
     @Test
-    public void autoProfilePrioritizesTimeEvenWhenSizePrioritySettingIsOff() {
-        assertTrue(ExoLoadControlPolicy.prioritizeTime(PlaybackPerformanceSetting.PROFILE_AUTO, false));
-        assertTrue(ExoLoadControlPolicy.prioritizeTime(PlaybackPerformanceSetting.PROFILE_AUTO, true));
-        assertFalse(ExoLoadControlPolicy.prioritizeTime(PlaybackPerformanceSetting.PROFILE_RECOMMENDED, false));
+    public void fixedProfilesHonorConfiguredPriorityWithoutAutoOverride() {
+        assertFalse(ExoLoadControlPolicy.prioritizeTime(false));
+        assertTrue(ExoLoadControlPolicy.prioritizeTime(true));
+    }
+
+    @Test
+    public void automaticProfileSeparatesStreamingAndLocalBoundaries() {
+        ExoLoadControlPolicy.AutomaticConfiguration configuration =
+                ExoLoadControlPolicy.automatic(1_500);
+
+        assertEquals(30_000, configuration.streaming().minBufferMs());
+        assertEquals(60_000, configuration.streaming().maxBufferMs());
+        assertEquals(1_500, configuration.streamingStartBufferMs());
+        assertEquals(15_000, configuration.streamingRebufferMs());
+        assertFalse(configuration.streamingPrioritizeTime());
+        assertEquals(1_000, configuration.local().minBufferMs());
+        assertEquals(15_000, configuration.local().maxBufferMs());
+        assertEquals(500, configuration.localStartBufferMs());
+        assertEquals(1_000, configuration.localRebufferMs());
+        assertTrue(configuration.localPrioritizeTime());
+    }
+
+    @Test
+    public void automaticStreamingStartIsClampedToItsMinimumBuffer() {
+        assertEquals(0, ExoLoadControlPolicy.automatic(-1).streamingStartBufferMs());
+        assertEquals(30_000, ExoLoadControlPolicy.automatic(60_000).streamingStartBufferMs());
     }
 
     @Test

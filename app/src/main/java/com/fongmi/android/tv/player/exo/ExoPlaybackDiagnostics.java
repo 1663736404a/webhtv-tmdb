@@ -20,6 +20,24 @@ final class ExoPlaybackDiagnostics {
                 budget.memoryClassMb(), budget.largeMemoryClassMb(), budget.largeHeap(), budget.lowRamDevice(), prioritizeTime);
     }
 
+    static void logAutoLoadControl(
+            int profile,
+            ExoLoadControlPolicy.AutomaticConfiguration configuration,
+            ExoBufferBudget.Budget budget,
+            int backBufferMs) {
+        if (!SpiderDebug.isEnabled()) return;
+        SpiderDebug.log("exo-buffer", "loadControl profile=%s targetMode=dynamic streamingMin=%d streamingMax=%d streamingStart=%d streamingRebufferMax=%d streamingPrioritizeTime=%s localMin=%d localMax=%d localStart=%d localRebuffer=%d localPrioritizeTime=%s back=%d requestedBytes=%d heapBudgetBytes=%d fallbackEffectiveBytes=%d guardBytes=%d",
+                profileName(profile),
+                configuration.streaming().minBufferMs(), configuration.streaming().maxBufferMs(),
+                configuration.streamingStartBufferMs(), configuration.streamingRebufferMs(),
+                configuration.streamingPrioritizeTime(),
+                configuration.local().minBufferMs(), configuration.local().maxBufferMs(),
+                configuration.localStartBufferMs(), configuration.localRebufferMs(),
+                configuration.localPrioritizeTime(), backBufferMs,
+                budget.requestedTargetBytes(), budget.heapBudgetBytes(), budget.effectiveTargetBytes(),
+                ExoTargetBufferPolicy.GUARD_TARGET_BYTES);
+    }
+
     static void logTargetDecision(ExoTargetBufferPolicy.Decision decision) {
         if (!SpiderDebug.isEnabled() || decision == null) return;
         ExoTargetBufferPolicy.MediaDemand media = decision.mediaDemand();
@@ -31,6 +49,18 @@ final class ExoPlaybackDiagnostics {
                 decision.deviceBudgetBytes(), decision.heapBudgetBytes(), decision.javaHeadroomBudgetBytes(), decision.systemBudgetBytes(),
                 decision.configuredCapBytes(), ExoTargetBufferPolicy.GUARD_TARGET_BYTES, decision.reserveBytes(), decision.lowRamDevice(),
                 decision.memorySnapshotUsable(), decision.memoryPressureUsable(), decision.memoryPressure().label());
+    }
+
+    static void logLoadControlMode(ExoLoadControlModePolicy.Decision decision) {
+        if (!SpiderDebug.isEnabled() || decision == null) return;
+        ExoLoadControlModePolicy.TrackProfile tracks = decision.tracks();
+        SpiderDebug.log("exo-buffer", "mode=%s reason=%s protocol=%s stream=%s prioritizeTime=%s adaptiveVideo=%s selectedVideoCandidates=%d availableVideoFormats=%d manifestVariants=%d bitrateBps=%d targetBytes=%d targetDurationMs=%d rescueBytes=%d hardCapacityBytes=%d hardProtection=%s memoryPressure=%s",
+                decision.mode().label(), decision.reason().label(), decision.protocol().label(),
+                decision.streamKind().label(), decision.mode().prioritizeTime(),
+                tracks.adaptiveVideo(), tracks.selectedVideoCandidates(), tracks.availableVideoFormats(),
+                decision.manifestVariantCount(), decision.bitrateBitsPerSecond(), decision.targetBytes(),
+                decision.targetDurationMs(), decision.rescueBytes(), decision.hardCapacityBytes(),
+                decision.hardProtectionAvailable(), decision.memoryPressure().label());
     }
 
     static void logDefaultLoadControl(int profile) {

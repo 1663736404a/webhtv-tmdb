@@ -7,6 +7,7 @@ import androidx.media3.common.Format;
 import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.LoadControl;
 import androidx.media3.exoplayer.analytics.PlayerId;
+import androidx.media3.exoplayer.source.TrackGroupArray;
 import androidx.media3.exoplayer.trackselection.ExoTrackSelection;
 import androidx.media3.exoplayer.upstream.DefaultAllocator;
 
@@ -17,61 +18,157 @@ import com.fongmi.android.tv.player.PlaybackTelemetryCoordinator;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** DefaultLoadControl extension that calculates automatic target bytes at track-selection edges. */
 final class AutoTargetLoadControl extends DefaultLoadControl {
 
+    private final DefaultAllocator allocator;
     private final ExoBufferBudget.Budget fallbackBudget;
     private final int configuredTargetBytes;
     private final ExoTargetBufferCoordinator coordinator;
+    private final ConcurrentHashMap<PlayerId, TargetState> targetStates;
+    private final ConcurrentHashMap<PlayerId, ModeState> modeStates;
 
     AutoTargetLoadControl(
-            ExoLoadControlPolicy.BufferDurations durations,
-            int startBufferMs,
-            int rebufferMs,
+            ExoLoadControlPolicy.AutomaticConfiguration configuration,
             int backBufferMs,
-            boolean prioritizeTime,
             int configuredTargetBytes,
             ExoBufferBudget.Budget fallbackBudget) {
         this(
-                durations,
-                startBufferMs,
-                rebufferMs,
+                new DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE),
+                configuration,
                 backBufferMs,
-                prioritizeTime,
                 configuredTargetBytes,
                 fallbackBudget,
                 ExoTargetBufferCoordinator.process());
     }
 
     AutoTargetLoadControl(
-            ExoLoadControlPolicy.BufferDurations durations,
-            int startBufferMs,
-            int rebufferMs,
+            DefaultAllocator allocator,
+            ExoLoadControlPolicy.AutomaticConfiguration configuration,
             int backBufferMs,
-            boolean prioritizeTime,
             int configuredTargetBytes,
             ExoBufferBudget.Budget fallbackBudget,
             ExoTargetBufferCoordinator coordinator) {
         super(
-                new DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE),
-                durations.minBufferMs(),
-                durations.minBufferMs(),
-                durations.maxBufferMs(),
-                durations.maxBufferMs(),
-                startBufferMs,
-                startBufferMs,
-                rebufferMs,
-                rebufferMs,
+                allocator,
+                configuration.streaming().minBufferMs(),
+                configuration.local().minBufferMs(),
+                configuration.streaming().maxBufferMs(),
+                configuration.local().maxBufferMs(),
+                configuration.streamingStartBufferMs(),
+                configuration.localStartBufferMs(),
+                configuration.streamingRebufferMs(),
+                configuration.localRebufferMs(),
                 C.LENGTH_UNSET,
-                prioritizeTime,
-                prioritizeTime,
+                configuration.streamingPrioritizeTime(),
+                configuration.localPrioritizeTime(),
                 backBufferMs,
                 true,
                 Collections.singletonMap(PlayerId.PRELOAD.name, DEFAULT_TARGET_BUFFER_BYTES_FOR_PRELOAD));
+        this.allocator = allocator;
         this.configuredTargetBytes = Math.max(0, configuredTargetBytes);
         this.fallbackBudget = fallbackBudget;
         this.coordinator = coordinator;
+        this.targetStates = new ConcurrentHashMap<>();
+        this.modeStates = new ConcurrentHashMap<>();
+    }
+
+    @Override
+    public void onPrepared(PlayerId playerId) {
+        targetStates.remove(playerId);
+        modeStates.remove(playerId);
+        super.onPrepared(playerId);
+    }
+
+    @Override
+    public void onTracksSelected(
+            LoadControl.Parameters parameters,
+            TrackGroupArray trackGroups,
+            ExoTrackSelection[] trackSelections) {
+        super.onTracksSelected(parameters, trackGroups, trackSelections);
+        if (PlayerId.PRELOAD.equals(parameters.playerId)) return;
+        long now = SystemClock.elapsedRealtime();
+        PlaybackAutoContext context = PlaybackAutoContextStore.process().snapshot();
+        TargetState targetState = targetStates.get(parameters.playerId);
+        if (targetState == null) return;
+        PlaybackAutoContext modeContext = targetState.session().active()
+                && targetState.session().equals(context.session())
+                ? context : PlaybackAutoContext.empty();
+        ExoLoadControlModePolicy.TrackProfile tracks =
+                ExoLoadControlModePolicy.TrackProfile.inspect(trackGroups, trackSelections);
+        ExoLoadControlModePolicy.Decision mode = resolveMode(
+                modeContext,
+                tracks,
+                targetState.decision(),
+                now);
+        ModeState previous = modeStates.put(
+                parameters.playerId,
+                new ModeState(targetState.session(), tracks, mode));
+        ExoPlaybackDiagnostics.logLoadControlMode(mode);
+        if (targetState.session().active()) {
+            publishModeTelemetry(
+                    targetState.session(),
+                    previous == null ? null : previous.decision(),
+                    mode,
+                    targetState.decision(),
+                    modeContext,
+                    now);
+        }
+    }
+
+    @Override
+    public void onStopped(PlayerId playerId) {
+        targetStates.remove(playerId);
+        modeStates.remove(playerId);
+        super.onStopped(playerId);
+    }
+
+    @Override
+    public void onReleased(PlayerId playerId) {
+        targetStates.remove(playerId);
+        modeStates.remove(playerId);
+        super.onReleased(playerId);
+    }
+
+    @Override
+    public boolean shouldContinueLoading(LoadControl.Parameters parameters) {
+        boolean delegateLoading = super.shouldContinueLoading(parameters);
+        if (delegateLoading || PlayerId.PRELOAD.equals(parameters.playerId)) return delegateLoading;
+        ExoLoadControlModePolicy.Decision mode = currentModeDecision(parameters.playerId);
+        if (!mode.mode().controlledTimePriority()) return false;
+        if (AutoLoadControl.reachedAdaptiveThreshold(
+                parameters.bufferedDurationUs,
+                parameters.playbackSpeed,
+                parameters.targetLiveOffsetUs,
+                ExoLoadControlModePolicy.SINGLE_TRACK_RESCUE_BUFFER_MS)) {
+            return false;
+        }
+        return canContinueControlledRescue(mode);
+    }
+
+    boolean canContinueControlledRescue(PlayerId playerId) {
+        return canContinueControlledRescue(currentModeDecision(playerId));
+    }
+
+    ExoLoadControlModePolicy.Decision currentModeDecision(PlayerId playerId) {
+        ModeState modeState = modeStates.get(playerId);
+        TargetState targetState = targetStates.get(playerId);
+        if (modeState == null || targetState == null
+                || !modeState.session().equals(targetState.session())) {
+            return ExoLoadControlModePolicy.Decision.unknown();
+        }
+        if (!modeState.session().active()) return modeState.decision();
+        PlaybackAutoContext context = PlaybackAutoContextStore.process().snapshot();
+        if (!modeState.session().equals(context.session())) {
+            return ExoLoadControlModePolicy.Decision.unknown();
+        }
+        return resolveMode(
+                context,
+                modeState.tracks(),
+                targetState.decision(),
+                SystemClock.elapsedRealtime());
     }
 
     @Override
@@ -90,9 +187,150 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
                 device,
                 now);
         boolean published = coordinator.publish(session, decision, now);
+        targetStates.put(parameters.playerId, new TargetState(session, decision));
         ExoPlaybackDiagnostics.logTargetDecision(decision);
         if (published) publishTelemetry(session, previous, decision, context, now);
         return decision.targetBytes();
+    }
+
+    private ExoLoadControlModePolicy.Decision resolveMode(
+            PlaybackAutoContext context,
+            ExoLoadControlModePolicy.TrackProfile tracks,
+            ExoTargetBufferPolicy.Decision actualTarget,
+            long now) {
+        PlaybackAutoContext safeContext = context == null ? PlaybackAutoContext.empty() : context;
+        ExoTargetBufferPolicy.Decision currentSafety = ExoTargetBufferPolicy.resolve(
+                actualTarget.mediaDemand(),
+                configuredTargetBytes,
+                fallbackBudget,
+                safeContext.device(),
+                now);
+        return ExoLoadControlModePolicy.resolve(
+                safeContext.resource(),
+                safeContext.path(),
+                tracks,
+                actualTarget,
+                currentSafety,
+                now);
+    }
+
+    private boolean heapGuardAllows() {
+        Runtime runtime = Runtime.getRuntime();
+        return ExoLoadControlModePolicy.heapGuardAllows(
+                runtime.maxMemory(),
+                runtime.totalMemory(),
+                runtime.freeMemory(),
+                allocator.getUnusedBytesAllocated());
+    }
+
+    private boolean canContinueControlledRescue(ExoLoadControlModePolicy.Decision mode) {
+        return mode.mode().controlledTimePriority()
+                && heapGuardAllows()
+                && ExoLoadControlModePolicy.canAllocate(
+                        allocator.getTotalBytesAllocated(),
+                        allocator.getIndividualAllocationLength(),
+                        mode.hardCapacityBytes());
+    }
+
+    private static void publishModeTelemetry(
+            PlaybackAutoContext.SessionToken session,
+            ExoLoadControlModePolicy.Decision previous,
+            ExoLoadControlModePolicy.Decision decision,
+            ExoTargetBufferPolicy.Decision target,
+            PlaybackAutoContext context,
+            long now) {
+        PlaybackAutoContext.Fact<PlaybackAutoContext.Protocol> protocol =
+                context.resource().protocol();
+        PlaybackAutoContext.Fact<PlaybackAutoContext.StreamKind> stream =
+                context.resource().streamKind();
+        PlaybackAutoContext.Fact<PlaybackAutoContext.ManifestFacts> manifest =
+                context.resource().manifest();
+        PlaybackAutoContext.Fact<PlaybackAutoContext.MemorySnapshot> memorySnapshot =
+                context.device().memorySnapshot();
+        PlaybackAutoContext.Fact<PlaybackAutoContext.MemoryPressure> memoryPressure =
+                context.device().memoryPressure();
+        ExoLoadControlModePolicy.TrackProfile tracks = decision.tracks();
+        PlaybackTelemetryCoordinator.process().publishDecision(
+                session,
+                new PlaybackTelemetry.DecisionEvent(
+                        PlaybackTelemetry.DecisionDomain.LOAD_CONTROL,
+                        PlaybackTelemetry.DecisionOutcome.APPLIED,
+                        previous == null ? "unknown" : previous.mode().label(),
+                        decision.mode().label(),
+                        decision.mode().label(),
+                        decision.reason().label(),
+                        "none",
+                        List.of(
+                                factInput("protocol", decision.protocol().label(), protocol, now),
+                                factInput("stream_kind", decision.streamKind().label(), stream, now),
+                                PlaybackTelemetry.DecisionInput.bool("adaptive_video", tracks.adaptiveVideo(), PlaybackAutoContext.ValueSource.PLAYER_CALLBACK, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.number("video_candidates", tracks.selectedVideoCandidates(), PlaybackAutoContext.ValueSource.PLAYER_CALLBACK, PlaybackAutoContext.Confidence.HIGH),
+                                manifestVariantInput(decision.manifestVariantCount(), manifest, now),
+                                modeBitrateInput(decision, target.mediaDemand()),
+                                PlaybackTelemetry.DecisionInput.number("target_bytes", decision.targetBytes(), PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH),
+                                decision.targetDurationMs() < 0
+                                        ? PlaybackTelemetry.DecisionInput.unknown("target_duration_ms")
+                                        : PlaybackTelemetry.DecisionInput.number("target_duration_ms", decision.targetDurationMs(), PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.MEDIUM),
+                                decision.rescueBytes() <= 0
+                                        ? PlaybackTelemetry.DecisionInput.unknown("rescue_bytes")
+                                        : PlaybackTelemetry.DecisionInput.number("rescue_bytes", decision.rescueBytes(), PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH),
+                                memoryInput("hard_capacity_bytes", decision.hardCapacityBytes(), memorySnapshot, now),
+                                memoryBooleanInput("hard_protection", decision.hardProtectionAvailable(), memorySnapshot, now),
+                                factInput("memory_pressure", decision.memoryPressure().label(), memoryPressure, now))),
+                now);
+    }
+
+    private static <T> PlaybackTelemetry.DecisionInput factInput(
+            String name,
+            String value,
+            PlaybackAutoContext.Fact<T> fact,
+            long now) {
+        if (fact == null || !fact.isUsable(now)) return PlaybackTelemetry.DecisionInput.unknown(name);
+        return PlaybackTelemetry.DecisionInput.text(name, value, fact.source(), fact.confidence());
+    }
+
+    private static PlaybackTelemetry.DecisionInput manifestVariantInput(
+            int variants,
+            PlaybackAutoContext.Fact<PlaybackAutoContext.ManifestFacts> fact,
+            long now) {
+        if (variants < 0 || fact == null || !fact.isUsable(now)) {
+            return PlaybackTelemetry.DecisionInput.unknown("manifest_variants");
+        }
+        return PlaybackTelemetry.DecisionInput.number(
+                "manifest_variants", variants, fact.source(), fact.confidence());
+    }
+
+    private static PlaybackTelemetry.DecisionInput modeBitrateInput(
+            ExoLoadControlModePolicy.Decision decision,
+            ExoTargetBufferPolicy.MediaDemand media) {
+        long bitrate = decision.bitrateBitsPerSecond();
+        if (bitrate <= 0) return PlaybackTelemetry.DecisionInput.unknown("control_bitrate_bps");
+        if (media.burstReliable() && media.burstBitsPerSecond() == bitrate) {
+            return bitrateInput(
+                    "control_bitrate_bps", bitrate, media.burstSource(), media.burstConfidence());
+        }
+        return bitrateInput(
+                "control_bitrate_bps", bitrate, media.averageSource(), media.averageConfidence());
+    }
+
+    private static PlaybackTelemetry.DecisionInput memoryInput(
+            String name,
+            long value,
+            PlaybackAutoContext.Fact<PlaybackAutoContext.MemorySnapshot> fact,
+            long now) {
+        if (value <= 0 || fact == null || !fact.isUsable(now)) {
+            return PlaybackTelemetry.DecisionInput.unknown(name);
+        }
+        return PlaybackTelemetry.DecisionInput.number(name, value, fact.source(), fact.confidence());
+    }
+
+    private static PlaybackTelemetry.DecisionInput memoryBooleanInput(
+            String name,
+            boolean value,
+            PlaybackAutoContext.Fact<PlaybackAutoContext.MemorySnapshot> fact,
+            long now) {
+        if (fact == null || !fact.isUsable(now)) return PlaybackTelemetry.DecisionInput.unknown(name);
+        return PlaybackTelemetry.DecisionInput.bool(name, value, fact.source(), fact.confidence());
     }
 
     ExoTargetBufferPolicy.Decision calculateDecision(
@@ -320,5 +558,26 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
         if (first <= 0) return Math.max(0, second);
         if (second <= 0) return first;
         return first > Long.MAX_VALUE - second ? Long.MAX_VALUE : first + second;
+    }
+
+    private record TargetState(
+            PlaybackAutoContext.SessionToken session,
+            ExoTargetBufferPolicy.Decision decision) {
+
+        private TargetState {
+            session = session == null ? PlaybackAutoContext.SessionToken.none() : session;
+        }
+    }
+
+    private record ModeState(
+            PlaybackAutoContext.SessionToken session,
+            ExoLoadControlModePolicy.TrackProfile tracks,
+            ExoLoadControlModePolicy.Decision decision) {
+
+        private ModeState {
+            session = session == null ? PlaybackAutoContext.SessionToken.none() : session;
+            tracks = tracks == null ? ExoLoadControlModePolicy.TrackProfile.unknown() : tracks;
+            decision = decision == null ? ExoLoadControlModePolicy.Decision.unknown() : decision;
+        }
     }
 }

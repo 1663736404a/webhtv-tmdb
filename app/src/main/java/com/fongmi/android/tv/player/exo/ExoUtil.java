@@ -418,25 +418,26 @@ public class ExoUtil {
     private static LoadControl buildEnhancedLoadControl() {
         int profile = PlaybackPerformanceSetting.getProfile(PlayerSetting.EXO);
         boolean auto = profile == PlaybackPerformanceSetting.PROFILE_AUTO;
-        ExoLoadControlPolicy.BufferDurations durations = getBufferDurations();
         ExoBufferBudget.Budget budget = getBufferBudget();
         int configuredTargetBytes = PlayerSetting.getBufferBytes(PlayerSetting.EXO);
-        int startBufferMs = auto ? ExoPerformanceSetting.getAutoSessionStartBufferMs() : ExoPerformanceSetting.getStartBufferMs();
-        int rebufferMs = ExoPerformanceSetting.getRebufferMs();
         int backBufferMs = PlayerSetting.getBackBufferMs(PlayerSetting.EXO);
-        boolean prioritizeTime = ExoLoadControlPolicy.prioritizeTime(profile, ExoPerformanceSetting.isPrioritizeTime());
-        ExoPlaybackDiagnostics.logLoadControl(profile, durations, budget, startBufferMs, rebufferMs, backBufferMs, prioritizeTime, auto);
         if (auto) {
-            DefaultLoadControl loadControl = new AutoTargetLoadControl(
-                    durations,
-                    startBufferMs,
-                    AutoLoadControl.MAX_REBUFFER_MS,
+            int startBufferMs = ExoPerformanceSetting.getAutoSessionStartBufferMs();
+            ExoLoadControlPolicy.AutomaticConfiguration configuration =
+                    ExoLoadControlPolicy.automatic(startBufferMs);
+            ExoPlaybackDiagnostics.logAutoLoadControl(profile, configuration, budget, backBufferMs);
+            AutoTargetLoadControl loadControl = new AutoTargetLoadControl(
+                    configuration,
                     backBufferMs,
-                    prioritizeTime,
                     configuredTargetBytes,
                     budget);
-            return new AutoLoadControl(loadControl);
+            return new AutoLoadControl(loadControl, configuration);
         }
+        ExoLoadControlPolicy.BufferDurations durations = getBufferDurations();
+        int startBufferMs = ExoPerformanceSetting.getStartBufferMs();
+        int rebufferMs = ExoPerformanceSetting.getRebufferMs();
+        boolean prioritizeTime = ExoLoadControlPolicy.prioritizeTime(ExoPerformanceSetting.isPrioritizeTime());
+        ExoPlaybackDiagnostics.logLoadControl(profile, durations, budget, startBufferMs, rebufferMs, backBufferMs, prioritizeTime, false);
         return new DefaultLoadControl.Builder()
                 .setBufferDurationsMs(durations.minBufferMs(), durations.maxBufferMs(), startBufferMs, rebufferMs)
                 .setTargetBufferBytes(budget.effectiveTargetBytes())
