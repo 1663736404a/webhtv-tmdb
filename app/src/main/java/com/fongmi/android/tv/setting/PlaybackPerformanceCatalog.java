@@ -154,10 +154,10 @@ public final class PlaybackPerformanceCatalog {
     }
 
     private static void addPreload(List<PlaybackPerformanceOption> options) {
-        options.add(option(PRELOAD, PRELOAD_SECTION, "预载", "怎么选：网盘点播和大文件建议保持自动/开启，可提前准备后续数据；直播、流量受限或播放本身已被预载抢带宽时关闭。代价：增加流量、磁盘写入和后台连接，预载不能抢占当前播放。"));
-        options.add(option(PRELOAD_THREADS, PRELOAD_SECTION, "预载线程", "怎么选：自动档使用0～2条；手动通常1条最稳，播放带宽有富余可试2条，不建议盲目加高。线程越多不等于播放越快，反而可能挤占当前播放、触发服务器限流或412。"));
+        options.add(option(PRELOAD, PRELOAD_SECTION, "预载", "怎么选：网盘点播和大文件建议保持自动/开启，可提前准备后续数据；直播、计费/漫游/Data Saver、省电、热或内存压力下自动暂停。代价：增加流量、磁盘写入和后台连接；前台缓冲或短窗吞吐转差时会立即取消在途预载。"));
+        options.add(option(PRELOAD_THREADS, PRELOAD_SECTION, "预载线程", "怎么选：自动档按前台缓冲、短/长窗吞吐和系统状态使用0～2条；只有可信非计费链路连续稳定才升到2条，风险或证据不足回到0～1条。手动通常1条最稳，线程过多可能挤占当前播放、触发服务器限流或412。"));
         options.add(option(PRELOAD_SIZE, PRELOAD_SECTION, "预载容量", "怎么选：保持档位默认；长视频/网盘大文件且存储充足可提高，空间紧张则降低。容量决定最多保存多少预载数据，不提高瞬时网速；越大占用磁盘越多。"));
-        options.add(option(PRELOAD_TIME, PRELOAD_SECTION, "预载时间", "怎么选：自动档每次10～30秒；网络有短时波动可适当提高，流量或磁盘受限则降低。范围越长越能跨过较长波动，也会下载更多；过长可能让预载持续占用连接。"));
+        options.add(option(PRELOAD_TIME, PRELOAD_SECTION, "预载时间", "怎么选：自动档通常每次10～30秒；外部 loopback 始终最多1线程，只有前台缓冲和系统状态持续安全才保留40秒范围。网络有短时波动可适当提高，流量或磁盘受限则降低；范围越长下载和连接占用越多。"));
     }
 
     private static String profileDescription(int kernel) {

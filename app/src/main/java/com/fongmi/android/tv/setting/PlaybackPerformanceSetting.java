@@ -527,7 +527,7 @@ public class PlaybackPerformanceSetting {
         if (!isAuto()) {
             return "\n预载：" + onOff(PreloadSetting.isPreload()) + "，线程：" + PreloadSetting.getPreloadThreads() + "，容量：" + PreloadSetting.getPreloadSizeMb() + "MB，时间：" + PreloadSetting.getPreloadTimeSeconds() + "秒";
         }
-        return "\n预载：自动，线程：0～2，容量：" + PreloadSetting.getPreloadSizeMb() + "MB，单次时间：10～30秒";
+        return "\n预载：自动，线程：0～2，容量：" + PreloadSetting.getPreloadSizeMb() + "MB，单次时间：10～30秒（外部代理安全时最多40秒）";
     }
 
     private static String secondsText(int milliseconds) {
