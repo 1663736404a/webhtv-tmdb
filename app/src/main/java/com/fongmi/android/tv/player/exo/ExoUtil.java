@@ -23,6 +23,7 @@ import androidx.media3.common.MediaItem;
 import androidx.media3.common.MimeTypes;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
+import androidx.media3.common.Tracks;
 import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.DecoderReuseEvaluation;
@@ -53,6 +54,9 @@ import com.fongmi.android.tv.BuildConfig;
 import com.fongmi.android.tv.bean.Drm;
 import com.fongmi.android.tv.bean.Sub;
 import com.fongmi.android.tv.player.PlayerHelper;
+import com.fongmi.android.tv.player.PlaybackAutoContext;
+import com.fongmi.android.tv.player.PlaybackAutoContextStore;
+import com.fongmi.android.tv.player.PlaybackSystemConditionCoordinator;
 import com.fongmi.android.tv.player.engine.PlaySpec;
 import com.fongmi.android.tv.player.engine.PlayerEngine;
 import com.fongmi.android.tv.player.lut.LutSetting;
@@ -100,7 +104,8 @@ public class ExoUtil {
     }
 
     public static ExoPlayer buildPlayer(int decode, Player.Listener listener, boolean tunnelingFallbackAttempted) {
-        if (PlaybackPerformanceSetting.isAuto(PlayerSetting.EXO)) ExoPerformanceSetting.beginAutoSession();
+        boolean automatic = PlaybackPerformanceSetting.isAuto(PlayerSetting.EXO);
+        if (automatic) ExoPerformanceSetting.beginAutoSession();
         EnhancedVideoProfile profile = getEnhancedVideoProfile(decode);
         List<EnhancedVideoProfile> profiles = getEnhancedVideoProfiles(decode);
         DefaultTrackSelector trackSelector = buildTrackSelector(decode, tunnelingFallbackAttempted);
@@ -120,7 +125,13 @@ public class ExoUtil {
         PlaybackAnalyticsListener analyticsListener = new PlaybackAnalyticsListener();
         player.addAnalyticsListener(analyticsListener);
         player.setVideoFrameMetadataListener(analyticsListener);
-        if (PlaybackPerformanceSetting.isAdaptiveDowngradeEnabled()) player.addAnalyticsListener(new AdaptiveVideoProfileController(trackSelector, profile, profiles));
+        if (PlaybackPerformanceSetting.isAdaptiveDowngradeEnabled()) {
+            if (automatic && PlaybackPerformanceSetting.isTrackLimitEnabled()) {
+                player.addAnalyticsListener(new AutomaticVideoConstraintController(trackSelector, profile, profiles));
+            } else if (!automatic) {
+                player.addAnalyticsListener(new LegacyAdaptiveVideoProfileController(trackSelector, profile, profiles));
+            }
+        }
         if (BuildConfig.DEBUG) player.addAnalyticsListener(new EventLogger());
         player.setAudioAttributes(AudioAttributes.DEFAULT, true);
         player.setHandleAudioBecomingNoisy(true);
@@ -218,10 +229,17 @@ public class ExoUtil {
     }
 
     private static void applyEnhancedVideoProfile(DefaultTrackSelector.Parameters.Builder builder, EnhancedVideoProfile profile) {
-        builder.setMaxVideoSize(profile.width(), profile.height());
-        builder.setViewportSize(profile.width(), profile.height(), true);
-        builder.setMaxVideoBitrate(profile.maxVideoBitrate());
-        builder.setMaxVideoFrameRate(profile.frameRate());
+        applyVideoLimit(builder, new ExoAutomaticVideoConstraintPolicy.Limit(
+                profile.width(), profile.height(), profile.frameRate(), profile.maxVideoBitrate()));
+    }
+
+    private static void applyVideoLimit(
+            DefaultTrackSelector.Parameters.Builder builder,
+            ExoAutomaticVideoConstraintPolicy.Limit limit) {
+        builder.setMaxVideoSize(limit.width(), limit.height());
+        builder.setViewportSize(limit.width(), limit.height(), true);
+        builder.setMaxVideoBitrate(limit.maxVideoBitrate());
+        builder.setMaxVideoFrameRate(limit.frameRate());
         builder.setExceedVideoConstraintsIfNecessary(true);
         builder.setAllowVideoNonSeamlessAdaptiveness(true);
         builder.setAllowVideoMixedMimeTypeAdaptiveness(true);
@@ -627,7 +645,384 @@ public class ExoUtil {
         }
     }
 
-    private static class AdaptiveVideoProfileController implements AnalyticsListener {
+    private static class AutomaticVideoConstraintController implements AnalyticsListener {
+
+        private final DefaultTrackSelector trackSelector;
+        private final EnhancedVideoProfile baselineProfile;
+        private final ExoAutomaticVideoConstraintPolicy.Limit baselineLimit;
+        private final List<ExoAutomaticVideoConstraintPolicy.Limit> tiers;
+        private final PlaybackSystemConditionCoordinator.Registration systemConditionRegistration;
+        private final Runnable refreshRunnable;
+        private PlaybackAutoContext.SessionToken boundSession;
+        private ExoAutomaticVideoConstraintPolicy.State constraintState;
+        private ExoAutomaticVideoConstraintPolicy.Limit appliedLimit;
+        private ExoAutomaticVideoConstraintPolicy.Decision lastDecision;
+        private ExoAutomaticVideoConstraintPolicy.Action lastLoggedAction;
+        private Format selectedFormat;
+        private int playbackState;
+        private boolean playing;
+        private boolean adaptiveVideo;
+        private int selectedVideoCandidates;
+        private int availableVideoFormats;
+        private volatile boolean released;
+
+        AutomaticVideoConstraintController(
+                DefaultTrackSelector trackSelector,
+                EnhancedVideoProfile baselineProfile,
+                List<EnhancedVideoProfile> profiles) {
+            this.trackSelector = trackSelector;
+            this.baselineProfile = baselineProfile;
+            this.baselineLimit = toLimit(baselineProfile);
+            this.tiers = profiles.stream().map(AutomaticVideoConstraintController::toLimit).toList();
+            this.boundSession = PlaybackAutoContext.SessionToken.none();
+            this.constraintState = ExoAutomaticVideoConstraintPolicy.initial(baselineLimit);
+            this.appliedLimit = baselineLimit;
+            this.playbackState = Player.STATE_IDLE;
+            this.refreshRunnable = () -> refresh("system-condition", -1);
+            this.systemConditionRegistration = PlaybackSystemConditionCoordinator.process()
+                    .addListener(update -> App.post(refreshRunnable, 0));
+        }
+
+        @Override
+        public void onPlaybackStateChanged(EventTime eventTime, @Player.State int state) {
+            playbackState = state;
+            refresh("playback-state", eventTime.currentPlaybackPositionMs);
+        }
+
+        @Override
+        public void onIsPlayingChanged(EventTime eventTime, boolean isPlaying) {
+            playing = isPlaying;
+            refresh("playing", eventTime.currentPlaybackPositionMs);
+        }
+
+        @Override
+        public void onTracksChanged(EventTime eventTime, Tracks tracks) {
+            bindEventSession();
+            TrackShape shape = inspectTracks(tracks);
+            adaptiveVideo = shape.adaptiveVideo();
+            selectedVideoCandidates = shape.selectedVideoCandidates();
+            availableVideoFormats = shape.availableVideoFormats();
+            if (shape.selectedFormat() != null) selectedFormat = shape.selectedFormat();
+            refresh("tracks", eventTime.currentPlaybackPositionMs);
+        }
+
+        @Override
+        public void onVideoInputFormatChanged(
+                EventTime eventTime,
+                Format format,
+                @Nullable DecoderReuseEvaluation decoderReuseEvaluation) {
+            bindEventSession();
+            selectedFormat = format;
+            refresh("video-format", eventTime.currentPlaybackPositionMs);
+            logSelectedTrack(eventTime, format);
+        }
+
+        @Override
+        public void onDroppedVideoFrames(EventTime eventTime, int droppedFrames, long elapsedMs) {
+            if (droppedFrames < ENHANCED_DROPPED_FRAMES_THRESHOLD
+                    && getDroppedFramesPerSecond(droppedFrames, elapsedMs)
+                    < ENHANCED_DROPPED_FRAMES_PER_SECOND_THRESHOLD) {
+                return;
+            }
+            applyFault(
+                    ExoAutomaticVideoConstraintPolicy.Fault.DROPPED_FRAMES,
+                    eventTime.currentPlaybackPositionMs,
+                    droppedFrames,
+                    elapsedMs,
+                    "none");
+        }
+
+        @Override
+        public void onVideoCodecError(EventTime eventTime, Exception videoCodecError) {
+            applyFault(
+                    ExoAutomaticVideoConstraintPolicy.Fault.CODEC_ERROR,
+                    eventTime.currentPlaybackPositionMs,
+                    0,
+                    0,
+                    videoCodecError == null ? "unknown" : videoCodecError.getClass().getSimpleName());
+        }
+
+        @Override
+        public void onEvents(Player player, AnalyticsListener.Events events) {
+            playbackState = player.getPlaybackState();
+            playing = player.isPlaying();
+            refresh("events", player.getCurrentPosition());
+        }
+
+        @Override
+        public void onPlayerReleased(EventTime eventTime) {
+            released = true;
+            App.removeCallbacks(refreshRunnable);
+            systemConditionRegistration.close();
+        }
+
+        private void refresh(String trigger, long positionMs) {
+            if (released) return;
+            long now = android.os.SystemClock.elapsedRealtime();
+            ExoAutomaticVideoConstraintPolicy.Input input = buildInput(now);
+            if (input == null) return;
+            acceptDecision(
+                    ExoAutomaticVideoConstraintPolicy.evaluate(constraintState, input),
+                    trigger,
+                    positionMs,
+                    0,
+                    0,
+                    "none");
+        }
+
+        private void applyFault(
+                ExoAutomaticVideoConstraintPolicy.Fault fault,
+                long positionMs,
+                int droppedFrames,
+                long elapsedMs,
+                String errorType) {
+            if (released) return;
+            long now = android.os.SystemClock.elapsedRealtime();
+            ExoAutomaticVideoConstraintPolicy.Input input = buildInput(now);
+            if (input == null) return;
+            acceptDecision(
+                    ExoAutomaticVideoConstraintPolicy.onFault(constraintState, input, fault),
+                    "decode-fault",
+                    positionMs,
+                    droppedFrames,
+                    elapsedMs,
+                    safeErrorType(errorType));
+        }
+
+        @Nullable
+        private ExoAutomaticVideoConstraintPolicy.Input buildInput(long now) {
+            PlaybackAutoContext context = currentExoContext(now);
+            if (context == null) return null;
+            if (!context.session().equals(boundSession)) bindSession(context.session());
+            ExoAutomaticVideoConstraintPolicy.Environment environment =
+                    ExoAutomaticVideoConstraintPolicy.environment(context, now);
+            return new ExoAutomaticVideoConstraintPolicy.Input(
+                    baselineLimit,
+                    tiers,
+                    environment,
+                    playbackState == Player.STATE_READY && playing,
+                    selectedTrack(selectedFormat),
+                    resourceMode(context, now),
+                    now);
+        }
+
+        private void bindSession(PlaybackAutoContext.SessionToken session) {
+            boundSession = session;
+            constraintState = ExoAutomaticVideoConstraintPolicy.initial(baselineLimit);
+            lastDecision = null;
+            lastLoggedAction = null;
+            selectedFormat = null;
+            adaptiveVideo = false;
+            selectedVideoCandidates = 0;
+            availableVideoFormats = 0;
+            apply(baselineLimit);
+        }
+
+        private void bindEventSession() {
+            PlaybackAutoContext context = currentExoContext(
+                    android.os.SystemClock.elapsedRealtime());
+            if (context == null || context.session().equals(boundSession)) return;
+            bindSession(context.session());
+        }
+
+        @Nullable
+        private PlaybackAutoContext currentExoContext(long now) {
+            PlaybackAutoContext context = PlaybackAutoContextStore.process().snapshot();
+            if (!context.active()
+                    || !context.session().traceId().equals(
+                            PlaybackAnalyticsListener.getPlaybackTraceId())) {
+                return null;
+            }
+            if (context.kernel().isUsable(now)
+                    && context.kernel().value() != PlaybackAutoContext.Kernel.EXO) {
+                return null;
+            }
+            return context;
+        }
+
+        private void acceptDecision(
+                ExoAutomaticVideoConstraintPolicy.Decision decision,
+                String trigger,
+                long positionMs,
+                int droppedFrames,
+                long elapsedMs,
+                String errorType) {
+            constraintState = decision.state();
+            lastDecision = decision;
+            if (decision.changed()) apply(decision.state().effective());
+            boolean shouldLog = decision.changed()
+                    || decision.faultSignal() != ExoAutomaticVideoConstraintPolicy.Fault.NONE
+                    || decision.action() != lastLoggedAction;
+            if (shouldLog) {
+                lastLoggedAction = decision.action();
+                SpiderDebug.log("exo-enhance", "automatic constraint trigger=%s action=%s mode=%s reasons=%s baseline=%s target=%s effective=%s adaptiveVideo=%s selectedVideoCandidates=%d availableVideoFormats=%d stable=%s thermal=%s power=%s networkCost=%s dataSaver=%s costScope=%s decode=%s fault=%s faultActive=%s faultStepped=%s droppedFrames=%d elapsedMs=%d errorType=%s position=%d",
+                        trigger,
+                        decision.action().label(),
+                        decision.resourceMode().label(),
+                        decision.environment().reasonLabel(),
+                        baselineLimit.label(),
+                        decision.rawTarget().label(),
+                        decision.state().effective().label(),
+                        adaptiveVideo,
+                        selectedVideoCandidates,
+                        availableVideoFormats,
+                        playbackState == Player.STATE_READY && playing,
+                        decision.environment().thermal().label(),
+                        decision.environment().power().label(),
+                        decision.environment().networkCost().label(),
+                        decision.environment().dataSaver().label(),
+                        decision.environment().costScope().label(),
+                        decision.environment().decodeMode().label(),
+                        decision.faultSignal().label(),
+                        decision.faultActive(),
+                        decision.faultStepped(),
+                        droppedFrames,
+                        elapsedMs,
+                        errorType,
+                        positionMs);
+            }
+            if (decision.reevaluateAfterMs() > 0) {
+                App.post(refreshRunnable, decision.reevaluateAfterMs());
+            } else {
+                App.removeCallbacks(refreshRunnable);
+            }
+        }
+
+        private void apply(ExoAutomaticVideoConstraintPolicy.Limit limit) {
+            if (limit.equals(appliedLimit)) return;
+            DefaultTrackSelector.Parameters.Builder builder = trackSelector.buildUponParameters();
+            applyVideoLimit(builder, limit);
+            trackSelector.setParameters(builder.build());
+            appliedLimit = limit;
+        }
+
+        private void logSelectedTrack(EventTime eventTime, Format format) {
+            ExoAutomaticVideoConstraintPolicy.Decision decision = lastDecision;
+            ExoAutomaticVideoConstraintPolicy.Limit effective = appliedLimit;
+            int selectedBitrate = ExoPlaybackDiagnostics.trackConstraintBitrate(format);
+            ExoAdaptiveVideoBitratePolicy.SelectionCheck check =
+                    ExoAdaptiveVideoBitratePolicy.checkSelectedTrack(
+                            effective.maxVideoBitrate(), selectedBitrate);
+            SpiderDebug.log("exo-enhance", "automatic selected mode=%s reasons=%s baseline=%s effective=%s baselineNominalBitrate=%d selected=%dx%d@%.3f selectedBitrate=%d selectedBitrateSource=%s averageBitrate=%d peakBitrate=%d capStatus=%s exceedAllowed=true adaptiveVideo=%s selectedVideoCandidates=%d availableVideoFormats=%d position=%d",
+                    decision == null ? ExoAutomaticVideoConstraintPolicy.ResourceMode.UNKNOWN.label()
+                            : decision.resourceMode().label(),
+                    decision == null ? "baseline" : decision.environment().reasonLabel(),
+                    baselineLimit.label(),
+                    effective.label(),
+                    baselineProfile.bitrate(),
+                    format.width,
+                    format.height,
+                    format.frameRate,
+                    check.selectedBitrate(),
+                    ExoPlaybackDiagnostics.trackConstraintBitrateSource(format),
+                    Math.max(0, format.averageBitrate),
+                    Math.max(0, format.peakBitrate),
+                    check.status().label(),
+                    adaptiveVideo,
+                    selectedVideoCandidates,
+                    availableVideoFormats,
+                    eventTime.currentPlaybackPositionMs);
+        }
+
+        private ExoAutomaticVideoConstraintPolicy.ResourceMode resourceMode(
+                PlaybackAutoContext context,
+                long now) {
+            PlaybackAutoContext.Protocol protocol = context.resource().protocol().isUsable(now)
+                    ? context.resource().protocol().value() : PlaybackAutoContext.Protocol.UNKNOWN;
+            boolean manifestAdaptive = false;
+            PlaybackAutoContext.Fact<PlaybackAutoContext.ManifestFacts> manifest =
+                    context.resource().manifest();
+            if (manifest.isUsable(now)) {
+                Integer variants = manifest.value().variantCount();
+                manifestAdaptive = variants != null && variants > 1;
+            }
+            if (adaptiveVideo || manifestAdaptive) {
+                return ExoAutomaticVideoConstraintPolicy.ResourceMode.ADAPTIVE_VARIANTS;
+            }
+            if (protocol == PlaybackAutoContext.Protocol.HLS
+                    || protocol == PlaybackAutoContext.Protocol.DASH) {
+                return ExoAutomaticVideoConstraintPolicy.ResourceMode.SEGMENTED_SINGLE;
+            }
+            if (protocol == PlaybackAutoContext.Protocol.PROGRESSIVE_HTTP) {
+                return ExoAutomaticVideoConstraintPolicy.ResourceMode.PROGRESSIVE_SINGLE;
+            }
+            if (protocol == PlaybackAutoContext.Protocol.UNKNOWN) {
+                return ExoAutomaticVideoConstraintPolicy.ResourceMode.UNKNOWN;
+            }
+            return ExoAutomaticVideoConstraintPolicy.ResourceMode.OTHER_SINGLE;
+        }
+
+        private static ExoAutomaticVideoConstraintPolicy.SelectedTrack selectedTrack(
+                @Nullable Format format) {
+            if (format == null) return ExoAutomaticVideoConstraintPolicy.SelectedTrack.unknown();
+            return new ExoAutomaticVideoConstraintPolicy.SelectedTrack(
+                    format.width,
+                    format.height,
+                    format.frameRate > 0 && Float.isFinite(format.frameRate)
+                            ? Math.round(format.frameRate) : 0,
+                    ExoPlaybackDiagnostics.trackConstraintBitrate(format));
+        }
+
+        private static TrackShape inspectTracks(@Nullable Tracks tracks) {
+            if (tracks == null || tracks.isEmpty()) return TrackShape.unknown();
+            boolean adaptive = false;
+            int selectedCandidates = 0;
+            int availableFormats = 0;
+            Format selected = null;
+            for (Tracks.Group group : tracks.getGroups()) {
+                if (group.getType() != C.TRACK_TYPE_VIDEO) continue;
+                availableFormats = safeAdd(availableFormats, group.length);
+                if (!group.isSelected()) continue;
+                selectedCandidates = Math.max(selectedCandidates, group.length);
+                adaptive |= group.length > 1 && group.isAdaptiveSupported();
+                for (int i = 0; i < group.length; i++) {
+                    if (group.isTrackSelected(i)) {
+                        selected = group.getTrackFormat(i);
+                        break;
+                    }
+                }
+            }
+            return new TrackShape(adaptive, selectedCandidates, availableFormats, selected);
+        }
+
+        private static int safeAdd(int first, int second) {
+            return first > Integer.MAX_VALUE - second ? Integer.MAX_VALUE : first + second;
+        }
+
+        private static int getDroppedFramesPerSecond(int droppedFrames, long elapsedMs) {
+            if (elapsedMs <= 0) return droppedFrames;
+            return (int) (droppedFrames * 1000L / elapsedMs);
+        }
+
+        private static String safeErrorType(String value) {
+            if (value == null || value.isBlank() || value.length() > 96) return "unknown";
+            for (int i = 0; i < value.length(); i++) {
+                char c = value.charAt(i);
+                if (Character.isLetterOrDigit(c) || c == '.' || c == '_' || c == '-') continue;
+                return "unknown";
+            }
+            return value;
+        }
+
+        private static ExoAutomaticVideoConstraintPolicy.Limit toLimit(
+                EnhancedVideoProfile profile) {
+            return new ExoAutomaticVideoConstraintPolicy.Limit(
+                    profile.width(), profile.height(), profile.frameRate(), profile.maxVideoBitrate());
+        }
+
+        private record TrackShape(
+                boolean adaptiveVideo,
+                int selectedVideoCandidates,
+                int availableVideoFormats,
+                @Nullable Format selectedFormat) {
+
+            private static TrackShape unknown() {
+                return new TrackShape(false, 0, 0, null);
+            }
+        }
+    }
+
+    private static class LegacyAdaptiveVideoProfileController implements AnalyticsListener {
 
         private final DefaultTrackSelector trackSelector;
         private final List<EnhancedVideoProfile> profiles;
@@ -636,7 +1031,7 @@ public class ExoUtil {
         private boolean everReady;
         private long lastAdaptMs;
 
-        AdaptiveVideoProfileController(DefaultTrackSelector trackSelector, EnhancedVideoProfile profile, List<EnhancedVideoProfile> profiles) {
+        LegacyAdaptiveVideoProfileController(DefaultTrackSelector trackSelector, EnhancedVideoProfile profile, List<EnhancedVideoProfile> profiles) {
             this.trackSelector = trackSelector;
             this.profiles = profiles;
             this.profile = profile;
