@@ -42,6 +42,7 @@ import androidx.media3.exoplayer.source.MediaSource;
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector;
 import androidx.media3.exoplayer.analytics.AnalyticsListener;
 import androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime;
+import androidx.media3.exoplayer.upstream.BandwidthMeter;
 import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter;
 import androidx.media3.exoplayer.util.EventLogger;
 import androidx.media3.exoplayer.video.VideoRendererEventListener;
@@ -116,7 +117,11 @@ public class ExoUtil {
                 .setVideoChangeFrameRateStrategy(ExoPerformanceSetting.getFrameRateStrategy());
         if (PlaybackPerformanceSetting.isHighBufferEnabled()) builder.setLoadControl(buildEnhancedLoadControl());
         else ExoPlaybackDiagnostics.logDefaultLoadControl(PlaybackPerformanceSetting.getProfile(PlayerSetting.EXO));
-        if (PlaybackPerformanceSetting.isBandwidthMeterEnabled()) builder.setBandwidthMeter(buildEnhancedBandwidthMeter(App.get()));
+        if (PlaybackPerformanceSetting.isBandwidthMeterEnabled()) {
+            builder.setBandwidthMeter(automatic
+                    ? buildAutomaticBandwidthMeter(App.get())
+                    : buildEnhancedBandwidthMeter(App.get()));
+        }
         if (PlaybackPerformanceSetting.isDynamicSchedulingEnabled()) {
             builder.experimentalSetDynamicSchedulingEnabled(true);
         }
@@ -486,6 +491,10 @@ public class ExoUtil {
         return new DefaultBandwidthMeter.Builder(context)
                 .setSlidingWindowMaxWeight(4_000)
                 .build();
+    }
+
+    static BandwidthMeter buildAutomaticBandwidthMeter(@Nullable Context context) {
+        return new ExoPathAwareBandwidthMeter(context);
     }
 
     private static RenderersFactory buildPlaybackRenderersFactory(int decode) {

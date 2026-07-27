@@ -97,6 +97,10 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
         return BUFFER_TREND.snapshot();
     }
 
+    static ExoThroughputEstimator.Snapshot getThroughputSnapshot() {
+        return ExoThroughputCoordinator.process().snapshot();
+    }
+
     public static void reset() {
         snapshot = Snapshot.empty();
         totalDroppedFrames = 0;
@@ -245,8 +249,17 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
         lastBandwidthLogMs = now;
         ObservedMediaBitrateEstimator.Estimate media = getMediaBitrateEstimate();
         ForwardBufferTrend.Snapshot trend = getBufferTrend();
-        traceLog("bandwidth=%d loadTime=%dms bytes=%d mediaBitrate=%d mediaSource=%s mediaConfidence=%s mediaAverage=%d averageSource=%s averageConfidence=%s mediaBurst=%d burstSource=%s burstConfidence=%s bufferSlope=%d slopeWindowMs=%d",
-                bitrateEstimate, totalLoadTimeMs, totalBytesLoaded,
+        ExoThroughputEstimator.Snapshot throughput = getThroughputSnapshot();
+        traceLog("bandwidth=%d raw=%d short=%d long=%d throughputConfidence=%s predictionErrorPermille=%d pathTrust=%s preloadContended=%s loadTime=%dms bytes=%d mediaBitrate=%d mediaSource=%s mediaConfidence=%s mediaAverage=%d averageSource=%s averageConfidence=%s mediaBurst=%d burstSource=%s burstConfidence=%s bufferSlope=%d slopeWindowMs=%d",
+                bitrateEstimate,
+                throughput.rawEstimateBitsPerSecond(),
+                throughput.shortEstimateBitsPerSecond(),
+                throughput.longEstimateBitsPerSecond(),
+                throughput.confidence().label(),
+                throughput.predictionErrorPermille(),
+                throughput.pathTrust().label(),
+                throughput.preloadContended(),
+                totalLoadTimeMs, totalBytesLoaded,
                 media.bitrateBitsPerSecond(), media.source().label(), media.confidence().label(),
                 media.averageBitrateBitsPerSecond(), media.averageSource().label(), media.averageConfidence().label(),
                 media.burstBitrateBitsPerSecond(), media.burstSource().label(), media.burstConfidence().label(),

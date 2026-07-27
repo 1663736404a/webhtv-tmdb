@@ -30,8 +30,11 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
     private final int configuredTargetBytes;
     private final ExoTargetBufferCoordinator coordinator;
     private final ExoMemoryPressureCoordinator memoryPressureCoordinator;
+    private final ExoPreloadTrafficCoordinator preloadTrafficCoordinator;
     private final ConcurrentHashMap<PlayerId, TargetState> targetStates;
     private final ConcurrentHashMap<PlayerId, ModeState> modeStates;
+    private final ConcurrentHashMap<PlayerId, ExoPreloadTrafficCoordinator.Registration>
+            media3PreloadTraffic;
     private final Set<PlayerId> preparedPlayers;
     private volatile ExoMemoryPressureCoordinator.Registration memoryPressureRegistration;
 
@@ -47,7 +50,8 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
                 configuredTargetBytes,
                 fallbackBudget,
                 ExoTargetBufferCoordinator.process(),
-                ExoMemoryPressureCoordinator.process());
+                ExoMemoryPressureCoordinator.process(),
+                ExoPreloadTrafficCoordinator.process());
     }
 
     AutoTargetLoadControl(
@@ -64,7 +68,8 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
                 configuredTargetBytes,
                 fallbackBudget,
                 coordinator,
-                ExoMemoryPressureCoordinator.process());
+                ExoMemoryPressureCoordinator.process(),
+                ExoPreloadTrafficCoordinator.process());
     }
 
     AutoTargetLoadControl(
@@ -75,6 +80,26 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
             ExoBufferBudget.Budget fallbackBudget,
             ExoTargetBufferCoordinator coordinator,
             ExoMemoryPressureCoordinator memoryPressureCoordinator) {
+        this(
+                allocator,
+                configuration,
+                backBufferMs,
+                configuredTargetBytes,
+                fallbackBudget,
+                coordinator,
+                memoryPressureCoordinator,
+                ExoPreloadTrafficCoordinator.process());
+    }
+
+    AutoTargetLoadControl(
+            DefaultAllocator allocator,
+            ExoLoadControlPolicy.AutomaticConfiguration configuration,
+            int backBufferMs,
+            int configuredTargetBytes,
+            ExoBufferBudget.Budget fallbackBudget,
+            ExoTargetBufferCoordinator coordinator,
+            ExoMemoryPressureCoordinator memoryPressureCoordinator,
+            ExoPreloadTrafficCoordinator preloadTrafficCoordinator) {
         super(
                 allocator,
                 configuration.streaming().minBufferMs(),
@@ -96,13 +121,16 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
         this.fallbackBudget = fallbackBudget;
         this.coordinator = coordinator;
         this.memoryPressureCoordinator = memoryPressureCoordinator;
+        this.preloadTrafficCoordinator = preloadTrafficCoordinator;
         this.targetStates = new ConcurrentHashMap<>();
         this.modeStates = new ConcurrentHashMap<>();
+        this.media3PreloadTraffic = new ConcurrentHashMap<>();
         this.preparedPlayers = ConcurrentHashMap.newKeySet();
     }
 
     @Override
     public void onPrepared(PlayerId playerId) {
+        closeMedia3PreloadTraffic(playerId);
         targetStates.remove(playerId);
         modeStates.remove(playerId);
         preparedPlayers.add(playerId);
@@ -149,6 +177,7 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
 
     @Override
     public void onStopped(PlayerId playerId) {
+        closeMedia3PreloadTraffic(playerId);
         targetStates.remove(playerId);
         modeStates.remove(playerId);
         preparedPlayers.remove(playerId);
@@ -159,6 +188,7 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
 
     @Override
     public void onReleased(PlayerId playerId) {
+        closeMedia3PreloadTraffic(playerId);
         targetStates.remove(playerId);
         modeStates.remove(playerId);
         preparedPlayers.remove(playerId);
@@ -170,10 +200,14 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
     @Override
     public boolean shouldContinueLoading(LoadControl.Parameters parameters) {
         boolean delegateLoading = super.shouldContinueLoading(parameters);
-        applyAllocatorTarget();
         if (PlayerId.PRELOAD.equals(parameters.playerId)) {
-            return delegateLoading && !isPreloadPaused();
+            applyAllocatorTarget();
+            boolean allowed = delegateLoading && !isPreloadPaused();
+            setMedia3PreloadTraffic(parameters.playerId, allowed);
+            return allowed;
         }
+        refreshTargetForActualFormats(parameters.playerId);
+        applyAllocatorTarget();
         ExoMemoryPressurePolicy.Decision memory = currentMemoryDecision(parameters.playerId);
         if (memory != null && memory.degraded()) {
             Allocator playerAllocator = getAllocator(parameters.playerId);
@@ -217,6 +251,34 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
     boolean isPreloadPaused() {
         ExoMemoryPressurePolicy.Decision decision = memoryPressureCoordinator.currentDecision();
         return decision != null && decision.preloadPaused();
+    }
+
+    private void setMedia3PreloadTraffic(PlayerId playerId, boolean active) {
+        if (!active) {
+            closeMedia3PreloadTraffic(playerId);
+            return;
+        }
+        PlaybackAutoContext context = PlaybackAutoContextStore.process().snapshot();
+        PlaybackAutoContext.SessionToken session = currentExoSession(context);
+        if (!session.active()) {
+            closeMedia3PreloadTraffic(playerId);
+            return;
+        }
+        ExoPreloadTrafficCoordinator.Registration existing =
+                media3PreloadTraffic.get(playerId);
+        if (existing != null && existing.active()
+                && session.equals(existing.session())) return;
+        closeMedia3PreloadTraffic(playerId);
+        ExoPreloadTrafficCoordinator.Registration acquired =
+                preloadTrafficCoordinator.acquire(
+                        session, ExoPreloadTrafficCoordinator.Source.MEDIA3);
+        if (acquired.active()) media3PreloadTraffic.put(playerId, acquired);
+    }
+
+    private void closeMedia3PreloadTraffic(PlayerId playerId) {
+        ExoPreloadTrafficCoordinator.Registration registration =
+                media3PreloadTraffic.remove(playerId);
+        if (registration != null) registration.close();
     }
 
     ExoLoadControlModePolicy.Decision currentModeDecision(PlayerId playerId) {
@@ -266,7 +328,11 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
         boolean published = coordinator.publish(session, baseline, now);
         targetStates.put(
                 parameters.playerId,
-                new TargetState(session, baseline, observed));
+                new TargetState(
+                        session,
+                        baseline,
+                        observed,
+                        DemandKey.from(trackSelections)));
         memoryPressureCoordinator.publishBaseline(
                 session,
                 baseline,
@@ -279,6 +345,55 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
             publishTelemetry(session, previousObserved, observed, context, now);
         }
         return baseline.targetBytes();
+    }
+
+    private void refreshTargetForActualFormats(PlayerId playerId) {
+        TargetState previous = targetStates.get(playerId);
+        if (previous == null || !previous.session().active()) return;
+        PlaybackAutoContext context = PlaybackAutoContextStore.process().snapshot();
+        if (!previous.session().equals(currentExoSession(context))) return;
+        PlaybackAnalyticsListener.Snapshot analytics = PlaybackAnalyticsListener.getSnapshot();
+        DemandKey actualKey = DemandKey.from(
+                analytics.videoFormat(), analytics.audioFormat());
+        if (!actualKey.known() || actualKey.equals(previous.demandKey())) return;
+
+        long now = SystemClock.elapsedRealtime();
+        ExoTargetBufferPolicy.MediaDemand mediaDemand = resolveMediaDemand(
+                analytics.videoFormat(),
+                analytics.audioFormat(),
+                PlaybackAnalyticsListener.getMediaBitrateEstimate());
+        if (mediaDemand.averageBitsPerSecond() <= 0
+                && mediaDemand.burstBitsPerSecond() <= 0) return;
+        ExoTargetBufferPolicy.Decision baseline = calculateDecision(
+                mediaDemand,
+                PlaybackAutoContext.DeviceFacts.unknown(),
+                now);
+        ExoTargetBufferPolicy.Decision observed = calculateDecision(
+                mediaDemand,
+                context.device(),
+                now);
+        TargetState next = new TargetState(
+                previous.session(), baseline, observed, actualKey);
+        if (!targetStates.replace(playerId, previous, next)) return;
+
+        boolean published = coordinator.publish(previous.session(), baseline, now);
+        memoryPressureCoordinator.publishBaseline(
+                previous.session(),
+                baseline,
+                configuredTargetBytes,
+                fallbackBudget,
+                context.device(),
+                now);
+        ExoPlaybackDiagnostics.logTargetDecision(observed);
+        if (published) {
+            publishTelemetry(
+                    previous.session(),
+                    previous.observedDecision(),
+                    observed,
+                    context,
+                    now);
+        }
+        applyAllocatorTarget();
     }
 
     private ExoLoadControlModePolicy.Decision resolveMode(
@@ -571,6 +686,19 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
             ExoTrackSelection[] trackSelections,
             ObservedMediaBitrateEstimator.Estimate estimate) {
         ExoTargetBufferPolicy.MediaDemand selected = selectedTrackDemand(trackSelections);
+        return resolveMediaDemand(selected, estimate);
+    }
+
+    static ExoTargetBufferPolicy.MediaDemand resolveMediaDemand(
+            Format video,
+            Format audio,
+            ObservedMediaBitrateEstimator.Estimate estimate) {
+        return resolveMediaDemand(selectedFormatDemand(video, audio), estimate);
+    }
+
+    private static ExoTargetBufferPolicy.MediaDemand resolveMediaDemand(
+            ExoTargetBufferPolicy.MediaDemand selected,
+            ObservedMediaBitrateEstimator.Estimate estimate) {
         long average = selected.averageBitsPerSecond();
         ExoTargetBufferPolicy.DemandSource averageSource = selected.averageSource();
         PlaybackAutoContext.Confidence averageConfidence = selected.averageConfidence();
@@ -618,6 +746,33 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
             }
         }
         if (average <= 0 && burst <= 0) return ExoTargetBufferPolicy.MediaDemand.unknown();
+        if (average <= 0) average = burst;
+        if (burst < average) burst = average;
+        return new ExoTargetBufferPolicy.MediaDemand(
+                average,
+                ExoTargetBufferPolicy.DemandSource.SELECTED_TRACK,
+                PlaybackAutoContext.Confidence.MEDIUM,
+                burst,
+                ExoTargetBufferPolicy.DemandSource.SELECTED_TRACK,
+                PlaybackAutoContext.Confidence.MEDIUM);
+    }
+
+    private static ExoTargetBufferPolicy.MediaDemand selectedFormatDemand(
+            Format... formats) {
+        long average = 0;
+        long burst = 0;
+        if (formats != null) {
+            for (Format format : formats) {
+                if (format == null) continue;
+                long formatAverage = averageBitrate(format);
+                long formatBurst = peakBitrate(format, formatAverage);
+                average = safeAdd(average, formatAverage);
+                burst = safeAdd(burst, formatBurst);
+            }
+        }
+        if (average <= 0 && burst <= 0) {
+            return ExoTargetBufferPolicy.MediaDemand.unknown();
+        }
         if (average <= 0) average = burst;
         if (burst < average) burst = average;
         return new ExoTargetBufferPolicy.MediaDemand(
@@ -784,11 +939,36 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
     private record TargetState(
             PlaybackAutoContext.SessionToken session,
             ExoTargetBufferPolicy.Decision decision,
-            ExoTargetBufferPolicy.Decision observedDecision) {
+            ExoTargetBufferPolicy.Decision observedDecision,
+            DemandKey demandKey) {
 
         private TargetState {
             session = session == null ? PlaybackAutoContext.SessionToken.none() : session;
             observedDecision = observedDecision == null ? decision : observedDecision;
+            demandKey = demandKey == null ? DemandKey.unknown() : demandKey;
+        }
+    }
+
+    private record DemandKey(long averageBitsPerSecond, long burstBitsPerSecond) {
+
+        private static DemandKey from(ExoTrackSelection[] selections) {
+            ExoTargetBufferPolicy.MediaDemand demand = selectedTrackDemand(selections);
+            return new DemandKey(
+                    demand.averageBitsPerSecond(), demand.burstBitsPerSecond());
+        }
+
+        private static DemandKey from(Format video, Format audio) {
+            ExoTargetBufferPolicy.MediaDemand demand = selectedFormatDemand(video, audio);
+            return new DemandKey(
+                    demand.averageBitsPerSecond(), demand.burstBitsPerSecond());
+        }
+
+        private static DemandKey unknown() {
+            return new DemandKey(0, 0);
+        }
+
+        private boolean known() {
+            return averageBitsPerSecond > 0 || burstBitsPerSecond > 0;
         }
     }
 

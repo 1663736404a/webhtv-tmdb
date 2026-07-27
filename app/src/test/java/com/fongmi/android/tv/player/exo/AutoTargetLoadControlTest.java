@@ -15,6 +15,7 @@ import org.junit.Test;
 import java.lang.reflect.Proxy;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class AutoTargetLoadControlTest {
 
@@ -96,6 +97,31 @@ public class AutoTargetLoadControlTest {
         assertEquals(0, demand.averageBitsPerSecond());
         assertEquals(0, demand.burstBitsPerSecond());
         assertEquals(ExoTargetBufferPolicy.DemandSource.UNKNOWN, demand.averageSource());
+    }
+
+    @Test
+    public void actualAdaptiveFormatSwitchChangesOngoingMediaDemand() {
+        Format lowVideo = new Format.Builder()
+                .setAverageBitrate(4_000_000)
+                .setPeakBitrate(5_000_000)
+                .build();
+        Format highVideo = new Format.Builder()
+                .setAverageBitrate(20_000_000)
+                .setPeakBitrate(30_000_000)
+                .build();
+        Format audio = new Format.Builder()
+                .setAverageBitrate(192_000)
+                .setPeakBitrate(256_000)
+                .build();
+
+        ExoTargetBufferPolicy.MediaDemand low = AutoTargetLoadControl.resolveMediaDemand(
+                lowVideo, audio, ObservedMediaBitrateEstimator.Estimate.unknown());
+        ExoTargetBufferPolicy.MediaDemand high = AutoTargetLoadControl.resolveMediaDemand(
+                highVideo, audio, ObservedMediaBitrateEstimator.Estimate.unknown());
+
+        assertEquals(4_192_000L, low.averageBitsPerSecond());
+        assertEquals(20_192_000L, high.averageBitsPerSecond());
+        assertTrue(high.burstBitsPerSecond() > low.burstBitsPerSecond());
     }
 
     @Test

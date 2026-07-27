@@ -86,6 +86,7 @@ public class PreCache implements Player.Listener {
     private BufferGate bufferGate;
     private AutoPreloadPolicy autoPolicy;
     private ExoMemoryPressureCoordinator.Registration memoryPressureRegistration;
+    private ExoPreloadTrafficCoordinator.Registration preloadTrafficRegistration;
 
     public void start(Player player, MediaItem mediaItem, String playbackTraceId, PlaybackRoute.Resolution routeResolution) {
         stop("replace-media");
@@ -127,6 +128,7 @@ public class PreCache implements Player.Listener {
         }
         if (player != null) player.removeListener(this);
         if (helper != null) helper.release(false);
+        closePreloadTraffic();
         unbindMemoryPressure();
         handler = null;
         helper = null;
@@ -302,8 +304,10 @@ public class PreCache implements Player.Listener {
         transition(PreloadLifecycleTracker.State.PRELOADING, "task-start", "generation=%d route=%s threads=%d", generation, route, threads);
         for (PreloadLifecycleTracker.TaskEvent event : lifecycle.startTask(generation, startMs, lengthMs)) {
             if (event.type() == PreloadLifecycleTracker.TaskEvent.Type.END) {
+                closePreloadTraffic();
                 logTaskEnd(event, "next-range", null);
             } else {
+                beginPreloadTraffic();
                 beginTaskMetrics();
                 logTask(event, "estimatedBytes=%d bitrate=%d bitrateSource=%s bitrateConfidence=%s average=%d averageSource=%s averageConfidence=%s burst=%d burstSource=%s burstConfidence=%s p50=%d p90=%d position=%d buffered=%d loading=%s bufferSlope=%d slopeConfidence=%s slopeWindowMs=%d waitCount=%d waitTotalMs=%d", estimatedBytes, bitrate, media.source().label(), media.confidence().label(), media.averageBitrateBitsPerSecond(), media.averageSource().label(), media.averageConfidence().label(), media.burstBitrateBitsPerSecond(), media.burstSource().label(), media.burstConfidence().label(), media.p50BitsPerSecond(), media.p90BitsPerSecond(), player.getCurrentPosition(), player.getTotalBufferedDuration(), player.isLoading(), trend.slopeMsPerSecond(), trend.confidence().label(), trend.windowMs(), priority.waitCount(), priority.waitTotalMs());
             }
@@ -336,6 +340,7 @@ public class PreCache implements Player.Listener {
 
     private void stopCurrentTask(String reason) {
         logTaskEnd(lifecycle.endTask(PreloadLifecycleTracker.TaskEvent.Outcome.CANCELLED), reason, null);
+        closePreloadTraffic();
         generation++;
         cancel();
         if (helper != null) helper.stop();
@@ -677,11 +682,25 @@ public class PreCache implements Player.Listener {
 
     private PreloadLifecycleTracker.TaskEvent finishTask(PreloadLifecycleTracker.TaskEvent.Outcome outcome, String reason, Throwable error) {
         PreloadLifecycleTracker.TaskEvent event = lifecycle.endTask(outcome);
+        closePreloadTraffic();
         if (event == null) return null;
         logTaskEnd(event, reason, error);
         PreloadLifecycleTracker.State state = outcome == PreloadLifecycleTracker.TaskEvent.Outcome.COMPLETED ? PreloadLifecycleTracker.State.WAIT_NEXT_RANGE : PreloadLifecycleTracker.State.WAIT_RETRY;
         transition(state, reason, "generation=%d task=%d", event.generation(), event.taskId());
         return event;
+    }
+
+    private void beginPreloadTraffic() {
+        closePreloadTraffic();
+        preloadTrafficRegistration = ExoPreloadTrafficCoordinator.process().acquire(
+                playbackTraceId,
+                ExoPreloadTrafficCoordinator.Source.CUSTOM);
+    }
+
+    private void closePreloadTraffic() {
+        ExoPreloadTrafficCoordinator.Registration registration = preloadTrafficRegistration;
+        preloadTrafficRegistration = null;
+        if (registration != null) registration.close();
     }
 
     private void beginTaskMetrics() {

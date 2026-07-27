@@ -85,6 +85,7 @@ public final class PlaybackTelemetry {
 
     public enum DecisionDomain {
         NETWORK_PROTECTION("network-protection"),
+        THROUGHPUT("throughput"),
         MPV_OUTPUT("mpv-output"),
         DISPLAY_MODE("display-mode"),
         TUNNELING("tunneling"),
