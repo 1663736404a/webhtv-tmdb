@@ -44,12 +44,30 @@ public final class ForwardBufferTrend {
         Sample last = samples.peekLast();
         if (first == null || last == null) return Snapshot.unknown();
         long windowMs = last.nowMs() - first.nowMs();
-        if (windowMs < MIN_WINDOW_MS || !slopeInitialized) return new Snapshot(0, 0, 0, windowMs, samples.size(), Confidence.UNKNOWN);
+        if (windowMs < MIN_WINDOW_MS || !slopeInitialized) {
+            return new Snapshot(
+                    0,
+                    0,
+                    0,
+                    windowMs,
+                    samples.size(),
+                    Confidence.UNKNOWN,
+                    last.bufferedMs(),
+                    last.nowMs());
+        }
         long fast = Math.round(fastSlope);
         long slow = Math.round(slowSlope);
         long slope = Math.min(fast, slow);
         Confidence confidence = windowMs >= HIGH_WINDOW_MS ? Confidence.HIGH : windowMs >= MEDIUM_WINDOW_MS ? Confidence.MEDIUM : Confidence.LOW;
-        return new Snapshot(slope, fast, slow, windowMs, samples.size(), confidence);
+        return new Snapshot(
+                slope,
+                fast,
+                slow,
+                windowMs,
+                samples.size(),
+                confidence,
+                last.bufferedMs(),
+                last.nowMs());
     }
 
     private void updateSlope(long elapsedMs, long bufferDeltaMs) {
@@ -87,18 +105,59 @@ public final class ForwardBufferTrend {
         }
     }
 
-    public record Snapshot(long slopeMsPerSecond, long fastSlopeMsPerSecond, long slowSlopeMsPerSecond, long windowMs, int sampleCount, Confidence confidence) {
+    public record Snapshot(
+            long slopeMsPerSecond,
+            long fastSlopeMsPerSecond,
+            long slowSlopeMsPerSecond,
+            long windowMs,
+            int sampleCount,
+            Confidence confidence,
+            long lastBufferedMs,
+            long sampledAtElapsedMs) {
+
+        public Snapshot(
+                long slopeMsPerSecond,
+                long fastSlopeMsPerSecond,
+                long slowSlopeMsPerSecond,
+                long windowMs,
+                int sampleCount,
+                Confidence confidence) {
+            this(
+                    slopeMsPerSecond,
+                    fastSlopeMsPerSecond,
+                    slowSlopeMsPerSecond,
+                    windowMs,
+                    sampleCount,
+                    confidence,
+                    -1,
+                    -1);
+        }
 
         public Snapshot(long slopeMsPerSecond, long windowMs, int sampleCount, Confidence confidence) {
-            this(slopeMsPerSecond, slopeMsPerSecond, slopeMsPerSecond, windowMs, sampleCount, confidence);
+            this(
+                    slopeMsPerSecond,
+                    slopeMsPerSecond,
+                    slopeMsPerSecond,
+                    windowMs,
+                    sampleCount,
+                    confidence,
+                    -1,
+                    -1);
         }
 
         static Snapshot unknown() {
-            return new Snapshot(0, 0, 0, 0, 0, Confidence.UNKNOWN);
+            return new Snapshot(0, 0, 0, 0, 0, Confidence.UNKNOWN, -1, -1);
         }
 
         public boolean known() {
             return confidence != Confidence.UNKNOWN;
+        }
+
+        public long timeToEmptyMs() {
+            if (!known() || lastBufferedMs < 0 || slopeMsPerSecond >= 0) return -1;
+            long drainPerSecond = -slopeMsPerSecond;
+            if (lastBufferedMs > Long.MAX_VALUE / 1_000L) return Long.MAX_VALUE;
+            return lastBufferedMs * 1_000L / drainPerSecond;
         }
     }
 

@@ -78,6 +78,37 @@ final class ExoPlaybackDiagnostics {
                 Math.max(0, allocatorAllocatedBytes), Math.max(0, allocatorUnusedBytes));
     }
 
+    static void logPlaybackThreshold(
+            ExoPlaybackThresholdCoordinator.Selection selection) {
+        if (!SpiderDebug.isEnabled() || selection == null) return;
+        ExoPlaybackThresholdPolicy.Decision policy = selection.policy();
+        ExoPlaybackThresholdPolicy.TrendThresholds trend =
+                policy.trendThresholds();
+        SpiderDebug.log(
+                "exo-buffer",
+                "threshold episode=%s action=%s startMs=%d rebufferMs=%d protocol=%s stream=%s boundaryMs=%d risk=%s reason=%s loweringEligible=%s conservativePath=%s immediateCap=%s throughputRatioPermille=%d predictionErrorPermille=%d bufferSlopeMsps=%d timeToEmptyMs=%d trendMinWindowMs=%d trendWarningTteMs=%d trendCriticalTteMs=%d trendDrainSlopeMsps=%d",
+                selection.episode().label(),
+                selection.action().label(),
+                selection.startBufferMs(),
+                selection.rebufferMs(),
+                policy.protocol().label(),
+                policy.streamKind().label(),
+                policy.boundaryMs(),
+                policy.riskLevel().name().toLowerCase(java.util.Locale.US),
+                policy.reason().label(),
+                policy.loweringEligible(),
+                policy.conservativePath(),
+                policy.immediateDecrease(),
+                policy.throughputRatioPermille(),
+                policy.predictionErrorPermille(),
+                policy.bufferSlopeMsPerSecond(),
+                policy.timeToEmptyMs(),
+                trend.minimumWindowMs(),
+                trend.warningTimeToEmptyMs(),
+                trend.criticalTimeToEmptyMs(),
+                trend.drainSlopeMsPerSecond());
+    }
+
     static void logDefaultLoadControl(int profile) {
         if (SpiderDebug.isEnabled()) SpiderDebug.log("exo-buffer", "loadControl profile=%s mode=media3-default", profileName(profile));
     }

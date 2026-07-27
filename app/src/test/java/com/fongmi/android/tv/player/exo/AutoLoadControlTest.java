@@ -43,13 +43,20 @@ public class AutoLoadControlTest {
     @Test
     public void controlledStartFallsBackWhenRescueCannotContinue() {
         assertFalse(AutoLoadControl.shouldStartControlledPlayback(
-                true, false, false, true, false));
+                false, true, true, false));
         assertTrue(AutoLoadControl.shouldStartControlledPlayback(
-                true, false, false, false, false));
+                false, false, true, false));
         assertTrue(AutoLoadControl.shouldStartControlledPlayback(
-                false, true, false, false, true));
+                false, false, false, true));
         assertTrue(AutoLoadControl.shouldStartControlledPlayback(
-                false, true, true, true, false));
+                true, true, false, false));
+    }
+
+    @Test
+    public void dynamicThresholdPreservesTargetBytesEscape() {
+        assertTrue(AutoLoadControl.shouldStartDynamicPlayback(true, false));
+        assertTrue(AutoLoadControl.shouldStartDynamicPlayback(false, true));
+        assertFalse(AutoLoadControl.shouldStartDynamicPlayback(false, false));
     }
 
     @Test

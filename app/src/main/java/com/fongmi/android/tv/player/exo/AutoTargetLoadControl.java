@@ -253,6 +253,13 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
         return decision != null && decision.preloadPaused();
     }
 
+    boolean isTargetBufferSizeReached(PlayerId playerId) {
+        if (playerId == null || !targetStates.containsKey(playerId)) return false;
+        AllocatorTarget target = currentAllocatorTarget();
+        return target.targetBytes() > 0
+                && allocator.getTotalBytesAllocated() >= target.targetBytes();
+    }
+
     private void setMedia3PreloadTraffic(PlayerId playerId, boolean active) {
         if (!active) {
             closeMedia3PreloadTraffic(playerId);
@@ -479,6 +486,12 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
 
     private void applyAllocatorTarget() {
         if (targetStates.isEmpty()) return;
+        AllocatorTarget target = currentAllocatorTarget();
+        allocator.setTargetBufferSize(target.targetBytes());
+        if (target.preloadPaused()) allocator.trim();
+    }
+
+    private AllocatorTarget currentAllocatorTarget() {
         int targetBytes = 0;
         boolean preloadPaused = false;
         for (TargetState targetState : targetStates.values()) {
@@ -499,8 +512,7 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
                     targetBytes,
                     DEFAULT_TARGET_BUFFER_BYTES_FOR_PRELOAD);
         }
-        allocator.setTargetBufferSize(targetBytes);
-        if (preloadPaused) allocator.trim();
+        return new AllocatorTarget(targetBytes, preloadPaused);
     }
 
     private void publishMemoryPressureTelemetry(
@@ -981,6 +993,13 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
             session = session == null ? PlaybackAutoContext.SessionToken.none() : session;
             tracks = tracks == null ? ExoLoadControlModePolicy.TrackProfile.unknown() : tracks;
             decision = decision == null ? ExoLoadControlModePolicy.Decision.unknown() : decision;
+        }
+    }
+
+    private record AllocatorTarget(int targetBytes, boolean preloadPaused) {
+
+        private AllocatorTarget {
+            targetBytes = Math.max(0, targetBytes);
         }
     }
 }

@@ -52,4 +52,17 @@ public class ForwardBufferTrendTest {
         assertTrue(snapshot.fastSlopeMsPerSecond() > snapshot.slowSlopeMsPerSecond());
         assertEquals(snapshot.slowSlopeMsPerSecond(), snapshot.slopeMsPerSecond());
     }
+
+    @Test
+    public void snapshotKeepsLastStableBufferForTimeToEmpty() {
+        ForwardBufferTrend trend = new ForwardBufferTrend();
+        trend.observe(0, 20_000, true);
+        trend.observe(10_000, 15_000, true);
+
+        ForwardBufferTrend.Snapshot snapshot = trend.snapshot();
+
+        assertEquals(15_000, snapshot.lastBufferedMs());
+        assertEquals(10_000, snapshot.sampledAtElapsedMs());
+        assertEquals(30_000, snapshot.timeToEmptyMs());
+    }
 }

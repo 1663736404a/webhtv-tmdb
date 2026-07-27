@@ -19,6 +19,8 @@ import androidx.media3.exoplayer.source.MediaLoadData;
 import androidx.media3.exoplayer.video.VideoFrameMetadataListener;
 
 import com.fongmi.android.tv.setting.ExoPerformanceSetting;
+import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
+import com.fongmi.android.tv.setting.PlayerSetting;
 import com.fongmi.android.tv.player.PlaybackTrace;
 import com.github.catvod.crawler.DebugEventLimiter;
 import com.github.catvod.crawler.SpiderDebug;
@@ -31,6 +33,8 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
     private static volatile long lastBandwidthLogMs;
     private static volatile long lastMediaEstimateLogMs;
     private static volatile boolean loading;
+    private static volatile ForwardBufferTrend.Snapshot lastStableBufferTrend =
+            ForwardBufferTrend.Snapshot.unknown();
     private static final long BANDWIDTH_LOG_INTERVAL_MS = 5_000;
     private static final long MEDIA_ESTIMATE_LOG_INTERVAL_MS = 10_000;
     private static final long LOADING_LOG_INTERVAL_MS = 5_000;
@@ -97,11 +101,17 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
         return BUFFER_TREND.snapshot();
     }
 
+    static ForwardBufferTrend.Snapshot getLastStableBufferTrend() {
+        return lastStableBufferTrend;
+    }
+
     static ExoThroughputEstimator.Snapshot getThroughputSnapshot() {
         return ExoThroughputCoordinator.process().snapshot();
     }
 
     public static void reset() {
+        ExoPlaybackThresholdCoordinator.process().disrupt(
+                ExoPlaybackThresholdCoordinator.currentSession());
         snapshot = Snapshot.empty();
         totalDroppedFrames = 0;
         lastBandwidthLogMs = 0;
@@ -112,6 +122,7 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
         FRAME_RATE_ESTIMATOR.reset();
         FRAME_TIMING_METRICS.reset();
         BUFFER_TREND.reset();
+        lastStableBufferTrend = ForwardBufferTrend.Snapshot.unknown();
         LOADING_LOG_LIMITER.clear();
         PlaybackCacheMetrics.reset();
         PlaybackBytePositionDataSource.resetSession();
@@ -135,6 +146,7 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
         Snapshot previous = snapshot;
         Snapshot next = snapshot.withState(stateName(state), eventTime.currentPlaybackPositionMs, eventTime.totalBufferedDurationMs);
         if (state == Player.STATE_BUFFERING) {
+            rememberStableBufferTrend(BUFFER_TREND.snapshot());
             BITRATE_ESTIMATOR.disrupt();
             BUFFER_TREND.reset();
             FRAME_TIMING_METRICS.resetReleaseContinuity();
@@ -146,6 +158,16 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
         boolean rebufferEnded = previous.rebufferStartMs() > 0 && next.rebufferStartMs() <= 0;
         snapshot = next;
         if (rebufferStarted || rebufferEnded) updateAutoRecovery(next, now);
+        observeAutoThresholds(
+                eventTime.totalBufferedDurationMs,
+                next.rebufferStartMs() > 0,
+                now);
+        if (state == Player.STATE_READY
+                || state == Player.STATE_IDLE
+                || state == Player.STATE_ENDED) {
+            ExoPlaybackThresholdCoordinator.process().endEpisode(
+                    ExoPlaybackThresholdCoordinator.currentSession());
+        }
         if (!SpiderDebug.isEnabled()) return;
         if (rebufferStarted) {
             traceLog("rebuffer start count=%d position=%d buffered=%d loading=%s", next.rebufferCount(), eventTime.currentPlaybackPositionMs, eventTime.totalBufferedDurationMs, loading);
@@ -280,6 +302,9 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
         FRAME_RATE_ESTIMATOR.reset();
         FRAME_TIMING_METRICS.resetReleaseContinuity();
         BUFFER_TREND.reset();
+        lastStableBufferTrend = ForwardBufferTrend.Snapshot.unknown();
+        ExoPlaybackThresholdCoordinator.process().disrupt(
+                ExoPlaybackThresholdCoordinator.currentSession());
     }
 
     @Override
@@ -296,16 +321,46 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
         boolean stablePlayback = player.getPlaybackState() == Player.STATE_READY && player.isPlaying();
         BITRATE_ESTIMATOR.observeBytePosition(now, player.getBufferedPosition(), bytes, stablePlayback);
         BUFFER_TREND.observe(now, player.getTotalBufferedDuration(), stablePlayback && player.isLoading());
+        ForwardBufferTrend.Snapshot trend = BUFFER_TREND.snapshot();
+        rememberStableBufferTrend(trend);
+        observeAutoThresholds(
+                player.getTotalBufferedDuration(),
+                snapshot.rebufferStartMs() > 0,
+                now);
         if (!SpiderDebug.isEnabled() || now - lastMediaEstimateLogMs < MEDIA_ESTIMATE_LOG_INTERVAL_MS) return;
         lastMediaEstimateLogMs = now;
         ObservedMediaBitrateEstimator.Estimate media = getMediaBitrateEstimate();
-        ForwardBufferTrend.Snapshot trend = getBufferTrend();
         traceLog("media-estimate bitrate=%d source=%s confidence=%s average=%d averageSource=%s averageConfidence=%s burst=%d burstSource=%s burstConfidence=%s p50=%d p90=%d windows=%d windowMs=%d observedMs=%d contentLength=%d duration=%d bufferSlope=%d slopeConfidence=%s slopeWindowMs=%d slopeSamples=%d",
                 media.bitrateBitsPerSecond(), media.source().label(), media.confidence().label(),
                 media.averageBitrateBitsPerSecond(), media.averageSource().label(), media.averageConfidence().label(),
                 media.burstBitrateBitsPerSecond(), media.burstSource().label(), media.burstConfidence().label(),
                 media.p50BitsPerSecond(), media.p90BitsPerSecond(), media.windowCount(), media.windowDurationMs(), media.observedDurationMs(), media.contentLengthBytes(), media.durationMs(),
                 trend.slopeMsPerSecond(), trend.confidence().label(), trend.windowMs(), trend.sampleCount());
+    }
+
+    private static void rememberStableBufferTrend(
+            ForwardBufferTrend.Snapshot trend) {
+        if (trend == null || !trend.known()) return;
+        ForwardBufferTrend.Snapshot previous = lastStableBufferTrend;
+        if (!previous.known()
+                || trend.sampledAtElapsedMs() >= previous.sampledAtElapsedMs()) {
+            lastStableBufferTrend = trend;
+        }
+    }
+
+    private static void observeAutoThresholds(
+            long bufferedDurationMs,
+            boolean rebuffering,
+            long nowElapsedMs) {
+        if (!PlaybackPerformanceSetting.isAuto(PlayerSetting.EXO)) return;
+        ExoPlaybackThresholdCoordinator.process().observe(
+                ExoPlaybackThresholdCoordinator.captureInputs(
+                        ExoPerformanceSetting.getAutoSessionStartBufferMs(),
+                        ExoPerformanceSetting.getAutoSessionRebufferMs(),
+                        Math.max(0, bufferedDurationMs),
+                        -1,
+                        rebuffering,
+                        nowElapsedMs));
     }
 
     @Override
