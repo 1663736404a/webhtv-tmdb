@@ -110,6 +110,7 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
     }
 
     public static void reset() {
+        ExoPerformanceSetting.discardAutoSession(playbackTraceId);
         ExoPlaybackThresholdCoordinator.process().disrupt(
                 ExoPlaybackThresholdCoordinator.currentSession());
         snapshot = Snapshot.empty();
@@ -130,12 +131,21 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
 
     public static void finishSession(long finalPositionMs) {
         Snapshot finished = snapshot;
+        String finishedTraceId = playbackTraceId;
         if (finished.everReady()) {
             long rebufferTotalMs = finished.rebufferTotalMs();
             if (finished.rebufferStartMs() > 0) rebufferTotalMs += Math.max(0, SystemClock.elapsedRealtime() - finished.rebufferStartMs());
             ObservedMediaBitrateEstimator.Estimate media = getMediaBitrateEstimate();
             long mediaBitrate = media.reliable() ? media.bitrateBitsPerSecond() : ExoPlaybackDiagnostics.combinedBitrate(finished.videoFormat(), finished.audioFormat());
-            ExoPerformanceSetting.recordAutoSession(finished.rebufferCount(), rebufferTotalMs, Math.max(finished.positionMs(), finalPositionMs), mediaBitrate, finished.bandwidthEstimate());
+            ExoPerformanceSetting.recordAutoSession(
+                    finishedTraceId,
+                    finished.rebufferCount(),
+                    rebufferTotalMs,
+                    Math.max(finished.positionMs(), finalPositionMs),
+                    mediaBitrate,
+                    finished.bandwidthEstimate());
+        } else {
+            ExoPerformanceSetting.discardAutoSession(finishedTraceId);
         }
         reset();
     }
@@ -184,7 +194,13 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
         ObservedMediaBitrateEstimator.Estimate media = getMediaBitrateEstimate();
         long mediaBitrate = media.reliable() ? media.bitrateBitsPerSecond() : ExoPlaybackDiagnostics.combinedBitrate(current.videoFormat(), current.audioFormat());
         int previousMs = ExoPerformanceSetting.getAutoSessionRebufferMs();
-        int updatedMs = ExoPerformanceSetting.updateAutoSession(current.rebufferCount(), totalMs, current.positionMs(), mediaBitrate, current.bandwidthEstimate());
+        int updatedMs = ExoPerformanceSetting.updateAutoSession(
+                playbackTraceId,
+                current.rebufferCount(),
+                totalMs,
+                current.positionMs(),
+                mediaBitrate,
+                current.bandwidthEstimate());
         if (updatedMs != previousMs && SpiderDebug.isEnabled()) {
             traceLog("auto recovery threshold=%dms previous=%dms count=%d total=%dms mediaBitrate=%d bandwidth=%d", updatedMs, previousMs, current.rebufferCount(), totalMs, mediaBitrate, current.bandwidthEstimate());
         }
@@ -353,6 +369,7 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
             boolean rebuffering,
             long nowElapsedMs) {
         if (!PlaybackPerformanceSetting.isAuto(PlayerSetting.EXO)) return;
+        ExoPerformanceSetting.refreshAutoSession(playbackTraceId);
         ExoPlaybackThresholdCoordinator.process().observe(
                 ExoPlaybackThresholdCoordinator.captureInputs(
                         ExoPerformanceSetting.getAutoSessionStartBufferMs(),

@@ -434,16 +434,29 @@ public record PlaybackAutoContext(
             Boolean metered,
             Boolean roaming,
             NetworkTransport transport,
-            DataSaverState dataSaverState) {
+            DataSaverState dataSaverState,
+            String identityDigest) {
+
+        public NetworkSnapshot(
+                Boolean available,
+                Boolean validated,
+                Boolean metered,
+                Boolean roaming,
+                NetworkTransport transport,
+                DataSaverState dataSaverState) {
+            this(available, validated, metered, roaming, transport, dataSaverState, "");
+        }
 
         public NetworkSnapshot {
             transport = transport == null ? NetworkTransport.UNKNOWN : transport;
             dataSaverState = dataSaverState == null ? DataSaverState.UNKNOWN : dataSaverState;
+            identityDigest = PlaybackNetworkIdentityPolicy.isValidDigest(identityDigest)
+                    ? identityDigest : "";
         }
 
         public static NetworkSnapshot unknown() {
             return new NetworkSnapshot(null, null, null, null,
-                    NetworkTransport.UNKNOWN, DataSaverState.UNKNOWN);
+                    NetworkTransport.UNKNOWN, DataSaverState.UNKNOWN, "");
         }
 
         public boolean hasEvidence() {
@@ -452,7 +465,8 @@ public record PlaybackAutoContext(
                     || metered != null
                     || roaming != null
                     || transport != NetworkTransport.UNKNOWN
-                    || dataSaverState != DataSaverState.UNKNOWN;
+                    || dataSaverState != DataSaverState.UNKNOWN
+                    || !identityDigest.isEmpty();
         }
 
         public boolean hasCoreEvidence() {
@@ -466,7 +480,13 @@ public record PlaybackAutoContext(
                     + " metered=" + safeBoolean(metered)
                     + " roaming=" + safeBoolean(roaming)
                     + " transport=" + transport.label()
-                    + " dataSaver=" + dataSaverState.label();
+                    + " dataSaver=" + dataSaverState.label()
+                    + " networkIdentity=" + (identityDigest.isEmpty() ? "unknown" : "known");
+        }
+
+        @Override
+        public String toString() {
+            return logSummary();
         }
 
         private static String safeBoolean(Boolean value) {

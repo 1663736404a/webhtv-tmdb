@@ -106,7 +106,6 @@ public class ExoUtil {
 
     public static ExoPlayer buildPlayer(int decode, Player.Listener listener, boolean tunnelingFallbackAttempted) {
         boolean automatic = PlaybackPerformanceSetting.isAuto(PlayerSetting.EXO);
-        if (automatic) ExoPerformanceSetting.beginAutoSession();
         EnhancedVideoProfile profile = getEnhancedVideoProfile(decode);
         List<EnhancedVideoProfile> profiles = getEnhancedVideoProfiles(decode);
         DefaultTrackSelector trackSelector = buildTrackSelector(decode, tunnelingFallbackAttempted);
@@ -445,7 +444,7 @@ public class ExoUtil {
         int configuredTargetBytes = PlayerSetting.getBufferBytes(PlayerSetting.EXO);
         int backBufferMs = PlayerSetting.getBackBufferMs(PlayerSetting.EXO);
         if (auto) {
-            int startBufferMs = ExoPerformanceSetting.getAutoSessionStartBufferMs();
+            int startBufferMs = ExoPerformanceSetting.getAutoDefaultStartBufferMs();
             ExoLoadControlPolicy.AutomaticConfiguration configuration =
                     ExoLoadControlPolicy.automatic(startBufferMs);
             ExoPlaybackDiagnostics.logAutoLoadControl(profile, configuration, budget, backBufferMs);

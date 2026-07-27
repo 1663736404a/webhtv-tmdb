@@ -140,6 +140,17 @@ public final class PlaybackSystemConditionMonitor {
         }
     }
 
+    public String currentNetworkIdentityDigest() {
+        ConnectivityManager manager = connectivityManager;
+        if (manager == null) return "";
+        try {
+            Network network = manager.getActiveNetwork();
+            return network == null ? "" : networkIdentityDigest(network);
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
     private void requestSample(PlaybackAutoContext.SystemConditionTrigger trigger) {
         PlaybackAutoContext.SessionToken session = coordinator.activeSession();
         if (!session.active()) return;
@@ -270,7 +281,22 @@ public final class PlaybackSystemConditionMonitor {
         PlaybackAutoContext.NetworkTransport transport = networkTransport(capabilities);
         Boolean roaming = readRoaming(session, manager, capabilities, transport);
         return new PlaybackAutoContext.NetworkSnapshot(
-                true, validated, metered, roaming, transport, dataSaver);
+                true,
+                validated,
+                metered,
+                roaming,
+                transport,
+                dataSaver,
+                networkIdentityDigest(activeNetwork));
+    }
+
+    private static String networkIdentityDigest(Network network) {
+        if (network == null) return "";
+        try {
+            return PlaybackNetworkIdentityPolicy.digest(network.getNetworkHandle());
+        } catch (Throwable ignored) {
+            return "";
+        }
     }
 
     private static PlaybackAutoContext.DataSaverState readDataSaver(

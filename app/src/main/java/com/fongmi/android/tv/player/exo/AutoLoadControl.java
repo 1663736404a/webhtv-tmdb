@@ -22,7 +22,7 @@ import java.util.List;
 final class AutoLoadControl implements LoadControl {
 
     private final AutoTargetLoadControl delegate;
-    private final int streamingStartBufferMs;
+    private final int fallbackStreamingStartBufferMs;
     private final ExoPlaybackThresholdCoordinator thresholdCoordinator;
 
     AutoLoadControl(
@@ -39,7 +39,7 @@ final class AutoLoadControl implements LoadControl {
             ExoLoadControlPolicy.AutomaticConfiguration configuration,
             ExoPlaybackThresholdCoordinator thresholdCoordinator) {
         this.delegate = delegate;
-        this.streamingStartBufferMs = configuration.streamingStartBufferMs();
+        this.fallbackStreamingStartBufferMs = configuration.streamingStartBufferMs();
         this.thresholdCoordinator = thresholdCoordinator;
     }
 
@@ -94,7 +94,7 @@ final class AutoLoadControl implements LoadControl {
         long now = SystemClock.elapsedRealtime();
         ExoPlaybackThresholdPolicy.Inputs inputs =
                 ExoPlaybackThresholdCoordinator.captureInputs(
-                        streamingStartBufferMs,
+                        ExoPerformanceSetting.getAutoSessionStartBufferMs(),
                         ExoPerformanceSetting.getAutoSessionRebufferMs(),
                         mediaDurationMs(parameters.bufferedDurationUs),
                         mediaDurationMs(parameters.targetLiveOffsetUs),
@@ -197,7 +197,7 @@ final class AutoLoadControl implements LoadControl {
         if (mode.mode().controlledTimePriority()) {
             int configuredThresholdMs = parameters.rebuffering
                     ? ExoPerformanceSetting.getAutoSessionRebufferMs()
-                    : streamingStartBufferMs;
+                    : fallbackStreamingStartBufferMs;
             int controlledThresholdMs = controlledTimeThresholdMs(
                     configuredThresholdMs);
             boolean controlledReady = reachedAdaptiveThreshold(

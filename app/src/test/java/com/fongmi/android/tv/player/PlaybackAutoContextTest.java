@@ -101,4 +101,21 @@ public class PlaybackAutoContextTest {
         assertEquals(PlaybackAutoContext.PathKind.LOCAL, path.upstreamPath().value());
         assertEquals(PlaybackAutoContext.UpstreamState.NOT_APPLICABLE, path.upstreamState().value());
     }
+
+    @Test
+    public void networkSnapshotNeverPrintsItsIdentityDigest() {
+        String digest = PlaybackNetworkIdentityPolicy.digest(42L);
+        PlaybackAutoContext.NetworkSnapshot snapshot =
+                new PlaybackAutoContext.NetworkSnapshot(
+                        true,
+                        true,
+                        false,
+                        false,
+                        PlaybackAutoContext.NetworkTransport.WIFI,
+                        PlaybackAutoContext.DataSaverState.DISABLED,
+                        digest);
+
+        assertTrue(snapshot.toString().contains("networkIdentity=known"));
+        assertFalse(snapshot.toString().contains(digest));
+    }
 }
