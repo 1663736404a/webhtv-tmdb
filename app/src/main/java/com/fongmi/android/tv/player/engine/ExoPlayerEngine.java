@@ -17,6 +17,8 @@ import com.fongmi.android.tv.bean.Track;
 import com.fongmi.android.tv.player.PlaybackTrace;
 import com.fongmi.android.tv.player.PlaybackResourceClassifier;
 import com.fongmi.android.tv.player.exo.ErrorMsgProvider;
+import com.fongmi.android.tv.player.exo.ExoDecoderRuntimeProfiles;
+import com.fongmi.android.tv.player.exo.ExoDecoderRuntimeSession;
 import com.fongmi.android.tv.player.exo.ExoUtil;
 import com.fongmi.android.tv.player.exo.ExoTunnelingProgressWatchdog;
 import com.fongmi.android.tv.player.exo.ExoTunnelingRuntimeState;
@@ -27,6 +29,8 @@ import com.fongmi.android.tv.player.exo.PlaybackAnalyticsListener;
 import com.fongmi.android.tv.player.exo.PreCache;
 import com.fongmi.android.tv.player.exo.TrackUtil;
 import com.fongmi.android.tv.setting.ExoPerformanceSetting;
+import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
+import com.fongmi.android.tv.setting.PlayerSetting;
 import com.fongmi.android.tv.utils.ResUtil;
 
 import java.util.HashSet;
@@ -40,6 +44,7 @@ public class ExoPlayerEngine implements PlayerEngine {
     private final ErrorMsgProvider provider;
     private final PreCache preCache;
     private final Set<String> attemptedFormats;
+    private final ExoDecoderRuntimeSession decoderRuntimeSession;
     private PlaySpec spec;
     private String activeFormat;
     private ExoPlayer player;
@@ -48,32 +53,47 @@ public class ExoPlayerEngine implements PlayerEngine {
     private boolean cacheSessionActive;
     private boolean tunnelingFallbackAttempted;
     private boolean tunnelingEnabledForSession;
+    private boolean decoderRuntimeEnabledForPlayer;
     private PlaybackResourceClassifier.Classification resourceClassification;
     private long byteSessionSequence = -1;
     private final ExoTunnelingWatchdog tunnelingWatchdog = new ExoTunnelingWatchdog();
     private final ExoTunnelingProgressWatchdog tunnelingProgressWatchdog = new ExoTunnelingProgressWatchdog();
     private final Runnable tunnelingWatchdogRunnable = this::onTunnelingWatchdogTimeout;
     private final Runnable tunnelingProgressWatchdogRunnable = this::checkTunnelingProgress;
+    private final Runnable decoderRuntimeStableRunnable = this::onDecoderRuntimeStable;
     private boolean firstFrameRendered;
+    private boolean decoderRuntimeStableScheduled;
     private final Player.Listener tunnelingWatchdogListener = new Player.Listener() {
         @Override
         public void onRenderedFirstFrame() {
             firstFrameRendered = true;
+            recordDecoderRuntimeFirstFrame();
             tunnelingWatchdog.onFirstFrame();
             App.removeCallbacks(tunnelingWatchdogRunnable);
             if (player.isPlaying()) armTunnelingProgressWatchdog();
+            armDecoderRuntimeStableWindow();
         }
 
         @Override
         public void onIsPlayingChanged(boolean isPlaying) {
-            if (isPlaying && firstFrameRendered) armTunnelingProgressWatchdog();
-            else if (!isPlaying) cancelTunnelingProgressWatchdog();
+            if (isPlaying && firstFrameRendered) {
+                armTunnelingProgressWatchdog();
+                armDecoderRuntimeStableWindow();
+            } else if (!isPlaying) {
+                cancelTunnelingProgressWatchdog();
+                cancelDecoderRuntimeStableWindow();
+            }
         }
 
         @Override
         public void onPlaybackStateChanged(int state) {
-            if (state == Player.STATE_READY && player.isPlaying() && firstFrameRendered) armTunnelingProgressWatchdog();
-            else if (state != Player.STATE_READY) cancelTunnelingProgressWatchdog();
+            if (state == Player.STATE_READY && player.isPlaying() && firstFrameRendered) {
+                armTunnelingProgressWatchdog();
+                armDecoderRuntimeStableWindow();
+            } else if (state != Player.STATE_READY) {
+                cancelTunnelingProgressWatchdog();
+                cancelDecoderRuntimeStableWindow();
+            }
         }
 
         @Override
@@ -86,13 +106,17 @@ public class ExoPlayerEngine implements PlayerEngine {
             tunnelingWatchdog.onError();
             App.removeCallbacks(tunnelingWatchdogRunnable);
             cancelTunnelingProgressWatchdog();
+            cancelDecoderRuntimeStableWindow();
         }
     };
 
     public ExoPlayerEngine(int decode, Player.Listener listener) {
+        this.decoderRuntimeSession = ExoDecoderRuntimeProfiles.process().newSession();
+        this.decoderRuntimeEnabledForPlayer =
+                PlaybackPerformanceSetting.isAuto(PlayerSetting.EXO);
         MediaSourceFactory.acquireCacheSession();
         try {
-            this.player = ExoUtil.buildPlayer(decode, listener, false);
+            this.player = ExoUtil.buildPlayer(decode, listener, false, decoderRuntimeSession);
         } catch (RuntimeException | Error e) {
             MediaSourceFactory.releaseCacheSession();
             throw e;
@@ -122,6 +146,8 @@ public class ExoPlayerEngine implements PlayerEngine {
         preCache.release(cacheRelease);
         cancelTunnelingWatchdog();
         cancelTunnelingProgressWatchdog();
+        cancelDecoderRuntimeStableWindow();
+        finishDecoderRuntimeAttempt();
         PlaybackAnalyticsListener.finishSession(player.getCurrentPosition());
         player.release();
     }
@@ -131,11 +157,16 @@ public class ExoPlayerEngine implements PlayerEngine {
         preCache.stop("engine-rebuild");
         cancelTunnelingWatchdog();
         cancelTunnelingProgressWatchdog();
+        cancelDecoderRuntimeStableWindow();
+        finishDecoderRuntimeAttempt();
         PlaybackAnalyticsListener.finishSession(player.getCurrentPosition());
         player.release();
         PlaybackTrace.log("player-engine", getPlaybackTraceId(), "rebuild decode=%d", decode);
         tunnelingEnabledForSession = ExoUtil.isTunnelingEnabled(decode, tunnelingFallbackAttempted);
-        player = ExoUtil.buildPlayer(decode, listener, tunnelingFallbackAttempted);
+        decoderRuntimeEnabledForPlayer =
+                PlaybackPerformanceSetting.isAuto(PlayerSetting.EXO);
+        player = ExoUtil.buildPlayer(
+                decode, listener, tunnelingFallbackAttempted, decoderRuntimeSession);
         player.addListener(tunnelingWatchdogListener);
         return player;
     }
@@ -172,6 +203,48 @@ public class ExoPlayerEngine implements PlayerEngine {
     private void cancelTunnelingProgressWatchdog() {
         tunnelingProgressWatchdog.reset();
         App.removeCallbacks(tunnelingProgressWatchdogRunnable);
+    }
+
+    private void armDecoderRuntimeStableWindow() {
+        if (!decoderRuntimeEnabledForPlayer
+                || !isHard()
+                || decoderRuntimeStableScheduled
+                || !firstFrameRendered
+                || !player.isPlaying()
+                || player.getPlaybackState() != Player.STATE_READY) {
+            return;
+        }
+        decoderRuntimeStableScheduled = true;
+        App.post(
+                decoderRuntimeStableRunnable,
+                ExoDecoderRuntimeSession.STABLE_PLAYBACK_WINDOW_MS);
+    }
+
+    private void cancelDecoderRuntimeStableWindow() {
+        decoderRuntimeStableScheduled = false;
+        App.removeCallbacks(decoderRuntimeStableRunnable);
+    }
+
+    private void onDecoderRuntimeStable() {
+        decoderRuntimeStableScheduled = false;
+        if (!decoderRuntimeEnabledForPlayer
+                || !isHard()
+                || !firstFrameRendered
+                || !player.isPlaying()
+                || player.getPlaybackState() != Player.STATE_READY) {
+            return;
+        }
+        decoderRuntimeSession.recordStable(
+                currentDecoderRuntimeEvidence(),
+                android.os.SystemClock.elapsedRealtime(),
+                System.currentTimeMillis());
+    }
+
+    private void recordDecoderRuntimeFirstFrame() {
+        if (!decoderRuntimeEnabledForPlayer || !isHard()) return;
+        decoderRuntimeSession.recordFirstFrame(
+                currentDecoderRuntimeEvidence(),
+                System.currentTimeMillis());
     }
 
     private void checkTunnelingProgress() {
@@ -249,10 +322,14 @@ public class ExoPlayerEngine implements PlayerEngine {
 
     @Override
     public void start(PlaySpec spec, boolean playWhenReady) {
+        finishDecoderRuntimeAttempt();
         this.spec = spec;
         this.activeFormat = spec.getFormat();
         this.resourceClassification = PlaybackResourceClassifier.classifyRequest(spec.getUrl(), spec.getFormat(), spec.getFormat());
         this.playWhenReady = playWhenReady;
+        if (decoderRuntimeEnabledForPlayer) {
+            decoderRuntimeSession.beginPlayback(spec.getPlaybackTraceId());
+        }
         resetAttemptedFormats();
         PlaybackTrace.log("player-engine", getPlaybackTraceId(), "start decode=%d format=%s play=%s headers=%s urlLen=%d", decode, spec.getFormat(), playWhenReady, spec.getHeaders() == null ? 0 : spec.getHeaders().size(), spec.getUrl() == null ? 0 : spec.getUrl().length());
         startInternal(C.TIME_UNSET, playWhenReady);
@@ -260,10 +337,14 @@ public class ExoPlayerEngine implements PlayerEngine {
 
     @Override
     public void start(PlaySpec spec, long position, boolean playWhenReady) {
+        finishDecoderRuntimeAttempt();
         this.spec = spec;
         this.activeFormat = spec.getFormat();
         this.resourceClassification = PlaybackResourceClassifier.classifyRequest(spec.getUrl(), spec.getFormat(), spec.getFormat());
         this.playWhenReady = playWhenReady;
+        if (decoderRuntimeEnabledForPlayer) {
+            decoderRuntimeSession.beginPlayback(spec.getPlaybackTraceId());
+        }
         resetAttemptedFormats();
         PlaybackTrace.log("player-engine", getPlaybackTraceId(), "start decode=%d format=%s position=%d play=%s headers=%s urlLen=%d", decode, spec.getFormat(), position, playWhenReady, spec.getHeaders() == null ? 0 : spec.getHeaders().size(), spec.getUrl() == null ? 0 : spec.getUrl().length());
         startInternal(position, playWhenReady);
@@ -271,10 +352,14 @@ public class ExoPlayerEngine implements PlayerEngine {
 
     @Override
     public void restart(PlaySpec spec, long position, boolean playWhenReady) {
+        finishDecoderRuntimeAttempt();
         this.spec = spec;
         this.activeFormat = spec.getFormat();
         this.resourceClassification = PlaybackResourceClassifier.classifyRequest(spec.getUrl(), spec.getFormat(), spec.getFormat());
         this.playWhenReady = playWhenReady;
+        if (decoderRuntimeEnabledForPlayer) {
+            decoderRuntimeSession.beginPlayback(spec.getPlaybackTraceId());
+        }
         resetAttemptedFormats();
         PlaybackTrace.log("player-engine", getPlaybackTraceId(), "restart decode=%d format=%s position=%d play=%s headers=%s urlLen=%d", decode, spec.getFormat(), position, playWhenReady, spec.getHeaders() == null ? 0 : spec.getHeaders().size(), spec.getUrl() == null ? 0 : spec.getUrl().length());
         preCache.stop("engine-restart");
@@ -285,6 +370,8 @@ public class ExoPlayerEngine implements PlayerEngine {
     @Override
     public void stop() {
         preCache.stop("player-stop");
+        cancelDecoderRuntimeStableWindow();
+        finishDecoderRuntimeAttempt();
         PlaybackAnalyticsListener.finishSession(player.getCurrentPosition());
         player.stop();
     }
@@ -430,6 +517,22 @@ public class ExoPlayerEngine implements PlayerEngine {
         return action;
     }
 
+    public boolean observeDecoderRuntimeFailure(PlaybackException error) {
+        if (!decoderRuntimeEnabledForPlayer || !isHard() || error == null) return false;
+        cancelDecoderRuntimeStableWindow();
+        return decoderRuntimeSession.recordFatalFailure(
+                decoderRuntimeEvidence(error),
+                error.errorCode,
+                android.os.SystemClock.elapsedRealtime(),
+                System.currentTimeMillis());
+    }
+
+    public boolean prepareDecoderRuntimeFallback() {
+        return decoderRuntimeEnabledForPlayer
+                && isHard()
+                && decoderRuntimeSession.prepareRuntimeFallback();
+    }
+
     private void startInternal() {
         startInternal(C.TIME_UNSET, true);
     }
@@ -442,9 +545,16 @@ public class ExoPlayerEngine implements PlayerEngine {
         this.playWhenReady = playWhenReady;
         firstFrameRendered = false;
         cancelTunnelingProgressWatchdog();
+        cancelDecoderRuntimeStableWindow();
         armTunnelingWatchdog();
+        finishDecoderRuntimeAttempt();
         PlaybackAnalyticsListener.finishSession(player.getCurrentPosition());
         PlaybackAnalyticsListener.beginSession(spec.getPlaybackTraceId());
+        if (decoderRuntimeEnabledForPlayer) {
+            decoderRuntimeSession.beginAttempt(
+                    ExoDecoderRuntimeProfiles.currentOutput(tunnelingEnabledForSession),
+                    android.os.SystemClock.elapsedRealtime());
+        }
         byteSessionSequence = PlaybackBytePositionDataSource.resourceSessionSequence();
         PlaybackTrace.log("player-engine", getPlaybackTraceId(), "prepare position=%d decode=%d format=%s originalFormat=%s play=%s", position, decode, activeFormat, spec.getFormat(), playWhenReady);
         ExoPerformanceSetting.beginAutoSession();
@@ -454,6 +564,54 @@ public class ExoPlayerEngine implements PlayerEngine {
         preCache.start(player, item, spec.getPlaybackTraceId(), spec.getPlaybackRoute());
         player.prepare();
         if (playWhenReady) player.play();
+    }
+
+    private void finishDecoderRuntimeAttempt() {
+        if (!decoderRuntimeEnabledForPlayer) return;
+        decoderRuntimeSession.finishAttempt(
+                currentDecoderRuntimeEvidence(),
+                android.os.SystemClock.elapsedRealtime(),
+                System.currentTimeMillis());
+    }
+
+    private ExoDecoderRuntimeSession.Evidence currentDecoderRuntimeEvidence() {
+        PlaybackAnalyticsListener.Snapshot analytics =
+                PlaybackAnalyticsListener.getSnapshot();
+        Format format = analytics.videoFormat() == null
+                ? player.getVideoFormat() : analytics.videoFormat();
+        String decoderName = analytics.videoDecoderName();
+        boolean secure = isSecureDecoderName(decoderName);
+        return new ExoDecoderRuntimeSession.Evidence(
+                decoderName,
+                format,
+                secure,
+                analytics.droppedFrames(),
+                PlaybackAnalyticsListener.getFrameTimingSnapshot().codecErrorCount());
+    }
+
+    private ExoDecoderRuntimeSession.Evidence decoderRuntimeEvidence(
+            PlaybackException error) {
+        PlaybackAnalyticsListener.Snapshot analytics =
+                PlaybackAnalyticsListener.getSnapshot();
+        PlaybackAnalyticsListener.DecoderFailureEvidence failure =
+                PlaybackAnalyticsListener.getDecoderFailureEvidence(error);
+        String decoderName = failure.decoderName();
+        boolean secure = failure.secureDecoderRequired()
+                || isSecureDecoderName(decoderName);
+        return new ExoDecoderRuntimeSession.Evidence(
+                decoderName,
+                failure.format(),
+                secure,
+                analytics.droppedFrames(),
+                PlaybackAnalyticsListener.getFrameTimingSnapshot().codecErrorCount());
+    }
+
+    private static boolean isSecureDecoderName(String decoderName) {
+        if (decoderName == null || decoderName.isBlank()) return false;
+        String lower = decoderName.toLowerCase(Locale.US);
+        return lower.contains(".secure")
+                || lower.contains("secure.decoder")
+                || lower.endsWith("-secure");
     }
 
     private ErrorAction seekToDefaultPosition() {

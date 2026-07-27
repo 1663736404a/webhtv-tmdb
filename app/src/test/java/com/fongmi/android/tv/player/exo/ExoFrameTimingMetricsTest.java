@@ -3,7 +3,6 @@ package com.fongmi.android.tv.player.exo;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 
 public class ExoFrameTimingMetricsTest {
 
@@ -24,7 +23,7 @@ public class ExoFrameTimingMetricsTest {
         ExoFrameTimingMetrics metrics = new ExoFrameTimingMetrics();
         metrics.observeCodecError(new IllegalStateException("codec stalled"));
         assertEquals(1, metrics.snapshot().codecErrorCount());
-        assertTrue(metrics.snapshot().lastCodecError().contains("codec stalled"));
+        assertEquals("IllegalStateException", metrics.snapshot().lastCodecError());
 
         metrics.reset();
         assertEquals(0, metrics.snapshot().codecErrorCount());

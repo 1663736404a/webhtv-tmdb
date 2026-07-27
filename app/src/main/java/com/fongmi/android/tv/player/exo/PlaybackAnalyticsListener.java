@@ -97,6 +97,19 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
         return FRAME_TIMING_METRICS.snapshot();
     }
 
+    public static DecoderFailureEvidence getDecoderFailureEvidence(
+            PlaybackException error) {
+        ErrorDetails details = ErrorDetails.from(error);
+        Snapshot current = snapshot;
+        Format format = details.format() != null
+                ? details.format() : current.videoFormat();
+        String decoderName = details.decoderName() == null
+                || details.decoderName().isBlank()
+                ? current.videoDecoderName() : details.decoderName();
+        boolean secure = details.secureDecoderRequired();
+        return new DecoderFailureEvidence(format, decoderName, secure);
+    }
+
     public static ForwardBufferTrend.Snapshot getBufferTrend() {
         return BUFFER_TREND.snapshot();
     }
@@ -275,7 +288,9 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
     @Override
     public void onVideoCodecError(EventTime eventTime, Exception videoCodecError) {
         FRAME_TIMING_METRICS.observeCodecError(videoCodecError);
-        if (SpiderDebug.isEnabled()) traceLog("video codec recoverable error=%s", videoCodecError);
+        if (SpiderDebug.isEnabled()) traceLog(
+                "video codec recoverable errorType=%s",
+                videoCodecError == null ? "unknown" : videoCodecError.getClass().getSimpleName());
     }
 
     @Override
@@ -384,9 +399,9 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
     public void onPlayerError(EventTime eventTime, PlaybackException error) {
         String code = PlaybackException.getErrorCodeName(error.errorCode);
         ErrorDetails details = ErrorDetails.from(error);
-        snapshot = snapshot.withError(code, error.getMessage(), details);
+        snapshot = snapshot.withError(code, error.getClass().getSimpleName(), details);
         if (!SpiderDebug.isEnabled()) return;
-        traceLog("error code=%s message=%s details=%s", code, error.getMessage(), details.summary());
+        traceLog("error code=%s errorType=%s details=%s", code, error.getClass().getSimpleName(), details.summary());
     }
 
     private static void traceLog(String format, Object... args) {
@@ -417,6 +432,16 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
     }
 
     public record DisplayFrameRateEstimate(float frameRate, int sampleCount) {
+    }
+
+    public record DecoderFailureEvidence(
+            @Nullable Format format,
+            String decoderName,
+            boolean secureDecoderRequired) {
+
+        public DecoderFailureEvidence {
+            decoderName = decoderName == null ? "" : decoderName;
+        }
     }
 
     public record Snapshot(String state, String videoDecoderName, Format videoFormat, String audioDecoderName, Format audioFormat, long droppedFrames, long positionMs, long bufferedMs, long bandwidthEstimate, int lastLoadTimeMs, long lastLoadBytes, int rebufferCount, long rebufferTotalMs, long rebufferStartMs, boolean everReady, String errorCode, String errorMessage, Format errorFormat, String errorDecoderName, String errorDiagnosticInfo, boolean errorSecureDecoderRequired, String errorCause) {
@@ -474,6 +499,7 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
     private record ErrorDetails(Format format, String decoderName, String diagnosticInfo, boolean secureDecoderRequired, String cause) {
 
         static ErrorDetails from(PlaybackException error) {
+            if (error == null) return new ErrorDetails(null, "", "", false, "");
             Format format = null;
             String decoderName = "";
             String diagnosticInfo = "";
@@ -485,8 +511,7 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
                 diagnosticInfo = init.diagnosticInfo == null ? "" : init.diagnosticInfo;
                 secure = init.secureDecoderRequired;
             }
-            Throwable cause = rootCause(error);
-            return new ErrorDetails(format, decoderName, diagnosticInfo, secure, cause == null ? "" : cause.getClass().getSimpleName() + ": " + cause.getMessage());
+            return new ErrorDetails(format, decoderName, diagnosticInfo, secure, causeTypes(error));
         }
 
         private String summary() {
@@ -495,15 +520,25 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
     }
 
     private static MediaCodecRenderer.DecoderInitializationException findDecoderInitException(Throwable error) {
+        // Attribute only the primary initialization exception. A single terminal
+        // error may contain several fallback decoders; persisting all of them at
+        // once would turn one playback failure into multiple blacklist samples.
         for (Throwable current = error; current != null; current = current.getCause()) {
             if (current instanceof MediaCodecRenderer.DecoderInitializationException init) return init;
         }
         return null;
     }
 
-    private static Throwable rootCause(Throwable error) {
+    private static String causeTypes(Throwable error) {
+        if (error == null) return "";
+        StringBuilder result = new StringBuilder();
         Throwable current = error;
-        while (current != null && current.getCause() != null) current = current.getCause();
-        return current;
+        int depth = 0;
+        while (current != null && depth++ < 8) {
+            if (result.length() > 0) result.append(" <- ");
+            result.append(current.getClass().getSimpleName());
+            current = current.getCause();
+        }
+        return result.toString();
     }
 }

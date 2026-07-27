@@ -81,7 +81,7 @@ import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.FfmpegVideoRenderer;
 
 public class ExoUtil {
 
-    private static final long ENHANCED_LATE_THRESHOLD_TO_DROP_INPUT_US = 5_000L;
+    static final long ENHANCED_LATE_THRESHOLD_TO_DROP_INPUT_US = 5_000L;
     private static final long ENHANCED_ADAPT_COOLDOWN_MS = 15_000L;
     private static final int ENHANCED_DROPPED_FRAMES_THRESHOLD = 24;
     private static final int ENHANCED_DROPPED_FRAMES_PER_SECOND_THRESHOLD = 4;
@@ -105,13 +105,27 @@ public class ExoUtil {
     }
 
     public static ExoPlayer buildPlayer(int decode, Player.Listener listener, boolean tunnelingFallbackAttempted) {
+        return buildPlayer(decode, listener, tunnelingFallbackAttempted, null);
+    }
+
+    public static ExoPlayer buildPlayer(
+            int decode,
+            Player.Listener listener,
+            boolean tunnelingFallbackAttempted,
+            @Nullable ExoDecoderRuntimeSession decoderRuntimeSession) {
         boolean automatic = PlaybackPerformanceSetting.isAuto(PlayerSetting.EXO);
         EnhancedVideoProfile profile = getEnhancedVideoProfile(decode);
         List<EnhancedVideoProfile> profiles = getEnhancedVideoProfiles(decode);
         DefaultTrackSelector trackSelector = buildTrackSelector(decode, tunnelingFallbackAttempted);
+        ExoDecoderRuntimeSession.OutputConfig decoderOutput =
+                ExoDecoderRuntimeProfiles.currentOutput(
+                        isTunnelingEnabled(decode, tunnelingFallbackAttempted));
         ExoPlayer.Builder builder = new ExoPlayer.Builder(App.get())
                 .setTrackSelector(trackSelector)
-                .setRenderersFactory(buildPlaybackRenderersFactory(decode))
+                .setRenderersFactory(buildPlaybackRenderersFactory(
+                        decode,
+                        automatic ? decoderRuntimeSession : null,
+                        decoderOutput))
                 .setMediaSourceFactory(buildMediaSourceFactory())
                 .setVideoChangeFrameRateStrategy(ExoPerformanceSetting.getFrameRateStrategy());
         if (PlaybackPerformanceSetting.isHighBufferEnabled()) builder.setLoadControl(buildEnhancedLoadControl());
@@ -496,16 +510,49 @@ public class ExoUtil {
         return new ExoPathAwareBandwidthMeter(context);
     }
 
-    private static RenderersFactory buildPlaybackRenderersFactory(int decode) {
-        return buildRenderersFactory(getAudioRenderMode(), getVideoRenderMode(decode), isAudioPrefer(decode), PlayerSetting.isVideoPrefer(PlayerSetting.EXO), decode == PlayerEngine.SOFT && PlaybackPerformanceSetting.isSoftVideoTuneEnabled());
+    private static RenderersFactory buildPlaybackRenderersFactory(
+            int decode,
+            @Nullable ExoDecoderRuntimeSession decoderRuntimeSession,
+            ExoDecoderRuntimeSession.OutputConfig decoderOutput) {
+        return buildRenderersFactory(
+                getAudioRenderMode(),
+                getVideoRenderMode(decode),
+                isAudioPrefer(decode),
+                PlayerSetting.isVideoPrefer(PlayerSetting.EXO),
+                decode == PlayerEngine.SOFT
+                        && PlaybackPerformanceSetting.isSoftVideoTuneEnabled(),
+                decoderRuntimeSession,
+                decoderOutput);
     }
 
     static RenderersFactory buildRenderersFactory() {
-        return buildRenderersFactory(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER, DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER, PlayerSetting.isAudioPrefer(PlayerSetting.EXO), PlayerSetting.isVideoPrefer(PlayerSetting.EXO), false);
+        return buildRenderersFactory(
+                DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER,
+                DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER,
+                PlayerSetting.isAudioPrefer(PlayerSetting.EXO),
+                PlayerSetting.isVideoPrefer(PlayerSetting.EXO),
+                false,
+                null,
+                ExoDecoderRuntimeSession.OutputConfig.unknown());
     }
 
-    private static RenderersFactory buildRenderersFactory(int audioRenderMode, int videoRenderMode, boolean audioPrefer, boolean videoPrefer, boolean softVideoTune) {
-        DefaultRenderersFactory factory = new FfmpegRenderersFactory(App.get(), audioRenderMode, videoRenderMode, audioPrefer, videoPrefer, softVideoTune) {
+    private static RenderersFactory buildRenderersFactory(
+            int audioRenderMode,
+            int videoRenderMode,
+            boolean audioPrefer,
+            boolean videoPrefer,
+            boolean softVideoTune,
+            @Nullable ExoDecoderRuntimeSession decoderRuntimeSession,
+            ExoDecoderRuntimeSession.OutputConfig decoderOutput) {
+        DefaultRenderersFactory factory = new FfmpegRenderersFactory(
+                App.get(),
+                audioRenderMode,
+                videoRenderMode,
+                audioPrefer,
+                videoPrefer,
+                softVideoTune,
+                decoderRuntimeSession,
+                decoderOutput) {
             @Override
             protected AudioSink buildAudioSink(@NonNull Context context, boolean enableFloatOutput, boolean enableAudioOutputPlaybackParams) {
                 return ExoUtil.buildAudioSink(context, enableFloatOutput, enableAudioOutputPlaybackParams);
@@ -553,14 +600,26 @@ public class ExoUtil {
         private final boolean audioPrefer;
         private final boolean videoPrefer;
         private final boolean softVideoTune;
+        @Nullable private final ExoDecoderRuntimeSession decoderRuntimeSession;
+        private final ExoDecoderRuntimeSession.OutputConfig decoderOutput;
 
-        FfmpegRenderersFactory(Context context, int audioRenderMode, int videoRenderMode, boolean audioPrefer, boolean videoPrefer, boolean softVideoTune) {
+        FfmpegRenderersFactory(
+                Context context,
+                int audioRenderMode,
+                int videoRenderMode,
+                boolean audioPrefer,
+                boolean videoPrefer,
+                boolean softVideoTune,
+                @Nullable ExoDecoderRuntimeSession decoderRuntimeSession,
+                ExoDecoderRuntimeSession.OutputConfig decoderOutput) {
             super(context);
             this.audioRenderMode = audioRenderMode;
             this.videoRenderMode = videoRenderMode;
             this.audioPrefer = audioPrefer;
             this.videoPrefer = videoPrefer;
             this.softVideoTune = softVideoTune;
+            this.decoderRuntimeSession = decoderRuntimeSession;
+            this.decoderOutput = decoderOutput;
         }
 
         @Override
@@ -575,11 +634,26 @@ public class ExoUtil {
 
         @Override
         protected void buildVideoRenderers(Context context, int extensionRendererMode, MediaCodecSelector mediaCodecSelector, boolean enableDecoderFallback, Handler eventHandler, VideoRendererEventListener eventListener, long allowedVideoJoiningTimeMs, ArrayList<Renderer> out) {
-            super.buildVideoRenderers(context, videoRenderMode, getVideoCodecSelector(mediaCodecSelector), enableDecoderFallback, eventHandler, eventListener, allowedVideoJoiningTimeMs, out);
+            MediaCodecSelector videoCodecSelector = getVideoCodecSelector(mediaCodecSelector);
+            if (decoderRuntimeSession != null
+                    && videoRenderMode == EXTENSION_RENDERER_MODE_OFF) {
+                out.add(new ExoRuntimeAwareVideoRenderer(
+                        context,
+                        getCodecAdapterFactory(),
+                        videoCodecSelector,
+                        allowedVideoJoiningTimeMs,
+                        enableDecoderFallback,
+                        eventHandler,
+                        eventListener,
+                        decoderRuntimeSession,
+                        decoderOutput));
+            } else {
+                super.buildVideoRenderers(context, videoRenderMode, videoCodecSelector, enableDecoderFallback, eventHandler, eventListener, allowedVideoJoiningTimeMs, out);
+            }
             // Keep the platform DV renderer first; use the HDR10 view only when it
             // cannot claim the DV5/DV7 track. This preserves native DV playback.
             try {
-                out.add(new DolbyVisionHdr10FallbackRenderer(context, getCodecAdapterFactory(), getVideoCodecSelector(mediaCodecSelector), allowedVideoJoiningTimeMs, enableDecoderFallback, eventHandler, eventListener));
+                out.add(new DolbyVisionHdr10FallbackRenderer(context, getCodecAdapterFactory(), videoCodecSelector, allowedVideoJoiningTimeMs, enableDecoderFallback, eventHandler, eventListener));
             } catch (Throwable ignored) {
             }
             if (videoRenderMode == EXTENSION_RENDERER_MODE_OFF) return;

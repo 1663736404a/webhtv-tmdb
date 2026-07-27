@@ -50,7 +50,7 @@ public final class ExoFrameTimingMetrics {
 
     synchronized void observeCodecError(Exception error) {
         codecErrorCount++;
-        lastCodecError = error == null ? "unknown" : error.getClass().getSimpleName() + (error.getMessage() == null ? "" : ": " + error.getMessage());
+        lastCodecError = error == null ? "unknown" : error.getClass().getSimpleName();
     }
 
     /** Starts a new continuous playback segment without discarding accumulated diagnostics. */

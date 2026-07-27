@@ -98,6 +98,7 @@ public class PlayerManager implements ParseCallback {
     private static final long LOCAL_PROXY_RETRY_DELAY_MS = 1000;
     private static final long HARD_DECODE_SWITCH_RETRY_DELAY_MS = 1200;
     private static final long EXO_TUNNELING_RETRY_DELAY_MS = 250;
+    private static final long EXO_DECODER_RUNTIME_RETRY_DELAY_MS = 1200;
     private static final long MPV_AUTO_OUTPUT_PROBE_INTERVAL_MS = 250;
     private static final int LOCAL_PROXY_MAX_RETRY = 2;
     private static final int MPV_AUTO_OUTPUT_PROBE_MAX_ATTEMPTS = 20;
@@ -2750,7 +2751,6 @@ public class PlayerManager implements ParseCallback {
         while (current != null && depth++ < 8) {
             if (builder.length() > 0) builder.append(" <- ");
             builder.append(current.getClass().getName());
-            if (!TextUtils.isEmpty(current.getMessage())) builder.append(": ").append(current.getMessage());
             current = current.getCause();
         }
         return builder.toString();
@@ -2876,11 +2876,15 @@ public class PlayerManager implements ParseCallback {
             PlaybackErrorClassifier.Failure failure = PlaybackErrorClassifier.classify(e, getEffectivePlaybackRoute());
             PlayerEngine.ErrorAction action = engine.handleError(e);
             PlaybackTrace.log("playback-error", playbackTrace.current(), "%s action=%s player=%d decode=%d", failure.logSummary(), action, playerType, engine.getDecode());
-            if (SpiderDebug.isEnabled()) SpiderDebug.log("player", "error code=%d message=%s action=%s retry=%d spec=%s cause=%s", e.errorCode, e.getMessage(), action, retry, debugSpec(), causeChain(e));
+            if (SpiderDebug.isEnabled()) SpiderDebug.log("player", "error code=%d errorType=%s action=%s retry=%d causeTypes=%s", e.errorCode, e.getClass().getSimpleName(), action, retry, causeChain(e));
             LocalProxyDebug.dumpIfLocalFailure(spec == null ? null : spec.getUrl(), e);
             if (retryLutFailure(e)) return;
             if (retryLutWarmupByRefresh(action, e)) return;
+            boolean decoderRuntimeObserved = action == PlayerEngine.ErrorAction.DECODE
+                    && engine instanceof ExoPlayerEngine exo
+                    && exo.observeDecoderRuntimeFailure(e);
             if (action == PlayerEngine.ErrorAction.DECODE && retryExoTunnelingFailure(e)) return;
+            if (decoderRuntimeObserved && retryExoDecoderRuntimeFailure(e)) return;
             if (action == PlayerEngine.ErrorAction.DECODE && retryHardDecodeSwitch(e)) return;
             if (action == PlayerEngine.ErrorAction.FATAL && retryLocalProxy(e)) return;
             if (action == PlayerEngine.ErrorAction.RELOAD) {
@@ -2936,10 +2940,10 @@ public class PlayerManager implements ParseCallback {
         callback.onPlayerRebuild(player, true);
         this.playWhenReady = wasPlayWhenReady;
         initTrack = false;
-        if (SpiderDebug.isEnabled()) SpiderDebug.log("player", "hard decode switch retry delay=%d position=%d spec=%s cause=%s", HARD_DECODE_SWITCH_RETRY_DELAY_MS, position, debugSpec(), causeChain(e));
+        if (SpiderDebug.isEnabled()) SpiderDebug.log("player", "hard decode switch retry delay=%d position=%d errorType=%s", HARD_DECODE_SWITCH_RETRY_DELAY_MS, position, e.getClass().getSimpleName());
         App.post(() -> {
             if (seq != prepareSeq || spec != target || engine == null || player == null || !engine.isHard()) return;
-            if (SpiderDebug.isEnabled()) SpiderDebug.log("player", "hard decode switch retry start position=%d spec=%s", position, debugSpec());
+            if (SpiderDebug.isEnabled()) SpiderDebug.log("player", "hard decode switch retry start position=%d", position);
             setDanmakus(target.getDanmakus());
             initTrack = false;
             waitingLutBeforePlay = false;
@@ -2968,10 +2972,10 @@ public class PlayerManager implements ParseCallback {
         rebuildPlayer(true);
         this.playWhenReady = wasPlayWhenReady;
         initTrack = false;
-        if (SpiderDebug.isEnabled()) SpiderDebug.log("exo-tunnel", "fallback scheduled delay=%d position=%d spec=%s cause=%s", EXO_TUNNELING_RETRY_DELAY_MS, position, debugSpec(), causeChain(e));
+        if (SpiderDebug.isEnabled()) SpiderDebug.log("exo-tunnel", "fallback scheduled delay=%d position=%d errorType=%s", EXO_TUNNELING_RETRY_DELAY_MS, position, e.getClass().getSimpleName());
         App.post(() -> {
             if (seq != prepareSeq || spec != target || engine != exo || player == null) return;
-            if (SpiderDebug.isEnabled()) SpiderDebug.log("exo-tunnel", "fallback start position=%d spec=%s", position, debugSpec());
+            if (SpiderDebug.isEnabled()) SpiderDebug.log("exo-tunnel", "fallback start position=%d", position);
             setDanmakus(target.getDanmakus());
             waitingLutBeforePlay = false;
             applySubtitleStyle();
@@ -2981,6 +2985,52 @@ public class PlayerManager implements ParseCallback {
             App.post(runnable, Constant.TIMEOUT_PLAY);
             callback.onPrepare();
         }, EXO_TUNNELING_RETRY_DELAY_MS);
+        return true;
+    }
+
+    private boolean retryExoDecoderRuntimeFailure(PlaybackException e) {
+        if (!(engine instanceof ExoPlayerEngine exo)
+                || player == null
+                || spec == null
+                || !exo.prepareDecoderRuntimeFallback()) {
+            return false;
+        }
+        hardDecodeSwitchRetryArmed = false;
+        int seq = ++prepareSeq;
+        PlaySpec target = spec;
+        long position = Math.max(0, getPosition());
+        float speed = getSpeed();
+        boolean repeat = isRepeatOne();
+        boolean wasPlayWhenReady = player.getPlayWhenReady();
+        App.removeCallbacks(runnable);
+        rebuildPlayer(true);
+        this.playWhenReady = wasPlayWhenReady;
+        initTrack = false;
+        if (SpiderDebug.isEnabled()) {
+            SpiderDebug.log(
+                    "exo-decoder-profile",
+                    "action=retry-scheduled delay=%d position=%d errorType=%s",
+                    EXO_DECODER_RUNTIME_RETRY_DELAY_MS,
+                    position,
+                    e.getClass().getSimpleName());
+        }
+        App.post(() -> {
+            if (seq != prepareSeq || spec != target || engine != exo || player == null) return;
+            if (SpiderDebug.isEnabled()) {
+                SpiderDebug.log(
+                        "exo-decoder-profile",
+                        "action=retry-start position=%d",
+                        position);
+            }
+            setDanmakus(target.getDanmakus());
+            waitingLutBeforePlay = false;
+            applySubtitleStyle();
+            engine.start(target.checkUa(), position, wasPlayWhenReady);
+            if (speed != 1f) setSpeed(speed);
+            setRepeatOne(repeat);
+            App.post(runnable, Constant.TIMEOUT_PLAY);
+            callback.onPrepare();
+        }, EXO_DECODER_RUNTIME_RETRY_DELAY_MS);
         return true;
     }
 
