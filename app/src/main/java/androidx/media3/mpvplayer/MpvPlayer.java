@@ -36,6 +36,7 @@ import androidx.media3.common.Tracks;
 import androidx.media3.common.VideoSize;
 import androidx.media3.common.util.UnstableApi;
 
+import com.fongmi.android.tv.player.PlaybackAutoContext;
 import com.fongmi.android.tv.player.PlaybackRoute;
 import com.fongmi.android.tv.player.PlaybackResourceClassifier;
 import com.fongmi.android.tv.player.PlaybackTrace;
@@ -143,6 +144,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     private final MpvHlsProxy hlsProxy;
     private final MpvAutoCacheBaselineState autoCacheBaselineState;
     private final MpvCacheObserverState cacheObserverState;
+    private final MpvCacheTimeState cacheTimeState;
     private final MpvMediaReplacementCoordinator mediaReplacementCoordinator;
     private final List<String> recentLogs;
     private final List<ParcelFileDescriptor> contentFds;
@@ -253,6 +255,20 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         this.config = config;
         mainHandler = new Handler(Looper.getMainLooper());
         cacheObserverState = new MpvCacheObserverState();
+        MpvCacheTimePolicy.Decision initialCacheTimeDecision = MpvCacheTimePolicy.resolve(
+                config.performanceOptionsPriority(),
+                config.automaticCacheTime(),
+                config.cache(),
+                config.cacheSeconds(),
+                config.demuxerReadaheadSeconds(),
+                config.rebufferMs(),
+                PlaybackAutoContext.Protocol.UNKNOWN,
+                PlaybackAutoContext.PathKind.UNKNOWN);
+        cacheTimeState = new MpvCacheTimeState(
+                initialCacheTimeDecision,
+                config.cacheSeconds(),
+                config.demuxerReadaheadSeconds(),
+                config.demuxerHysteresisSeconds());
         mediaReplacementCoordinator = new MpvMediaReplacementCoordinator();
         stateRefreshRunnable = this::refreshPlaybackState;
         endFileValidationRunnable = this::validateEarlyEndFile;
@@ -612,6 +628,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     }
 
     private PlayerCacheState buildCacheState() {
+        MpvCacheTimeState.Snapshot cacheTime = cacheTimeState.snapshot();
         return new PlayerCacheState(
                 true,
                 config.cache(),
@@ -629,8 +646,12 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
                 cachedCacheSpeedBytesPerSecond,
                 config.demuxerMaxBytes(),
                 config.demuxerMaxBackBytes(),
-                config.cacheSeconds(),
-                config.demuxerReadaheadSeconds());
+                cacheTime.master().label(),
+                cacheTime.reason().label(),
+                cacheTime.cacheSeconds(),
+                cacheTime.readaheadSeconds(),
+                cacheTime.hysteresisSeconds(),
+                cacheTime.observedOptions());
     }
 
     public String getRenderDiagnostics() {
@@ -844,6 +865,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
                 currentLikelyHls = isLikelyHls(mediaItem, currentPlayableUri);
                 currentLikelyDash = isLikelyDash(mediaItem, currentPlayableUri);
             }
+            applyCacheTimePolicy();
             if (currentIsoUri == null && shouldProxyHls(currentPlayableUri, currentLikelyHls)) {
                 String originalUri = currentPlayableUri;
                 currentPlayableUri = hlsProxy.proxy(originalUri, headers);
@@ -897,6 +919,20 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     }
 
     private void applyPreInitOptions() {
+        MpvCacheTimePolicy.Decision initialCacheTimeDecision = MpvCacheTimePolicy.resolve(
+                config.performanceOptionsPriority(),
+                config.automaticCacheTime(),
+                config.cache(),
+                config.cacheSeconds(),
+                config.demuxerReadaheadSeconds(),
+                config.rebufferMs(),
+                PlaybackAutoContext.Protocol.UNKNOWN,
+                PlaybackAutoContext.PathKind.UNKNOWN);
+        cacheTimeState.reset(
+                initialCacheTimeDecision,
+                config.cacheSeconds(),
+                config.demuxerReadaheadSeconds(),
+                config.demuxerHysteresisSeconds());
         setOption("config", "yes");
         setOption("config-dir", config.configDir().getAbsolutePath());
         setOption("gpu-shader-cache-dir", config.cacheDir().getAbsolutePath());
@@ -925,6 +961,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         setOption("demuxer-max-bytes", String.valueOf(config.demuxerMaxBytes()));
         setOption("demuxer-max-back-bytes", String.valueOf(config.demuxerMaxBackBytes()));
         setOption("demuxer-readahead-secs", String.valueOf(config.demuxerReadaheadSeconds()));
+        setOption("demuxer-hysteresis-secs", String.valueOf(config.demuxerHysteresisSeconds()));
         // These options are required for reliable text subtitle rendering on Android.
         // This libmpv build includes libass but not fontconfig, so let libass index the
         // Android system font directory directly instead of selecting an unavailable
@@ -951,7 +988,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
                     "action=initial-cache result=%s phase=post-init",
                     autoCacheApplied ? "applied" : "failed");
         }
-        if (shouldCollectDebugDetails()) PlaybackTrace.log("mpv", playbackTraceId, "option priority=%s overlayCount=%d effective cache maxBytes=%s backBytes=%s cacheSecs=%s readaheadSecs=%s initial=%s rebufferWait=%s", MpvOptionPriorityPolicy.priorityName(config.performanceOptionsPriority()), overlayCount, stringProperty("demuxer-max-bytes", "?"), stringProperty("demuxer-max-back-bytes", "?"), stringProperty("cache-secs", "?"), stringProperty("demuxer-readahead-secs", "?"), stringProperty("cache-pause-initial", "?"), stringProperty("cache-pause-wait", "?"));
+        if (shouldCollectDebugDetails()) PlaybackTrace.log("mpv", playbackTraceId, "option priority=%s overlayCount=%d effective cache maxBytes=%s backBytes=%s timeMaster=%s cacheSecs=%s readaheadSecs=%s hysteresisSecs=%s initial=%s rebufferWait=%s", MpvOptionPriorityPolicy.priorityName(config.performanceOptionsPriority()), overlayCount, stringProperty("demuxer-max-bytes", "?"), stringProperty("demuxer-max-back-bytes", "?"), cacheTimeState.snapshot().master().label(), stringProperty("cache-secs", "?"), stringProperty("demuxer-readahead-secs", "?"), stringProperty("demuxer-hysteresis-secs", "?"), stringProperty("cache-pause-initial", "?"), stringProperty("cache-pause-wait", "?"));
     }
 
     private boolean applyAutoCacheBaselineToNative() {
@@ -966,7 +1003,11 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
 
     private int applyPerformanceOptionOverlay() {
         Map<String, String> overlay = MpvOptionPriorityPolicy.resolvePerformanceOverlay(config);
-        for (Map.Entry<String, String> entry : overlay.entrySet()) setRuntimeString(entry.getKey(), entry.getValue());
+        for (Map.Entry<String, String> entry : overlay.entrySet()) {
+            if (setRuntimeStringChecked(entry.getKey(), entry.getValue())) {
+                cacheTimeState.recordAccepted(entry.getKey(), entry.getValue());
+            }
+        }
         return overlay.size();
     }
 
@@ -989,6 +1030,9 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         observe("demuxer-cache-state/raw-input-rate", MPVLib.MpvFormat.MPV_FORMAT_INT64);
         observe("demuxer-cache-state/bof-cached", MPVLib.MpvFormat.MPV_FORMAT_FLAG);
         observe("demuxer-cache-state/eof-cached", MPVLib.MpvFormat.MPV_FORMAT_FLAG);
+        observe("cache-secs", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE);
+        observe("demuxer-readahead-secs", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE);
+        observe("demuxer-hysteresis-secs", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE);
         observe("demuxer-cache-state/idle", MPVLib.MpvFormat.MPV_FORMAT_FLAG);
         observe("demuxer-cache-state/underrun", MPVLib.MpvFormat.MPV_FORMAT_FLAG);
         observe("pause", MPVLib.MpvFormat.MPV_FORMAT_FLAG);
@@ -1042,6 +1086,17 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
 
     private void handleProperty(String property, @Nullable Object value) {
         if (released) return;
+        boolean firstCacheTimeReadback = cacheTimeState.recordObserved(property, value);
+        if (firstCacheTimeReadback) {
+            MpvCacheTimeState.Snapshot cacheTime = cacheTimeState.snapshot();
+            if (cacheTime.observedOptions() == 3) {
+                PlaybackTrace.log("mpv-cache-time", playbackTraceId,
+                        "master=%s reason=%s cache=%d readahead=%d hysteresis=%d observed=%d result=native-readback",
+                        cacheTime.master().label(), cacheTime.reason().label(),
+                        cacheTime.cacheSeconds(), cacheTime.readaheadSeconds(),
+                        cacheTime.hysteresisSeconds(), cacheTime.observedOptions());
+            }
+        }
         if (mediaItem == null) {
             playbackState = Player.STATE_IDLE;
             loading = false;
@@ -2323,6 +2378,44 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         cachedCacheUnderrun = false;
         cachedCacheBof = false;
         cachedCacheEof = false;
+    }
+
+    private void applyCacheTimePolicy() {
+        PlaybackResourceClassifier.Classification classification = resourceClassification;
+        PlaybackAutoContext.Protocol protocol = currentLikelyHls
+                ? PlaybackAutoContext.Protocol.HLS
+                : currentLikelyDash
+                ? PlaybackAutoContext.Protocol.DASH
+                : classification == null
+                ? PlaybackAutoContext.Protocol.UNKNOWN
+                : classification.protocol();
+        PlaybackAutoContext.PathKind playerPath = classification == null
+                ? PlaybackAutoContext.PathKind.UNKNOWN : classification.playerPath();
+        MpvCacheTimePolicy.Decision decision = MpvCacheTimePolicy.resolve(
+                config.performanceOptionsPriority(),
+                config.automaticCacheTime(),
+                config.cache(),
+                config.cacheSeconds(),
+                config.demuxerReadaheadSeconds(),
+                config.rebufferMs(),
+                protocol,
+                playerPath);
+        cacheTimeState.select(decision);
+        boolean applied = decision.runtimeManaged();
+        for (Map.Entry<String, String> entry : decision.runtimeOptions().entrySet()) {
+            boolean accepted = setRuntimeStringChecked(entry.getKey(), entry.getValue());
+            if (accepted) cacheTimeState.recordAccepted(entry.getKey(), entry.getValue());
+            applied &= accepted;
+        }
+        MpvCacheTimeState.Snapshot snapshot = cacheTimeState.snapshot();
+        PlaybackTrace.log("mpv-cache-time", playbackTraceId,
+                "master=%s reason=%s protocol=%s path=%s cache=%d readahead=%d hysteresis=%d rebufferWait=%d observed=%d result=%s",
+                decision.master().label(), decision.reason().label(),
+                decision.protocol().label(), decision.playerPath().label(),
+                snapshot.cacheSeconds(), snapshot.readaheadSeconds(),
+                snapshot.hysteresisSeconds(), decision.rebufferWaitSeconds(),
+                snapshot.observedOptions(),
+                !decision.runtimeManaged() ? "mpv-conf" : applied ? "applied" : "failed");
     }
 
     private boolean isNetworkFailureLog(String lower) {

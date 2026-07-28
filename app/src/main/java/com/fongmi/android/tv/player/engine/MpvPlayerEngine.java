@@ -489,10 +489,12 @@ public class MpvPlayerEngine implements PlayerEngine {
                 .logLevel(MpvPerformanceSetting.isVerboseLog() ? "all=v" : "all=warn")
                 .demuxerMaxBytes(getDemuxerMaxBytes())
                 .demuxerMaxBackBytes(getDemuxerMaxBackBytes())
-                .cacheSeconds(getDemuxerReadAheadSeconds())
-                .demuxerReadaheadSeconds(getDemuxerReadAheadSeconds())
+                .cacheSeconds(getCacheTargetSeconds())
+                .demuxerReadaheadSeconds(MpvPlayerConfig.DEFAULT_DEMUXER_READAHEAD_SECONDS)
+                .demuxerHysteresisSeconds(MpvPlayerConfig.DEFAULT_DEMUXER_HYSTERESIS_SECONDS)
                 .rebufferMs(MpvPerformanceSetting.getRebufferMs())
                 .performanceOptionsPriority(MpvPerformanceSetting.isPerformancePriority())
+                .automaticCacheTime(PlaybackPerformanceSetting.isAuto(PlayerSetting.MPV))
                 .option("framedrop", MpvPerformanceSetting.getFrameDropOption())
                 .option("video-sync", MpvPerformanceSetting.getSyncOption())
                 .option("interpolation", MpvPerformanceSetting.isInterpolation() ? "yes" : "no")
@@ -551,7 +553,7 @@ public class MpvPlayerEngine implements PlayerEngine {
         };
     }
 
-    private int getDemuxerReadAheadSeconds() {
+    private int getCacheTargetSeconds() {
         return Math.min(60, Math.max(15, PlayerSetting.getBuffer(PlayerSetting.MPV) * 3));
     }
 

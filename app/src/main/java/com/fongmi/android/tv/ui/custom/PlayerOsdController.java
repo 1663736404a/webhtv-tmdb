@@ -591,11 +591,22 @@ public class PlayerOsdController {
                 cache.bofCached() && cache.eofCached() ? "全量缓存" : cache.eofCached() ? "EOF" : "");
         String config = join(" / ",
                 "cache " + switchText(cache.enabled()),
-                "目标 " + cache.cacheSeconds() + "s",
-                "readahead " + cache.readaheadSeconds() + "s",
+                "时间主控 " + cache.timeMaster() + " " + cacheTimeTarget(cache) + "s",
+                "非cache回退 " + cache.readaheadSeconds() + "s",
+                cache.hysteresisSeconds() > 0
+                        ? "批读阈值 " + cache.hysteresisSeconds() + "s"
+                        : "批读 连续",
+                cache.cacheTimeObservedOptions() > 0
+                        ? "参数读回 " + cache.cacheTimeObservedOptions() + "/3"
+                        : "",
                 cache.maxBytes() > 0 ? "上限 " + formatBytes(cache.maxBytes()) : "",
                 cache.maxBackBytes() > 0 ? "回退 " + formatBytes(cache.maxBackBytes()) : "回退 关");
         return join(" / ", runtime, config);
+    }
+
+    private int cacheTimeTarget(PlayerCacheState cache) {
+        return "demuxer-readahead-secs".equals(cache.timeMaster())
+                ? cache.readaheadSeconds() : cache.cacheSeconds();
     }
 
     private String summarizeFrameTiming() {
