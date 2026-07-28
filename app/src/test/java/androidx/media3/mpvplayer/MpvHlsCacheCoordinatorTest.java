@@ -71,6 +71,29 @@ public class MpvHlsCacheCoordinatorTest {
     }
 
     @Test
+    public void preloadSnapshotIncludesConcurrentReservationAndRelease() {
+        MpvHlsCacheCoordinator coordinator = coordinator(
+                new MpvHlsCacheCoordinator.StorageFacts(true, 8 * GIB, 10 * GIB),
+                new FakeClock(1_000_000));
+        MpvHlsCacheCoordinator.ReservationDecision reservation =
+                coordinator.tryReserve(
+                        "full.bin",
+                        new File(directory, "full.bin"),
+                        MIB - 256,
+                        MIB,
+                        MpvHlsCacheCoordinator.WriterType.PREFETCH);
+
+        assertTrue(reservation.granted());
+        MpvHlsCacheCoordinator.PreloadCapacitySnapshot blocked =
+                coordinator.preloadSnapshot(MIB);
+        assertFalse(blocked.allowed());
+        assertEquals(MIB, blocked.capacity().reservedBytes());
+
+        reservation.reservation().abort();
+        assertTrue(coordinator.preloadSnapshot(MIB).allowed());
+    }
+
+    @Test
     public void temporaryFilesAreCountedAgainstCapacity() throws IOException {
         File temp = new File(directory, "active.tmp");
         writeBytes(temp, 900_000);

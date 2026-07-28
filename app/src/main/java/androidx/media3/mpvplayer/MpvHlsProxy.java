@@ -8,6 +8,7 @@ import androidx.media3.exoplayer.hls.playlist.HlsAdsParser;
 
 import com.fongmi.android.tv.player.PlaybackRouteRegistry;
 import com.fongmi.android.tv.player.PlaybackResourceClassifier;
+import com.fongmi.android.tv.player.mpv.MpvPreloadPolicy;
 import com.fongmi.android.tv.setting.PlayerSetting;
 import com.fongmi.android.tv.setting.PreloadSetting;
 import com.fongmi.android.tv.setting.Setting;
@@ -37,6 +38,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -89,12 +91,17 @@ public final class MpvHlsProxy extends NanoHTTPD {
     private final AtomicLong nextId;
     private final java.util.Set<String> preloading;
     private final MpvHlsPreloadGate preloadGate;
+    private final MpvHlsUpstreamEstimator upstreamEstimator;
+    private final AtomicInteger activePreloadTransfers;
     private ExecutorService preloadExecutor;
     private MpvHlsCacheCoordinator.ClientLease cacheClient;
     private PlaybackRouteRegistry.Registration routeRegistration;
     private int preloadThreads;
     private volatile int sessionId;
     private volatile boolean started;
+    private volatile boolean automaticPreloadMode;
+    private volatile boolean automaticResourceAllowed = true;
+    private volatile boolean automaticTrafficAllowed;
 
     public MpvHlsProxy() {
         this(PlayerSetting.MPV);
@@ -115,12 +122,15 @@ public final class MpvHlsProxy extends NanoHTTPD {
         nextId = new AtomicLong();
         preloading = ConcurrentHashMap.newKeySet();
         preloadGate = new MpvHlsPreloadGate();
+        upstreamEstimator = new MpvHlsUpstreamEstimator();
+        activePreloadTransfers = new AtomicInteger();
     }
 
     public synchronized String proxy(String url, Map<String, String> headers) throws IOException {
         ensureStarted();
         refreshCacheCoordinator();
         int id = ++this.sessionId;
+        upstreamEstimator.reset();
         Session session = new Session(url, sanitize(headers), System.currentTimeMillis());
         sessions.put(id, session);
         SessionStats stats = new SessionStats();
@@ -143,6 +153,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
         ensureStarted();
         refreshCacheCoordinator();
         int id = ++this.sessionId;
+        upstreamEstimator.reset();
         Session session = new Session(url, sanitize(headers), System.currentTimeMillis());
         sessions.put(id, session);
         SessionStats stats = new SessionStats();
@@ -164,18 +175,29 @@ public final class MpvHlsProxy extends NanoHTTPD {
         sessions.clear();
         sessionStats.clear();
         targets.clear();
+        upstreamEstimator.reset();
         cancelPreloads();
     }
 
     /** Auto-mode gate only; foreground proxy reads and cache hits remain available. */
-    public boolean setAutomaticPreloadAllowed(boolean allowed) {
+    public boolean updateAutomaticPreloadControl(
+            boolean automatic,
+            boolean resourceAllowed,
+            boolean trafficAllowed) {
+        automaticPreloadMode = automatic;
+        automaticResourceAllowed = resourceAllowed;
+        automaticTrafficAllowed = trafficAllowed;
+        boolean allowed = !automatic || resourceAllowed && trafficAllowed;
         MpvHlsPreloadGate.Transition transition = preloadGate.update(allowed);
         if (transition == MpvHlsPreloadGate.Transition.BLOCKED) {
-            cancelPreloads();
+            releasePreloadWork(true);
         }
         if (transition.changed()) {
             SpiderDebug.log(TAG,
-                    "preload-gate state=%s action=%s active=%d",
+                    "preload-gate mode=%s resource=%s traffic=%s state=%s action=%s active=%d",
+                    automatic ? "automatic" : "manual",
+                    resourceAllowed ? "allowed" : "blocked",
+                    trafficAllowed ? "allowed" : "blocked",
                     allowed ? "allowed" : "blocked",
                     transition.label(),
                     preloading.size());
@@ -203,6 +225,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
                 + "/" + formatBytes(cacheLimitBytes())
                 + " / preload " + preloading.size()
                 + "/" + (preloadGate.allowed() ? "allowed" : "blocked")
+                + "/fg=" + preloadGate.foregroundRequests()
                 + " / " + statsText();
     }
 
@@ -228,6 +251,68 @@ public final class MpvHlsProxy extends NanoHTTPD {
         SessionStats stats = sessionStats.get(sessionId);
         if (owner == null || stats == null || !stats.vod || stats.segments.isEmpty()) return;
         preloadSegments(owner, stats.segments, Math.max(0, positionMs) / 1000.0);
+    }
+
+    void requestAutomaticPreload(long positionMs, long selectedBitsPerSecond) {
+        if (!automaticPreloadMode
+                || !automaticResourceAllowed
+                || !automaticTrafficAllowed
+                || preloadGate.foregroundRequests() > 0) return;
+        Session owner = sessions.get(sessionId);
+        SessionStats stats = sessionStats.get(sessionId);
+        if (owner == null || stats == null || !stats.vod) return;
+        List<HlsPlaylistRewriter.Segment> selected =
+                stats.segmentsForVariant(selectedBitsPerSecond);
+        if (selected.isEmpty()) return;
+        preloadSegments(owner, selected, Math.max(0, positionMs) / 1000.0);
+    }
+
+    void cancelAutomaticPreloadForDiscontinuity() {
+        if (!automaticPreloadMode || kernel != PlayerSetting.MPV) return;
+        automaticTrafficAllowed = false;
+        preloadGate.update(false);
+        releasePreloadWork(true);
+        SpiderDebug.log(TAG,
+                "preload discontinuity action=cancel active=%d transfers=%d",
+                preloading.size(), activePreloadTransfers.get());
+    }
+
+    PreloadRuntimeSnapshot preloadRuntimeSnapshot(long nowElapsedMs) {
+        refreshCacheCoordinator();
+        SessionStats stats = sessionStats.get(sessionId);
+        MpvHlsUpstreamEstimator.Snapshot throughput =
+                upstreamEstimator.snapshot(nowElapsedMs);
+        MpvHlsCacheCoordinator.PreloadCapacitySnapshot preloadCapacity =
+                cacheCoordinator.preloadSnapshot(configuredCacheLimitBytes());
+        MpvHlsCacheCoordinator.CapacitySnapshot capacity =
+                preloadCapacity.capacity();
+        boolean storageKnown = capacity.policy().state()
+                != com.fongmi.android.tv.player.cache.DiskCacheCapacityPolicy.State.UNAVAILABLE;
+        boolean cacheEnabled = capacity.policy().state()
+                != com.fongmi.android.tv.player.cache.DiskCacheCapacityPolicy.State.DISABLED;
+        boolean budgetAvailable = preloadCapacity.allowed()
+                || !preloading.isEmpty() || activePreloadTransfers.get() > 0;
+        return new PreloadRuntimeSnapshot(
+                PreloadSetting.isPreload(kernel),
+                stats != null && stats.vod,
+                throughput.bitsPerSecond(),
+                throughput.known(),
+                throughput.fresh(),
+                throughput.sampledAtElapsedMs(),
+                throughput.ageMs(),
+                throughput.acceptedSamples(),
+                throughput.rejectedSamples(),
+                throughput.lastRejectReason().label(),
+                preloadGate.foregroundRequests(),
+                cacheEnabled,
+                storageKnown,
+                budgetAvailable,
+                capacity.circuitOpen(),
+                capacity.physicalBytes(),
+                capacity.reservedBytes(),
+                capacity.policy().newWriteBudgetBytes(),
+                capacity.policy().effectiveCapacityBytes(),
+                preloading.size());
     }
 
     @Override
@@ -261,8 +346,18 @@ public final class MpvHlsProxy extends NanoHTTPD {
 
     private void cancelPreloadsForCircuit() {
         preloadGate.invalidate();
-        releasePreloadExecutor();
-        preloading.clear();
+        releasePreloadWork(false);
+    }
+
+    private ForegroundLease beginForegroundRequest() {
+        boolean managed = automaticPreloadMode && kernel == PlayerSetting.MPV;
+        if (managed && preloadGate.foregroundStarted()) {
+            releasePreloadWork(false);
+            SpiderDebug.log(TAG,
+                    "preload foreground action=cancel generation=invalidated active=%d",
+                    preloading.size());
+        }
+        return new ForegroundLease(managed);
     }
 
     private String baseUrl() {
@@ -273,7 +368,9 @@ public final class MpvHlsProxy extends NanoHTTPD {
         int id = parseSessionId(httpSession);
         Session session = sessions.get(id);
         if (session == null || TextUtils.isEmpty(session.url)) return error(Status.NOT_FOUND, "expired playlist");
-        try (okhttp3.Response response = fetch(session, session.url, null, false)) {
+        ForegroundLease foreground = beginForegroundRequest();
+        try (foreground;
+             okhttp3.Response response = fetch(session, session.url, null, false)) {
             if (!response.isSuccessful()) {
                 recordPlaylistResponse(id, response.code(), session.url, null);
                 SpiderDebug.log(TAG, "playlist error session=%d code=%d url=%s", id, response.code(), shortUrl(session.url));
@@ -434,75 +531,90 @@ public final class MpvHlsProxy extends NanoHTTPD {
         Target target = id == null ? null : targets.get(id);
         Session owner = target == null ? null : sessions.get(target.sessionId);
         if (target == null || owner == null) return error(Status.NOT_FOUND, "expired item");
-        String range = requestHeader(httpSession, "range");
-        boolean targetPlaylist = isPlaylistUrl(target.url, null);
-        if (targetPlaylist) recordSelectedVariant(target);
-        String forwardedRange = targetPlaylist ? null : range;
-        if (!targetPlaylist && target.cacheable) {
-            Response cached = serveCached(owner, target.url, range);
-            if (cached != null) {
-                SpiderDebug.log(TAG, "cache hit id=%s range=%s", id, range);
-                return cached;
-            }
-        }
-        okhttp3.Response response = fetch(owner, target.url, forwardedRange, !targetPlaylist);
-        ResponseBody body = response.body();
-        if (body == null) {
-            recordItemResponse(target.sessionId, response.code(), target.url);
-            response.close();
-            return error(Status.INTERNAL_ERROR, "empty item body");
-        }
-        String finalUrl = response.request().url().toString();
-        MediaType type = body.contentType();
-        if (isPlaylistUrl(target.url, type) || isPlaylistUrl(finalUrl, type)) {
-            recordSelectedVariant(target);
-            try (response; body) {
-                if (!response.isSuccessful()) {
-                    recordPlaylistResponse(target.sessionId, response.code(), target.url, null);
-                    SpiderDebug.log(TAG, "nested playlist error id=%s code=%d url=%s", id, response.code(), shortUrl(target.url));
-                    return error(toStatus(response.code()), "nested playlist http " + response.code());
-                }
-                String text = body.string();
-                recordPlaylistResponse(target.sessionId, response.code(), target.url, text);
-                if (!looksLikePlaylist(text)) {
-                    SpiderDebug.log(TAG, "invalid nested playlist id=%s code=%d bytes=%d url=%s", id, response.code(), text.length(), shortUrl(target.url));
-                    return error(Status.BAD_REQUEST, "invalid playlist");
-                }
-                text = applyAdblock(text, target.sessionId, target.url);
-                String rewritten = rewritePlaylist(finalUrl, text, target.sessionId, target.variant());
-                byte[] data = rewritten.getBytes(StandardCharsets.UTF_8);
-                SpiderDebug.log(TAG, "nested playlist id=%s code=%d bytes=%d url=%s", id, response.code(), data.length, shortUrl(target.url));
-                return noCache(newFixedLengthResponse(Status.OK, MIME_M3U8, new ByteArrayInputStream(data), data.length));
-            }
-        }
-
-        boolean mayStripPngPrefix = isPngMime(type);
-        recordItemResponse(target.sessionId, response.code(), target.url);
-        long contentLength = body.contentLength();
-        String mime = mediaMimeFor(target.url, finalUrl, type);
-        InputStream source = body.byteStream();
-        if (mayStripPngPrefix) {
-            source = new PngPrefixStrippingInputStream(source, target.url);
-        } else {
-            source = maybeCacheStreaming(owner, target, source, response.code(), forwardedRange, response.header("Content-Range"), contentLength, mime);
-        }
-        InputStream stream = new CloseResponseInputStream(source, response);
+        ForegroundLease foreground = beginForegroundRequest();
+        boolean foregroundHandedOff = false;
         try {
-            Response.IStatus streamingStatus = streamingStatus(response, forwardedRange);
-            Response result = mayStripPngPrefix || contentLength < 0
-                    ? newChunkedResponse(streamingStatus, mime, stream)
-                    : newFixedLengthResponse(streamingStatus, mime, stream, contentLength);
-            addStreamingHeaders(result, response, forwardedRange);
-            SpiderDebug.log(TAG, "item id=%s code=%d range=%s contentRange=%s length=%d mime=%s url=%s",
-                    id, response.code(), forwardedRange, response.header("Content-Range"), contentLength, mime, shortUrl(target.url));
-            return result;
-        } catch (Throwable error) {
-            try {
-                stream.close();
-            } catch (Throwable ignored) {
+            String range = requestHeader(httpSession, "range");
+            boolean targetPlaylist = isPlaylistUrl(target.url, null);
+            if (targetPlaylist) recordSelectedVariant(target);
+            String forwardedRange = targetPlaylist ? null : range;
+            if (!targetPlaylist && target.cacheable) {
+                Response cached = serveCached(owner, target.url, range, foreground);
+                if (cached != null) {
+                    foregroundHandedOff = true;
+                    SpiderDebug.log(TAG, "cache hit id=%s range=%s", id, range);
+                    return cached;
+                }
             }
-            if (error instanceof IOException io) throw io;
-            throw new IOException(error);
+            okhttp3.Response response = fetch(owner, target.url, forwardedRange, !targetPlaylist);
+            ResponseBody body = response.body();
+            if (body == null) {
+                recordItemResponse(target.sessionId, response.code(), target.url);
+                response.close();
+                return error(Status.INTERNAL_ERROR, "empty item body");
+            }
+            String finalUrl = response.request().url().toString();
+            MediaType type = body.contentType();
+            if (isPlaylistUrl(target.url, type) || isPlaylistUrl(finalUrl, type)) {
+                recordSelectedVariant(target);
+                try (response; body) {
+                    if (!response.isSuccessful()) {
+                        recordPlaylistResponse(target.sessionId, response.code(), target.url, null);
+                        SpiderDebug.log(TAG, "nested playlist error id=%s code=%d url=%s", id, response.code(), shortUrl(target.url));
+                        return error(toStatus(response.code()), "nested playlist http " + response.code());
+                    }
+                    String text = body.string();
+                    recordPlaylistResponse(target.sessionId, response.code(), target.url, text);
+                    if (!looksLikePlaylist(text)) {
+                        SpiderDebug.log(TAG, "invalid nested playlist id=%s code=%d bytes=%d url=%s", id, response.code(), text.length(), shortUrl(target.url));
+                        return error(Status.BAD_REQUEST, "invalid playlist");
+                    }
+                    text = applyAdblock(text, target.sessionId, target.url);
+                    String rewritten = rewritePlaylist(finalUrl, text, target.sessionId, target.variant());
+                    byte[] data = rewritten.getBytes(StandardCharsets.UTF_8);
+                    SpiderDebug.log(TAG, "nested playlist id=%s code=%d bytes=%d url=%s", id, response.code(), data.length, shortUrl(target.url));
+                    return noCache(newFixedLengthResponse(Status.OK, MIME_M3U8, new ByteArrayInputStream(data), data.length));
+                }
+            }
+
+            boolean mayStripPngPrefix = isPngMime(type);
+            recordItemResponse(target.sessionId, response.code(), target.url);
+            long contentLength = body.contentLength();
+            String mime = mediaMimeFor(target.url, finalUrl, type);
+            InputStream source = body.byteStream();
+            if (automaticPreloadMode && kernel == PlayerSetting.MPV
+                    && response.isSuccessful() && !mayStripPngPrefix
+                    && target.cacheable && stats(target.sessionId).vod) {
+                source = new UpstreamTelemetryInputStream(
+                        source, contentLength, upstreamEstimator);
+            }
+            if (mayStripPngPrefix) {
+                source = new PngPrefixStrippingInputStream(source, target.url);
+            } else {
+                source = maybeCacheStreaming(owner, target, source, response.code(), forwardedRange, response.header("Content-Range"), contentLength, mime);
+            }
+            InputStream stream = new ForegroundInputStream(
+                    new CloseResponseInputStream(source, response), foreground);
+            foregroundHandedOff = true;
+            try {
+                Response.IStatus streamingStatus = streamingStatus(response, forwardedRange);
+                Response result = mayStripPngPrefix || contentLength < 0
+                        ? newChunkedResponse(streamingStatus, mime, stream)
+                        : newFixedLengthResponse(streamingStatus, mime, stream, contentLength);
+                addStreamingHeaders(result, response, forwardedRange);
+                SpiderDebug.log(TAG, "item id=%s code=%d range=%s contentRange=%s length=%d mime=%s url=%s",
+                        id, response.code(), forwardedRange, response.header("Content-Range"), contentLength, mime, shortUrl(target.url));
+                return result;
+            } catch (Throwable error) {
+                try {
+                    stream.close();
+                } catch (Throwable ignored) {
+                }
+                if (error instanceof IOException io) throw io;
+                throw new IOException(error);
+            }
+        } finally {
+            if (!foregroundHandedOff) foreground.close();
         }
     }
 
@@ -534,11 +646,11 @@ public final class MpvHlsProxy extends NanoHTTPD {
     private String rewritePlaylist(String playlistUrl, String text, int session, @Nullable HlsPlaylistRewriter.Variant inheritedVariant) {
         HlsPlaylistRewriter.Result result = HlsPlaylistRewriter.rewrite(text, inheritedVariant, (uri, cacheable, context) -> {
             String targetUrl = resolve(playlistUrl, uri);
-            HlsPlaylistRewriter.Variant targetVariant = context.role() == HlsPlaylistRewriter.UriRole.VARIANT_PLAYLIST ? context.variant() : null;
+            HlsPlaylistRewriter.Variant targetVariant = context.variant();
             String rewrittenUrl = proxyItemUrl(targetUrl, session, cacheable, targetVariant);
             return new HlsPlaylistRewriter.MappedUri(targetUrl, rewrittenUrl);
         });
-        recordPlaylistDetails(session, text, result);
+        recordPlaylistDetails(session, text, result, inheritedVariant);
         if (!result.variants().isEmpty()) {
             SpiderDebug.log(TAG, "master playlist preserved variants session=%d variants=%d", session, result.variants().size());
         }
@@ -575,12 +687,17 @@ public final class MpvHlsProxy extends NanoHTTPD {
     }
 
     @Nullable
-    private Response serveCached(Session session, String url, @Nullable String rangeHeader) throws IOException {
+    private Response serveCached(
+            Session session,
+            String url,
+            @Nullable String rangeHeader,
+            ForegroundLease foreground) throws IOException {
         File file = cacheFile(session, url);
         if (!file.isFile() || file.length() < MIN_CACHE_FILE_BYTES) return null;
         long length = file.length();
         Range range = parseRange(rangeHeader, length);
         if (rangeHeader != null && range == null) {
+            foreground.close();
             Response response = error(Status.RANGE_NOT_SATISFIABLE, "invalid range");
             response.addHeader("Content-Range", "bytes */" + length);
             return response;
@@ -591,7 +708,9 @@ public final class MpvHlsProxy extends NanoHTTPD {
         if (input == null) return null;
         try {
             skipFully(input, start);
-            Response response = newFixedLengthResponse(range == null ? Status.OK : Status.PARTIAL_CONTENT, cacheMime(url, file), new LimitedInputStream(input, end - start + 1), end - start + 1);
+            InputStream stream = new ForegroundInputStream(
+                    new LimitedInputStream(input, end - start + 1), foreground);
+            Response response = newFixedLengthResponse(range == null ? Status.OK : Status.PARTIAL_CONTENT, cacheMime(url, file), stream, end - start + 1);
             response.addHeader("Access-Control-Allow-Origin", "*");
             response.addHeader("Cache-Control", "no-cache");
             response.addHeader("Connection", "close");
@@ -603,6 +722,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
                 input.close();
             } catch (Throwable ignored) {
             }
+            foreground.close();
             if (error instanceof IOException io) throw io;
             throw new IOException(error);
         }
@@ -640,7 +760,12 @@ public final class MpvHlsProxy extends NanoHTTPD {
     private void preloadSegments(Session session, List<HlsPlaylistRewriter.Segment> segments, double startSeconds) {
         refreshCacheCoordinator();
         long preloadGeneration = preloadGate.acquire();
-        if (preloadGeneration < 0 || !PreloadSetting.isPreload(kernel) || !isCacheEnabled() || !cacheCoordinator.canStartPreload(configuredCacheLimitBytes()) || segments.isEmpty()) return;
+        if (preloadGeneration < 0
+                || automaticPreloadMode && activePreloadTransfers.get() > 0
+                || !PreloadSetting.isPreload(kernel)
+                || !isCacheEnabled()
+                || !cacheCoordinator.canStartPreload(configuredCacheLimitBytes())
+                || segments.isEmpty()) return;
         double seconds = 0;
         for (HlsPlaylistRewriter.Segment segment : segments) {
             if (!preloadGate.allows(preloadGeneration)) break;
@@ -662,11 +787,13 @@ public final class MpvHlsProxy extends NanoHTTPD {
         if (!preloading.add(key)) return;
         try {
             getPreloadExecutor().execute(() -> {
+                activePreloadTransfers.incrementAndGet();
                 try {
                     prefetchToCache(session, url, file, preloadGeneration);
                 } catch (Throwable e) {
                     SpiderDebug.log(TAG, "preload failed errorType=%s action=stop-cache-write", e.getClass().getSimpleName());
                 } finally {
+                    activePreloadTransfers.updateAndGet(value -> Math.max(0, value - 1));
                     preloading.remove(key);
                 }
             });
@@ -677,7 +804,9 @@ public final class MpvHlsProxy extends NanoHTTPD {
     }
 
     private synchronized ExecutorService getPreloadExecutor() {
-        int threads = PreloadSetting.getPreloadThreads(kernel);
+        int threads = MpvPreloadPolicy.resolveExecutorThreads(
+                automaticPreloadMode,
+                PreloadSetting.getPreloadThreads(kernel));
         if (preloadExecutor != null && preloadThreads == threads) return preloadExecutor;
         releasePreloadExecutor();
         preloadThreads = threads;
@@ -686,6 +815,11 @@ public final class MpvHlsProxy extends NanoHTTPD {
 
     private synchronized void cancelPreloads() {
         preloadGate.invalidate();
+        releasePreloadWork(false);
+    }
+
+    private synchronized void releasePreloadWork(boolean invalidate) {
+        if (invalidate) preloadGate.invalidate();
         releasePreloadExecutor();
         preloading.clear();
     }
@@ -850,7 +984,11 @@ public final class MpvHlsProxy extends NanoHTTPD {
         }
     }
 
-    private void recordPlaylistDetails(int session, String text, HlsPlaylistRewriter.Result result) {
+    private void recordPlaylistDetails(
+            int session,
+            String text,
+            HlsPlaylistRewriter.Result result,
+            @Nullable HlsPlaylistRewriter.Variant inheritedVariant) {
         SessionStats stats = stats(session);
         stats.vod = isVodPlaylist(text);
         Session owner = sessions.get(session);
@@ -861,8 +999,11 @@ public final class MpvHlsProxy extends NanoHTTPD {
         String upper = text.toUpperCase(Locale.US);
         if (upper.contains("#EXT-X-BYTERANGE:") || upper.contains("BYTERANGE=")) stats.hasByteRange = true;
         if (!result.variants().isEmpty()) stats.recordVariants(result.variants());
-        if (stats.vod && !result.segments().isEmpty()) stats.segments = result.segments();
-        else if (!stats.vod) stats.segments = List.of();
+        if (stats.vod && !result.segments().isEmpty()) {
+            stats.recordSegments(inheritedVariant, result.segments());
+        } else if (!stats.vod) {
+            stats.clearSegments(inheritedVariant);
+        }
     }
 
     private void recordSelectedVariant(Target target) {
@@ -1148,6 +1289,158 @@ public final class MpvHlsProxy extends NanoHTTPD {
     private record Range(long start, long end) {
     }
 
+    private final class ForegroundLease implements AutoCloseable {
+
+        private final boolean managed;
+        private boolean closed;
+
+        private ForegroundLease(boolean managed) {
+            this.managed = managed;
+        }
+
+        @Override
+        public synchronized void close() {
+            if (closed) return;
+            closed = true;
+            if (managed) preloadGate.foregroundEnded();
+        }
+    }
+
+    private static final class ForegroundInputStream extends FilterInputStream {
+
+        private final ForegroundLease foreground;
+        private boolean closed;
+
+        private ForegroundInputStream(InputStream input, ForegroundLease foreground) {
+            super(input);
+            this.foreground = foreground;
+        }
+
+        @Override
+        public int read() throws IOException {
+            int value = super.read();
+            if (value == -1) close();
+            return value;
+        }
+
+        @Override
+        public int read(byte[] buffer, int offset, int length) throws IOException {
+            int value = super.read(buffer, offset, length);
+            if (value == -1) close();
+            return value;
+        }
+
+        @Override
+        public void close() throws IOException {
+            if (closed) return;
+            closed = true;
+            try {
+                super.close();
+            } finally {
+                foreground.close();
+            }
+        }
+    }
+
+    private static final class UpstreamTelemetryInputStream extends FilterInputStream {
+
+        private final long expectedLength;
+        private final MpvHlsUpstreamEstimator estimator;
+        private final long estimatorGeneration;
+        private long firstReadAtNanos = -1;
+        private long lastReadAtNanos = -1;
+        private long blockedReadNanos;
+        private long bytes;
+        private boolean eof;
+        private boolean finished;
+
+        private UpstreamTelemetryInputStream(
+                InputStream input,
+                long expectedLength,
+                MpvHlsUpstreamEstimator estimator) {
+            super(input);
+            this.expectedLength = expectedLength;
+            this.estimator = estimator;
+            this.estimatorGeneration = estimator.generation();
+        }
+
+        @Override
+        public int read() throws IOException {
+            long started = System.nanoTime();
+            markStarted(started);
+            int value = super.read();
+            long ended = System.nanoTime();
+            recordReadTiming(started, ended);
+            if (value == -1) {
+                eof = true;
+                finish(true);
+            } else {
+                bytes++;
+                finishIfExpectedLengthReached();
+            }
+            return value;
+        }
+
+        @Override
+        public int read(byte[] buffer, int offset, int length) throws IOException {
+            long started = System.nanoTime();
+            markStarted(started);
+            int value = super.read(buffer, offset, length);
+            long ended = System.nanoTime();
+            recordReadTiming(started, ended);
+            if (value == -1) {
+                eof = true;
+                finish(true);
+            } else if (value > 0) {
+                bytes = saturatedAdd(bytes, value);
+                finishIfExpectedLengthReached();
+            }
+            return value;
+        }
+
+        @Override
+        public void close() throws IOException {
+            try {
+                super.close();
+            } finally {
+                finish(eof || expectedLength > 0 && bytes == expectedLength);
+            }
+        }
+
+        private void markStarted(long started) {
+            if (firstReadAtNanos < 0) firstReadAtNanos = started;
+        }
+
+        private void recordReadTiming(long started, long ended) {
+            lastReadAtNanos = Math.max(started, ended);
+            blockedReadNanos = saturatedAdd(
+                    blockedReadNanos, Math.max(0, ended - started));
+        }
+
+        private void finishIfExpectedLengthReached() {
+            if (expectedLength > 0 && bytes == expectedLength) finish(true);
+        }
+
+        private void finish(boolean complete) {
+            if (finished) return;
+            finished = true;
+            long wallNanos = firstReadAtNanos < 0 || lastReadAtNanos < firstReadAtNanos
+                    ? 0 : lastReadAtNanos - firstReadAtNanos;
+            estimator.recordForeground(
+                    estimatorGeneration,
+                    bytes,
+                    blockedReadNanos,
+                    wallNanos,
+                    complete,
+                    SystemClock.elapsedRealtime());
+        }
+
+        private static long saturatedAdd(long first, long second) {
+            return second > 0 && first > Long.MAX_VALUE - second
+                    ? Long.MAX_VALUE : first + second;
+        }
+    }
+
     private final class CacheWritingInputStream extends FilterInputStream {
 
         private final MpvHlsCacheCoordinator.WriteReservation reservation;
@@ -1417,6 +1710,8 @@ public final class MpvHlsProxy extends NanoHTTPD {
         private volatile int variantCount;
         private volatile List<HlsVariant> variants = List.of();
         private volatile List<HlsPlaylistRewriter.Segment> segments = List.of();
+        private final Map<Long, List<HlsPlaylistRewriter.Segment>> variantSegments =
+                new ConcurrentHashMap<>();
 
         private void recordVariants(List<HlsPlaylistRewriter.VariantEntry> variants) {
             variantCount = variants.size();
@@ -1427,6 +1722,36 @@ public final class MpvHlsProxy extends NanoHTTPD {
             if (variant.equals(selectedVariant)) return false;
             selectedVariant = variant;
             return true;
+        }
+
+        private void recordSegments(
+                @Nullable HlsPlaylistRewriter.Variant variant,
+                List<HlsPlaylistRewriter.Segment> segments) {
+            List<HlsPlaylistRewriter.Segment> safe = segments == null
+                    ? List.of() : List.copyOf(segments);
+            long bits = variantBits(variant);
+            if (bits > 0) variantSegments.put(bits, safe);
+            else this.segments = safe;
+        }
+
+        private void clearSegments(@Nullable HlsPlaylistRewriter.Variant variant) {
+            long bits = variantBits(variant);
+            if (bits > 0) variantSegments.remove(bits);
+            else segments = List.of();
+        }
+
+        private List<HlsPlaylistRewriter.Segment> segmentsForVariant(
+                long selectedBitsPerSecond) {
+            return resolveAutomaticPreloadSegments(
+                    variantSegments, segments, selectedBitsPerSecond);
+        }
+
+        private static long variantBits(
+                @Nullable HlsPlaylistRewriter.Variant variant) {
+            if (variant == null
+                    || variant.kind() != HlsPlaylistRewriter.VariantKind.STREAM) return 0;
+            return Math.max(0, variant.bandwidth() > 0
+                    ? variant.bandwidth() : variant.averageBandwidth());
         }
 
         private String variantText() {
@@ -1474,6 +1799,43 @@ public final class MpvHlsProxy extends NanoHTTPD {
         }
     }
 
+    record PreloadRuntimeSnapshot(
+            boolean preloadConfigured,
+            boolean vod,
+            long upstreamBitsPerSecond,
+            boolean throughputKnown,
+            boolean throughputFresh,
+            long throughputSampleAtElapsedMs,
+            long throughputAgeMs,
+            int acceptedThroughputSamples,
+            int rejectedThroughputSamples,
+            String lastThroughputRejectReason,
+            int foregroundRequests,
+            boolean cacheEnabled,
+            boolean cacheStorageKnown,
+            boolean cacheBudgetAvailable,
+            boolean cacheCircuitOpen,
+            long cachePhysicalBytes,
+            long cacheReservedBytes,
+            long cacheNewWriteBudgetBytes,
+            long cacheEffectiveCapacityBytes,
+            int preloadTasks) {
+
+        PreloadRuntimeSnapshot {
+            upstreamBitsPerSecond = Math.max(0, upstreamBitsPerSecond);
+            acceptedThroughputSamples = Math.max(0, acceptedThroughputSamples);
+            rejectedThroughputSamples = Math.max(0, rejectedThroughputSamples);
+            lastThroughputRejectReason = lastThroughputRejectReason == null
+                    ? "none" : lastThroughputRejectReason;
+            foregroundRequests = Math.max(0, foregroundRequests);
+            cachePhysicalBytes = Math.max(0, cachePhysicalBytes);
+            cacheReservedBytes = Math.max(0, cacheReservedBytes);
+            cacheNewWriteBudgetBytes = Math.max(0, cacheNewWriteBudgetBytes);
+            cacheEffectiveCapacityBytes = Math.max(0, cacheEffectiveCapacityBytes);
+            preloadTasks = Math.max(0, preloadTasks);
+        }
+    }
+
     static List<HlsVariant> buildVariantLadder(
             List<HlsPlaylistRewriter.VariantEntry> variants) {
         Map<Long, HlsVariant> byBitrate = new LinkedHashMap<>();
@@ -1493,6 +1855,24 @@ public final class MpvHlsProxy extends NanoHTTPD {
         ladder.sort(java.util.Comparator.comparingLong(
                 HlsVariant::selectionBitsPerSecond));
         return List.copyOf(ladder);
+    }
+
+    static List<HlsPlaylistRewriter.Segment> resolveAutomaticPreloadSegments(
+            Map<Long, List<HlsPlaylistRewriter.Segment>> variantSegments,
+            List<HlsPlaylistRewriter.Segment> directSegments,
+            long selectedBitsPerSecond) {
+        Map<Long, List<HlsPlaylistRewriter.Segment>> variants =
+                variantSegments == null ? Map.of() : variantSegments;
+        List<HlsPlaylistRewriter.Segment> direct = directSegments == null
+                ? List.of() : directSegments;
+        long selected = Math.max(0, selectedBitsPerSecond);
+        if (!variants.isEmpty()) {
+            if (selected <= 0) return List.of();
+            List<HlsPlaylistRewriter.Segment> exact = variants.get(selected);
+            if (exact != null) return List.copyOf(exact);
+            return List.of();
+        }
+        return List.copyOf(direct);
     }
 
     /**

@@ -68,4 +68,24 @@ public class MpvHlsPreloadGateTest {
         }));
         assertEquals(1, commits.get());
     }
+
+    @Test
+    public void foregroundRequestsCancelOnceAndBlockAcquisitionUntilAllFinish() {
+        MpvHlsPreloadGate gate = new MpvHlsPreloadGate();
+        long original = gate.acquire();
+
+        assertTrue(gate.foregroundStarted());
+        assertFalse(gate.foregroundStarted());
+        assertEquals(2, gate.foregroundRequests());
+        assertEquals(-1, gate.acquire());
+        assertFalse(gate.allows(original));
+
+        gate.foregroundEnded();
+        assertEquals(-1, gate.acquire());
+        gate.foregroundEnded();
+        long replacement = gate.acquire();
+
+        assertTrue(replacement > original);
+        assertTrue(gate.allows(replacement));
+    }
 }

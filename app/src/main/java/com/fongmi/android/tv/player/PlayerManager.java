@@ -77,6 +77,8 @@ import com.fongmi.android.tv.player.mpv.MpvForwardCacheController;
 import com.fongmi.android.tv.player.mpv.MpvForwardCachePolicy;
 import com.fongmi.android.tv.player.mpv.MpvHlsVariantController;
 import com.fongmi.android.tv.player.mpv.MpvHlsVariantPolicy;
+import com.fongmi.android.tv.player.mpv.MpvPreloadController;
+import com.fongmi.android.tv.player.mpv.MpvPreloadPolicy;
 import com.fongmi.android.tv.player.mpv.MpvResourcePressureController;
 import com.fongmi.android.tv.player.mpv.MpvResourcePressurePolicy;
 import com.fongmi.android.tv.setting.DanmakuSetting;
@@ -146,6 +148,7 @@ public class PlayerManager implements ParseCallback {
     private final MpvCacheTargetCoordinator mpvCacheTargetCoordinator;
     private final MpvHlsVariantController mpvHlsVariantController;
     private final MpvResourcePressureController mpvResourcePressureController;
+    private final MpvPreloadController mpvPreloadController;
     private final PlaybackMemoryCoordinator.Registration mpvResourceMemoryRegistration;
     private final PlaybackSystemConditionCoordinator.Registration mpvResourceSystemRegistration;
     private final ForwardBufferTrend networkProtectionTrend;
@@ -233,6 +236,7 @@ public class PlayerManager implements ParseCallback {
         this.mpvCacheTargetCoordinator = new MpvCacheTargetCoordinator();
         this.mpvHlsVariantController = new MpvHlsVariantController();
         this.mpvResourcePressureController = new MpvResourcePressureController();
+        this.mpvPreloadController = new MpvPreloadController();
         this.mpvResourceMemoryRegistration = PlaybackMemoryCoordinator.process().addListener(update ->
                 App.post(() -> onMpvResourceMemoryUpdate(update)));
         this.mpvResourceSystemRegistration = PlaybackSystemConditionCoordinator.process().addListener(update ->
@@ -1651,14 +1655,16 @@ public class PlayerManager implements ParseCallback {
                         resourceForward,
                         resourceBack,
                         now);
-        boolean preloadGateChanged = mpv.setAutomaticPreloadAllowed(
-                resourceDecision.preloadAllowed());
+        boolean resourcePreloadChanged = resourceBefore.preloadAllowed()
+                != resourceDecision.preloadAllowed();
         publishMpvResourcePressureDecision(
                 resourceBefore,
                 resourceAssessment,
                 resourceDecision,
-                preloadGateChanged,
+                resourcePreloadChanged,
                 now);
+        evaluateMpvPreload(mpv, context, resourceDecision, automatic,
+                performancePriority, now);
         MpvForwardCachePolicy.Assessment forwardAssessment = MpvForwardCachePolicy.assess(
                 context,
                 automatic,
@@ -1809,6 +1815,218 @@ public class PlayerManager implements ParseCallback {
                     combinedDecision == null ? "none" : combinedDecision.reason().label(),
                     applyResult);
         }
+    }
+
+    private void evaluateMpvPreload(
+            MpvPlayerEngine mpv,
+            PlaybackAutoContext context,
+            MpvResourcePressureController.Decision resourceDecision,
+            boolean automatic,
+            boolean performancePriority,
+            long now) {
+        MpvPlayer.AutoHlsRuntimeSnapshot hls = mpv.getAutoHlsRuntimeSnapshot();
+        MpvPlayer.AutoHlsPreloadRuntimeSnapshot proxy =
+                mpv.getAutoHlsPreloadRuntimeSnapshot();
+        PlaybackAutoContext.Fact<PlaybackAutoContext.Protocol> protocolFact =
+                context.resource().protocol();
+        PlaybackAutoContext.Fact<PlaybackAutoContext.StreamKind> streamFact =
+                context.resource().streamKind();
+        PlaybackAutoContext.Fact<PlaybackAutoContext.PathKind> playerPathFact =
+                context.path().playerPath();
+        PlaybackAutoContext.Fact<PlaybackAutoContext.PathKind> upstreamPathFact =
+                context.path().upstreamPath();
+        PlaybackAutoContext.Fact<PlaybackAutoContext.UpstreamState> upstreamStateFact =
+                context.path().upstreamState();
+        PlaybackAutoContext.Fact<Long> bufferFact =
+                context.runtime().bufferedDurationMs();
+        PlaybackAutoContext.Fact<Integer> rebufferFact =
+                context.runtime().rebufferCount();
+        PlaybackAutoContext.Fact<Long> positionFact =
+                context.runtime().positionMs();
+        boolean protocolUsable = protocolFact.isUsable(now);
+        boolean streamUsable = streamFact.isUsable(now);
+        PlaybackAutoContext.StreamKind streamKind = streamUsable
+                ? streamFact.value() : PlaybackAutoContext.StreamKind.UNKNOWN;
+        if (streamKind == PlaybackAutoContext.StreamKind.VOD && !proxy.vod()) {
+            streamUsable = false;
+            streamKind = PlaybackAutoContext.StreamKind.UNKNOWN;
+        }
+        boolean bufferUsable = bufferFact.isUsable(now);
+        long selectedBits = hls.selectedVariant() == null
+                ? 0 : hls.selectedVariant().selectionBitsPerSecond();
+        boolean buffering = player != null
+                && player.getPlaybackState() == Player.STATE_BUFFERING;
+        MpvPreloadPolicy.Request request = new MpvPreloadPolicy.Request(
+                automatic,
+                isMpv(),
+                performancePriority,
+                proxy.preloadConfigured(),
+                protocolUsable ? protocolFact.value()
+                        : PlaybackAutoContext.Protocol.UNKNOWN,
+                protocolUsable,
+                streamKind,
+                streamUsable,
+                playerPathFact.isUsable(now) ? playerPathFact.value()
+                        : PlaybackAutoContext.PathKind.UNKNOWN,
+                playerPathFact.isUsable(now),
+                upstreamPathFact.isUsable(now) ? upstreamPathFact.value()
+                        : PlaybackAutoContext.PathKind.UNKNOWN,
+                upstreamPathFact.isUsable(now),
+                upstreamStateFact.isUsable(now) ? upstreamStateFact.value()
+                        : PlaybackAutoContext.UpstreamState.UNKNOWN,
+                upstreamStateFact.isUsable(now),
+                resourceDecision.preloadAllowed(),
+                proxy.cacheEnabled(),
+                proxy.cacheStorageKnown(),
+                proxy.cacheBudgetAvailable(),
+                proxy.cacheCircuitOpen(),
+                proxy.upstreamBitsPerSecond(),
+                proxy.throughputKnown(),
+                proxy.throughputFresh(),
+                proxy.throughputSampleAtElapsedMs(),
+                selectedBits,
+                bufferUsable,
+                bufferUsable ? bufferFact.value() : 0,
+                bufferUsable ? bufferFact.sampledAtElapsedMs() : -1,
+                rebufferFact.hasValue() ? rebufferFact.value() : 0,
+                buffering,
+                false,
+                false,
+                proxy.foregroundRequests(),
+                context.revision());
+        MpvPreloadController.Snapshot before = mpvPreloadController.snapshot();
+        MpvPreloadController.Decision decision = mpvPreloadController.evaluate(
+                playbackAutoSession, context.session(), request, now);
+        boolean automaticPreloadManaged = MpvPreloadPolicy.ownsProxyControl(
+                automatic, performancePriority);
+        boolean gateChanged = mpv.updateAutomaticPreloadControl(
+                automaticPreloadManaged,
+                resourceDecision.preloadAllowed(),
+                decision.preloadAllowed());
+        boolean scheduled = false;
+        if (automaticPreloadManaged && decision.preloadAllowed()
+                && positionFact.isUsable(now)) {
+            mpv.requestAutomaticHlsPreload(Math.max(0, positionFact.value()));
+            scheduled = true;
+        }
+        publishMpvPreloadDecision(
+                before, decision, request, proxy, gateChanged, scheduled, now);
+    }
+
+    private void publishMpvPreloadDecision(
+            MpvPreloadController.Snapshot before,
+            MpvPreloadController.Decision decision,
+            MpvPreloadPolicy.Request request,
+            MpvPlayer.AutoHlsPreloadRuntimeSnapshot proxy,
+            boolean gateChanged,
+            boolean scheduled,
+            long now) {
+        PlaybackTelemetry.DecisionOutcome outcome;
+        if (decision.policyReason() == MpvPreloadPolicy.Reason.CONFIG_PRIORITY
+                || decision.policyReason() == MpvPreloadPolicy.Reason.NOT_AUTOMATIC) {
+            outcome = PlaybackTelemetry.DecisionOutcome.SUPPRESSED;
+        } else if (gateChanged || decision.cancellationRequested()
+                || decision.action() == MpvPreloadController.Action.ALLOW) {
+            outcome = PlaybackTelemetry.DecisionOutcome.REQUESTED;
+        } else if (decision.changed()) {
+            outcome = PlaybackTelemetry.DecisionOutcome.OBSERVED;
+        } else {
+            outcome = PlaybackTelemetry.DecisionOutcome.HELD;
+        }
+        List<PlaybackTelemetry.DecisionInput> inputs = new ArrayList<>();
+        addNumberInput(inputs, "upstream_bps",
+                request.throughputKnown() ? request.upstreamBitsPerSecond() : -1,
+                PlaybackAutoContext.ValueSource.PROXY,
+                request.throughputKnown()
+                        ? PlaybackAutoContext.Confidence.MEDIUM
+                        : PlaybackAutoContext.Confidence.UNKNOWN);
+        addNumberInput(inputs, "throughput_age_ms",
+                request.throughputKnown() ? proxy.throughputAgeMs() : -1,
+                PlaybackAutoContext.ValueSource.PROXY,
+                request.throughputKnown()
+                        ? PlaybackAutoContext.Confidence.MEDIUM
+                        : PlaybackAutoContext.Confidence.UNKNOWN);
+        addNumberInput(inputs, "selected_bps",
+                request.selectedBitsPerSecond() > 0
+                        ? request.selectedBitsPerSecond() : -1,
+                PlaybackAutoContext.ValueSource.NATIVE_RUNTIME,
+                request.selectedBitsPerSecond() > 0
+                        ? PlaybackAutoContext.Confidence.HIGH
+                        : PlaybackAutoContext.Confidence.UNKNOWN);
+        addNumberInput(inputs, "ratio_permille", decision.ratioPermille(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH);
+        addNumberInput(inputs, "buffer_ms",
+                request.bufferUsable() ? request.bufferedDurationMs() : -1,
+                PlaybackAutoContext.ValueSource.PLAYER_CALLBACK,
+                request.bufferUsable()
+                        ? PlaybackAutoContext.Confidence.HIGH
+                        : PlaybackAutoContext.Confidence.UNKNOWN);
+        addNumberInput(inputs, "foreground", request.foregroundRequests(),
+                PlaybackAutoContext.ValueSource.PROXY,
+                PlaybackAutoContext.Confidence.HIGH);
+        addNumberInput(inputs, "cache_physical", proxy.cachePhysicalBytes(),
+                PlaybackAutoContext.ValueSource.PROXY,
+                PlaybackAutoContext.Confidence.HIGH);
+        addNumberInput(inputs, "cache_reserved", proxy.cacheReservedBytes(),
+                PlaybackAutoContext.ValueSource.PROXY,
+                PlaybackAutoContext.Confidence.HIGH);
+        addNumberInput(inputs, "cache_write_budget",
+                proxy.cacheNewWriteBudgetBytes(),
+                PlaybackAutoContext.ValueSource.PROXY,
+                PlaybackAutoContext.Confidence.HIGH);
+        addNumberInput(inputs, "cache_effective",
+                proxy.cacheEffectiveCapacityBytes(),
+                PlaybackAutoContext.ValueSource.PROXY,
+                PlaybackAutoContext.Confidence.HIGH);
+        addNumberInput(inputs, "recovery_samples", decision.recoverySamples(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH);
+        addNumberInput(inputs, "recovery_ms", decision.recoveryRemainingMs(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH);
+        inputs.add(PlaybackTelemetry.DecisionInput.text(
+                "throughput_filter",
+                proxy.lastThroughputRejectReason(),
+                PlaybackAutoContext.ValueSource.PROXY,
+                PlaybackAutoContext.Confidence.HIGH));
+        inputs.add(PlaybackTelemetry.DecisionInput.bool(
+                "resource_allowed", request.resourcePreloadAllowed(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH));
+        inputs.add(PlaybackTelemetry.DecisionInput.bool(
+                "cache_budget", request.cacheBudgetAvailable(),
+                PlaybackAutoContext.ValueSource.PROXY,
+                PlaybackAutoContext.Confidence.HIGH));
+        inputs.add(PlaybackTelemetry.DecisionInput.bool(
+                "cache_circuit", request.cacheCircuitOpen(),
+                PlaybackAutoContext.ValueSource.PROXY,
+                PlaybackAutoContext.Confidence.HIGH));
+        playbackTelemetryCoordinator.publishDecision(
+                playbackAutoSession,
+                new PlaybackTelemetry.DecisionEvent(
+                        PlaybackTelemetry.DecisionDomain.MPV_PRELOAD,
+                        outcome,
+                        before.lastDecision().targetLabel(),
+                        decision.targetLabel(),
+                        scheduled ? "scheduled" : gateChanged
+                                ? "gate-updated" : "held",
+                        decision.policyReason().label(),
+                        decision.reason().label(),
+                        inputs),
+                now);
+        PlaybackTrace.log("mpv-preload", playbackTrace.current(),
+                "state=%s action=%s reason=%s policy=%s threads=%d ratio=%d upstream=%d selected=%d buffer=%d foreground=%d cachePhysical=%d cacheReserved=%d cacheBudget=%d cacheEffective=%d circuit=%s recoverySamples=%d recoveryMs=%d gateChanged=%s scheduled=%s",
+                decision.state().label(), decision.action().label(),
+                decision.reason().label(), decision.policyReason().label(),
+                decision.concurrency(), decision.ratioPermille(),
+                request.upstreamBitsPerSecond(), request.selectedBitsPerSecond(),
+                request.bufferedDurationMs(), request.foregroundRequests(),
+                proxy.cachePhysicalBytes(), proxy.cacheReservedBytes(),
+                proxy.cacheNewWriteBudgetBytes(),
+                proxy.cacheEffectiveCapacityBytes(), proxy.cacheCircuitOpen(),
+                decision.recoverySamples(), decision.recoveryRemainingMs(),
+                gateChanged, scheduled);
     }
 
     private static MpvResourcePressureController.Trigger mpvResourceTrigger(
@@ -3495,6 +3713,7 @@ public class PlayerManager implements ParseCallback {
         mpvCacheTargetCoordinator.beginSession(playbackAutoSession);
         mpvHlsVariantController.beginSession(playbackAutoSession);
         mpvResourcePressureController.beginSession(playbackAutoSession);
+        mpvPreloadController.beginSession(playbackAutoSession);
         mpvHlsManagedReload = false;
         playbackTrackSequence = 1;
         playbackMediaFactsCoordinator.beginSession(playbackAutoSession);
@@ -4222,6 +4441,7 @@ public class PlayerManager implements ParseCallback {
         mpvCacheTargetCoordinator.endSession(playbackAutoSession);
         mpvHlsVariantController.endSession(playbackAutoSession);
         mpvResourcePressureController.endSession(playbackAutoSession);
+        mpvPreloadController.endSession(playbackAutoSession);
         mpvHlsManagedReload = false;
         mpvAutoController.endSession(playbackAutoSession);
         PlaybackSystemConditionMonitor.process().endSession(playbackAutoSession);
@@ -4538,6 +4758,9 @@ public class PlayerManager implements ParseCallback {
             resetNetworkProtectionSession("discontinuity-" + reason);
             scheduleNetworkProtection(ExoNetworkGuardController.OBSERVE_INTERVAL_MS);
             if (isMpv()) {
+                if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                    mpvPreloadController.disrupt(playbackAutoSession);
+                }
                 MpvBackCachePolicy.SeekObservation seek = MpvBackCachePolicy.observeSeek(
                         reason == Player.DISCONTINUITY_REASON_SEEK,
                         oldPosition.mediaItemIndex == newPosition.mediaItemIndex,

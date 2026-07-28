@@ -267,8 +267,16 @@ public class MpvPlayerEngine implements PlayerEngine {
         player.clearAutoCacheBaseline();
     }
 
-    public boolean setAutomaticPreloadAllowed(boolean allowed) {
-        return player.setAutomaticPreloadAllowed(allowed);
+    public boolean updateAutomaticPreloadControl(
+            boolean automatic,
+            boolean resourceAllowed,
+            boolean trafficAllowed) {
+        return player.updateAutomaticPreloadControl(
+                automatic, resourceAllowed, trafficAllowed);
+    }
+
+    public void requestAutomaticHlsPreload(long positionMs) {
+        player.requestAutomaticHlsPreload(positionMs);
     }
 
     public MpvPlayer.AutoHlsBitrateResult applyAutoHlsBitrate(
@@ -284,6 +292,11 @@ public class MpvPlayerEngine implements PlayerEngine {
     /** Cached track/proxy HLS state; this method never performs a native query. */
     public MpvPlayer.AutoHlsRuntimeSnapshot getAutoHlsRuntimeSnapshot() {
         return player.getAutoHlsRuntimeSnapshot();
+    }
+
+    /** Proxy-only upstream and disk facts; this never performs a native query. */
+    public MpvPlayer.AutoHlsPreloadRuntimeSnapshot getAutoHlsPreloadRuntimeSnapshot() {
+        return player.getAutoHlsPreloadRuntimeSnapshot();
     }
 
     @Override

@@ -490,6 +490,9 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         pendingSeekPositionMs = cachedPositionMs;
         if (initialized && playbackState != Player.STATE_IDLE) {
             if (fileLoaded) cacheObserverState.onPlaybackDiscontinuity(SystemClock.elapsedRealtime());
+            if (currentLikelyHls && playbackRestarted) {
+                hlsProxy.cancelAutomaticPreloadForDiscontinuity();
+            }
             seekMpv(cachedPositionMs);
             if (currentLikelyHls && playbackRestarted) hlsProxy.preloadAround(cachedPositionMs);
             if (playbackState == Player.STATE_ENDED) playbackState = Player.STATE_BUFFERING;
@@ -593,8 +596,20 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         autoCacheBaselineState.clear();
     }
 
-    public boolean setAutomaticPreloadAllowed(boolean allowed) {
-        return hlsProxy.setAutomaticPreloadAllowed(allowed);
+    public boolean updateAutomaticPreloadControl(
+            boolean automatic,
+            boolean resourceAllowed,
+            boolean trafficAllowed) {
+        return hlsProxy.updateAutomaticPreloadControl(
+                automatic, resourceAllowed, trafficAllowed);
+    }
+
+    public void requestAutomaticHlsPreload(long positionMs) {
+        MpvHlsProxy.HlsVariant selected = MpvHlsProxy.resolveSelectedVariant(
+                hlsProxy.variantSnapshot().variants(), cachedSelectedHlsBitrate);
+        hlsProxy.requestAutomaticPreload(
+                positionMs,
+                selected == null ? 0 : selected.selectionBitsPerSecond());
     }
 
     public AutoHlsBitrateResult applyAutoHlsBitrate(String option) {
@@ -645,6 +660,33 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
                 option.acceptedOption(),
                 option.observedBitsPerSecond(),
                 option.observedCount());
+    }
+
+    /** Proxy-only upstream and disk facts; this never trusts MPV loopback speed. */
+    public AutoHlsPreloadRuntimeSnapshot getAutoHlsPreloadRuntimeSnapshot() {
+        MpvHlsProxy.PreloadRuntimeSnapshot proxy =
+                hlsProxy.preloadRuntimeSnapshot(SystemClock.elapsedRealtime());
+        return new AutoHlsPreloadRuntimeSnapshot(
+                proxy.preloadConfigured(),
+                proxy.vod(),
+                proxy.upstreamBitsPerSecond(),
+                proxy.throughputKnown(),
+                proxy.throughputFresh(),
+                proxy.throughputSampleAtElapsedMs(),
+                proxy.throughputAgeMs(),
+                proxy.acceptedThroughputSamples(),
+                proxy.rejectedThroughputSamples(),
+                proxy.lastThroughputRejectReason(),
+                proxy.foregroundRequests(),
+                proxy.cacheEnabled(),
+                proxy.cacheStorageKnown(),
+                proxy.cacheBudgetAvailable(),
+                proxy.cacheCircuitOpen(),
+                proxy.cachePhysicalBytes(),
+                proxy.cacheReservedBytes(),
+                proxy.cacheNewWriteBudgetBytes(),
+                proxy.cacheEffectiveCapacityBytes(),
+                proxy.preloadTasks());
     }
 
     public enum AutoCacheBaselineResult {
@@ -745,6 +787,43 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
             stagedOption = stagedOption == null ? "" : stagedOption;
             acceptedOption = acceptedOption == null ? "" : acceptedOption;
             observedCount = Math.max(0, observedCount);
+        }
+    }
+
+    public record AutoHlsPreloadRuntimeSnapshot(
+            boolean preloadConfigured,
+            boolean vod,
+            long upstreamBitsPerSecond,
+            boolean throughputKnown,
+            boolean throughputFresh,
+            long throughputSampleAtElapsedMs,
+            long throughputAgeMs,
+            int acceptedThroughputSamples,
+            int rejectedThroughputSamples,
+            String lastThroughputRejectReason,
+            int foregroundRequests,
+            boolean cacheEnabled,
+            boolean cacheStorageKnown,
+            boolean cacheBudgetAvailable,
+            boolean cacheCircuitOpen,
+            long cachePhysicalBytes,
+            long cacheReservedBytes,
+            long cacheNewWriteBudgetBytes,
+            long cacheEffectiveCapacityBytes,
+            int preloadTasks) {
+
+        public AutoHlsPreloadRuntimeSnapshot {
+            upstreamBitsPerSecond = Math.max(0, upstreamBitsPerSecond);
+            acceptedThroughputSamples = Math.max(0, acceptedThroughputSamples);
+            rejectedThroughputSamples = Math.max(0, rejectedThroughputSamples);
+            lastThroughputRejectReason = lastThroughputRejectReason == null
+                    ? "none" : lastThroughputRejectReason;
+            foregroundRequests = Math.max(0, foregroundRequests);
+            cachePhysicalBytes = Math.max(0, cachePhysicalBytes);
+            cacheReservedBytes = Math.max(0, cacheReservedBytes);
+            cacheNewWriteBudgetBytes = Math.max(0, cacheNewWriteBudgetBytes);
+            cacheEffectiveCapacityBytes = Math.max(0, cacheEffectiveCapacityBytes);
+            preloadTasks = Math.max(0, preloadTasks);
         }
     }
 

@@ -7,6 +7,7 @@ final class MpvHlsPreloadGate {
 
     private volatile boolean allowed = true;
     private volatile long generation;
+    private volatile int foregroundRequests;
 
     synchronized Transition update(boolean allow) {
         if (allowed == allow) return Transition.UNCHANGED;
@@ -20,14 +21,26 @@ final class MpvHlsPreloadGate {
         return generation;
     }
 
+    synchronized boolean foregroundStarted() {
+        if (foregroundRequests < Integer.MAX_VALUE) foregroundRequests++;
+        if (foregroundRequests != 1) return false;
+        invalidate();
+        return true;
+    }
+
+    synchronized void foregroundEnded() {
+        if (foregroundRequests > 0) foregroundRequests--;
+    }
+
     long acquire() {
         long current = generation;
-        return allowed ? current : -1;
+        return allowed && foregroundRequests == 0 ? current : -1;
     }
 
     boolean allows(long expectedGeneration) {
         return expectedGeneration >= 0
                 && allowed
+                && foregroundRequests == 0
                 && expectedGeneration == generation;
     }
 
@@ -40,6 +53,10 @@ final class MpvHlsPreloadGate {
 
     boolean allowed() {
         return allowed;
+    }
+
+    int foregroundRequests() {
+        return foregroundRequests;
     }
 
     @FunctionalInterface

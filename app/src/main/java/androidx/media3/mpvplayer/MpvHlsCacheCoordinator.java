@@ -144,14 +144,23 @@ public final class MpvHlsCacheCoordinator {
     }
 
     public boolean canStartPreload(long configuredCapacityBytes) {
+        return preloadSnapshot(configuredCapacityBytes).allowed();
+    }
+
+    public PreloadCapacitySnapshot preloadSnapshot(long configuredCapacityBytes) {
         synchronized (lock) {
             long configured = effectiveConfiguredCapacityLocked(configuredCapacityBytes);
-            if (configured <= 0 || circuitOpen) return false;
             CapacitySnapshot snapshot = snapshotLocked(configured);
+            if (configured <= 0 || circuitOpen) {
+                return new PreloadCapacitySnapshot(snapshot, false);
+            }
             if (snapshot.policy().state() == DiskCacheCapacityPolicy.State.UNAVAILABLE
-                    || snapshot.policy().state() == DiskCacheCapacityPolicy.State.DISABLED) return false;
-            if (snapshot.policy().newWriteBudgetBytes() > snapshot.reservedBytes()) return true;
-            return hasEvictableFileLocked();
+                    || snapshot.policy().state() == DiskCacheCapacityPolicy.State.DISABLED) {
+                return new PreloadCapacitySnapshot(snapshot, false);
+            }
+            boolean allowed = snapshot.policy().newWriteBudgetBytes()
+                    > snapshot.reservedBytes() || hasEvictableFileLocked();
+            return new PreloadCapacitySnapshot(snapshot, allowed);
         }
     }
 
@@ -536,6 +545,9 @@ public final class MpvHlsCacheCoordinator {
 
     public record CapacitySnapshot(DiskCacheCapacityPolicy.Decision policy, long physicalBytes,
                                    long reservedBytes, boolean circuitOpen) {
+    }
+
+    public record PreloadCapacitySnapshot(CapacitySnapshot capacity, boolean allowed) {
     }
 
     public record ReservationDecision(@Nullable WriteReservation reservation, DenyReason reason,
