@@ -100,6 +100,71 @@ public class PlaybackResourceClassifierTest {
     }
 
     @Test
+    public void explicitVodWithoutEndListRemainsUnknown() {
+        PlaybackResourceClassifier.Classification result =
+                PlaybackResourceClassifier.classifyHls(
+                        "https://origin.example/vod.m3u8",
+                        null,
+                        "#EXTM3U\n#EXT-X-PLAYLIST-TYPE:VOD\n"
+                                + "#EXT-X-TARGETDURATION:6\n#EXTINF:6,\na.ts\n");
+
+        assertEquals(PlaybackAutoContext.ManifestKind.HLS_MEDIA,
+                result.manifest().kind());
+        assertEquals(PlaybackAutoContext.StreamKind.UNKNOWN, result.streamKind());
+        assertEquals(Boolean.FALSE, result.manifest().endList());
+    }
+
+    @Test
+    public void partHoldBackWinsWhenBothHoldBackValuesArePresent() {
+        PlaybackResourceClassifier.Classification result =
+                PlaybackResourceClassifier.classifyHls(
+                        "https://origin.example/live.m3u8",
+                        null,
+                        "#EXTM3U\n#EXT-X-TARGETDURATION:2\n"
+                                + "#EXT-X-SERVER-CONTROL:HOLD-BACK=6,PART-HOLD-BACK=1.2\n"
+                                + "#EXT-X-PART-INF:PART-TARGET=0.333\n"
+                                + "#EXT-X-PART:DURATION=0.250,URI=p.m4s\n");
+
+        assertEquals(PlaybackAutoContext.StreamKind.LOW_LATENCY_LIVE,
+                result.streamKind());
+        assertEquals(Long.valueOf(333), result.manifest().partDurationMs());
+        assertEquals(Long.valueOf(1200), result.manifest().holdBackMs());
+    }
+
+    @Test
+    public void blockingReloadAloneDoesNotDeclareLowLatency() {
+        PlaybackResourceClassifier.Classification result =
+                PlaybackResourceClassifier.classifyHls(
+                        "https://origin.example/live.m3u8",
+                        null,
+                        "#EXTM3U\n#EXT-X-TARGETDURATION:6\n"
+                                + "#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES\n"
+                                + "#EXTINF:6,\na.ts\n");
+
+        assertEquals(PlaybackAutoContext.StreamKind.LIVE, result.streamKind());
+        assertEquals(PlaybackAutoContext.TransferUnit.SEGMENT,
+                result.transferUnit());
+        assertEquals(Boolean.FALSE, result.manifest().lowLatency());
+    }
+
+    @Test
+    public void completedEventPlaylistTransitionsToVod() {
+        String active = "#EXTM3U\n#EXT-X-PLAYLIST-TYPE:EVENT\n"
+                + "#EXT-X-TARGETDURATION:6\n#EXTINF:6,\na.ts\n";
+        PlaybackResourceClassifier.Classification live =
+                PlaybackResourceClassifier.classifyHls(
+                        "https://origin.example/event.m3u8", null, active);
+        PlaybackResourceClassifier.Classification completed =
+                PlaybackResourceClassifier.classifyHls(
+                        "https://origin.example/event.m3u8", null,
+                        active + "#EXT-X-ENDLIST\n");
+
+        assertEquals(PlaybackAutoContext.StreamKind.LIVE, live.streamKind());
+        assertEquals(PlaybackAutoContext.StreamKind.VOD, completed.streamKind());
+        assertEquals(Boolean.TRUE, completed.manifest().endList());
+    }
+
+    @Test
     public void hlsMasterDoesNotGuessLiveOrVod() {
         String playlist = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\nlow/index.m3u8\n"
                 + "#EXT-X-STREAM-INF:BANDWIDTH=2000000\nhigh/index.m3u8\n";

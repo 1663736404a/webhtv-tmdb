@@ -20,9 +20,12 @@ import java.util.regex.Pattern;
 public final class PlaybackResourceClassifier {
 
     private static final Pattern HLS_TARGET_DURATION = Pattern.compile("#EXT-X-TARGETDURATION\\s*:\\s*([0-9]+(?:\\.[0-9]+)?)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern HLS_PLAYLIST_TYPE = Pattern.compile("^#EXT-X-PLAYLIST-TYPE\\s*:\\s*([^\\r\\n]+)", Pattern.CASE_INSENSITIVE | Pattern.MULTILINE);
     private static final Pattern HLS_PART = Pattern.compile("#EXT-X-PART(?:\\s*:|\\b)", Pattern.CASE_INSENSITIVE);
-    private static final Pattern HLS_PART_DURATION = Pattern.compile("^#EXT-X-PART(?:-INF)?\\s*:[^\\r\\n]*(?:DURATION|PART-TARGET)\\s*=\\s*([0-9]+(?:\\.[0-9]+)?)", Pattern.CASE_INSENSITIVE | Pattern.MULTILINE);
-    private static final Pattern HLS_HOLD_BACK = Pattern.compile("^#EXT-X-SERVER-CONTROL\\s*:[^\\r\\n]*(?:PART-HOLD-BACK|HOLD-BACK)\\s*=\\s*([0-9]+(?:\\.[0-9]+)?)", Pattern.CASE_INSENSITIVE | Pattern.MULTILINE);
+    private static final Pattern HLS_PART_TARGET = Pattern.compile("^#EXT-X-PART-INF\\s*:[^\\r\\n]*\\bPART-TARGET\\s*=\\s*([0-9]+(?:\\.[0-9]+)?)", Pattern.CASE_INSENSITIVE | Pattern.MULTILINE);
+    private static final Pattern HLS_PART_DURATION = Pattern.compile("^#EXT-X-PART\\s*:[^\\r\\n]*\\bDURATION\\s*=\\s*([0-9]+(?:\\.[0-9]+)?)", Pattern.CASE_INSENSITIVE | Pattern.MULTILINE);
+    private static final Pattern HLS_PART_HOLD_BACK = Pattern.compile("^#EXT-X-SERVER-CONTROL\\s*:[^\\r\\n]*\\bPART-HOLD-BACK\\s*=\\s*([0-9]+(?:\\.[0-9]+)?)", Pattern.CASE_INSENSITIVE | Pattern.MULTILINE);
+    private static final Pattern HLS_HOLD_BACK = Pattern.compile("^#EXT-X-SERVER-CONTROL\\s*:[^\\r\\n]*(?<!PART-)\\bHOLD-BACK\\s*=\\s*([0-9]+(?:\\.[0-9]+)?)", Pattern.CASE_INSENSITIVE | Pattern.MULTILINE);
     private static final Pattern DASH_MPD = Pattern.compile("<MPD\\b([^>]*)>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
     private static final Pattern DASH_ATTRIBUTE = Pattern.compile("\\b([A-Za-z][A-Za-z0-9:-]*)\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)')", Pattern.CASE_INSENSITIVE);
 
@@ -381,15 +384,20 @@ public final class PlaybackResourceClassifier {
         boolean master = upper.contains("#EXT-X-STREAM-INF") || upper.contains("#EXT-X-I-FRAME-STREAM-INF");
         boolean media = upper.contains("#EXTINF") || upper.contains("#EXT-X-TARGETDURATION") || upper.contains("#EXT-X-MEDIA-SEQUENCE") || upper.contains("#EXT-X-PART");
         boolean endList = upper.contains("#EXT-X-ENDLIST");
-        boolean hasPart = HLS_PART.matcher(text).find() || upper.contains("#EXT-X-PRELOAD-HINT") || upper.contains("PART-HOLD-BACK") || upper.contains("CAN-BLOCK-RELOAD=YES");
+        String playlistType = firstText(HLS_PLAYLIST_TYPE, text).trim();
+        boolean explicitVod = "VOD".equalsIgnoreCase(playlistType);
+        boolean hasPart = HLS_PART.matcher(text).find() || upper.contains("#EXT-X-PRELOAD-HINT") || upper.contains("PART-HOLD-BACK") || HLS_PART_TARGET.matcher(text).find();
         long targetMs = firstDecimalMs(HLS_TARGET_DURATION, text);
-        long partMs = firstDecimalMs(HLS_PART_DURATION, text);
-        long holdBackMs = firstDecimalMs(HLS_HOLD_BACK, text);
+        long partMs = firstDecimalMs(HLS_PART_TARGET, text);
+        if (partMs < 0) partMs = firstDecimalMs(HLS_PART_DURATION, text);
+        long partHoldBackMs = firstDecimalMs(HLS_PART_HOLD_BACK, text);
+        long holdBackMs = partHoldBackMs >= 0 ? partHoldBackMs : firstDecimalMs(HLS_HOLD_BACK, text);
         int variants = countOccurrences(upper, "#EXT-X-STREAM-INF");
         boolean byteRange = upper.contains("#EXT-X-BYTERANGE") || upper.contains("BYTERANGE=");
         PlaybackAutoContext.ManifestKind manifestKind = master ? PlaybackAutoContext.ManifestKind.HLS_MASTER
                 : media ? PlaybackAutoContext.ManifestKind.HLS_MEDIA : PlaybackAutoContext.ManifestKind.UNKNOWN;
         PlaybackAutoContext.StreamKind stream = master ? PlaybackAutoContext.StreamKind.UNKNOWN
+                : explicitVod && !endList ? PlaybackAutoContext.StreamKind.UNKNOWN
                 : endList ? PlaybackAutoContext.StreamKind.VOD
                 : hasPart ? PlaybackAutoContext.StreamKind.LOW_LATENCY_LIVE
                 : media ? PlaybackAutoContext.StreamKind.LIVE : PlaybackAutoContext.StreamKind.UNKNOWN;
@@ -741,6 +749,11 @@ public final class PlaybackResourceClassifier {
         }
     }
 
+    private static String firstText(Pattern pattern, String text) {
+        Matcher matcher = pattern.matcher(text == null ? "" : text);
+        return matcher.find() && matcher.group(1) != null ? matcher.group(1) : "";
+    }
+
     private static int countOccurrences(String text, String needle) {
         int count = 0;
         int from = 0;
@@ -782,7 +795,7 @@ public final class PlaybackResourceClassifier {
         return value == null ? -1 : value;
     }
 
-    private static long manifestTtlMs(PlaybackAutoContext.ManifestFacts manifest) {
+    public static long manifestTtlMs(PlaybackAutoContext.ManifestFacts manifest) {
         if (manifest == null) return 30_000;
         long base = manifest.targetDurationMs() == null ? 0 : manifest.targetDurationMs();
         if (base <= 0 && manifest.partDurationMs() != null) {

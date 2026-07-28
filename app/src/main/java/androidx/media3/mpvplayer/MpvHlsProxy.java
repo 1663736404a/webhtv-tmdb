@@ -6,6 +6,7 @@ import android.text.TextUtils;
 import androidx.annotation.Nullable;
 import androidx.media3.exoplayer.hls.playlist.HlsAdsParser;
 
+import com.fongmi.android.tv.player.PlaybackAutoContext;
 import com.fongmi.android.tv.player.PlaybackRouteRegistry;
 import com.fongmi.android.tv.player.PlaybackResourceClassifier;
 import com.fongmi.android.tv.player.mpv.MpvPreloadPolicy;
@@ -233,7 +234,8 @@ public final class MpvHlsProxy extends NanoHTTPD {
     public PlaybackResourceClassifier.Classification resourceClassification() {
         SessionStats stats = sessionStats.get(sessionId);
         if (stats == null) return null;
-        PlaybackResourceClassifier.Classification classification = stats.classification;
+        PlaybackResourceClassifier.Classification classification =
+                stats.resourceClassification(SystemClock.elapsedRealtime());
         if (classification != null) return classification;
         Session session = sessions.get(sessionId);
         if (session == null) return null;
@@ -650,7 +652,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
             String rewrittenUrl = proxyItemUrl(targetUrl, session, cacheable, targetVariant);
             return new HlsPlaylistRewriter.MappedUri(targetUrl, rewrittenUrl);
         });
-        recordPlaylistDetails(session, text, result, inheritedVariant);
+        recordPlaylistDetails(session, playlistUrl, text, result, inheritedVariant);
         if (!result.variants().isEmpty()) {
             SpiderDebug.log(TAG, "master playlist preserved variants session=%d variants=%d", session, result.variants().size());
         }
@@ -975,27 +977,23 @@ public final class MpvHlsProxy extends NanoHTTPD {
         stats.playlistRequests++;
         recordStatus(stats, status, url);
         if (isVodPlaylist(text)) stats.vod = true;
-        if (text != null && !text.isBlank()) {
-            Session owner = sessions.get(session);
-            if (owner != null) {
-                stats.classification = PlaybackResourceClassifier.classifyHls(
-                        playerPlaylistUri(session), owner.url, text, SystemClock.elapsedRealtime());
-            }
-        }
     }
 
     private void recordPlaylistDetails(
             int session,
+            String playlistUrl,
             String text,
             HlsPlaylistRewriter.Result result,
             @Nullable HlsPlaylistRewriter.Variant inheritedVariant) {
         SessionStats stats = stats(session);
-        stats.vod = isVodPlaylist(text);
         Session owner = sessions.get(session);
         if (owner != null) {
-            stats.classification = PlaybackResourceClassifier.classifyHls(
+            PlaybackResourceClassifier.Classification classification = PlaybackResourceClassifier.classifyHls(
                     playerPlaylistUri(session), owner.url, text, SystemClock.elapsedRealtime());
+            stats.observeHls(playlistUrl, classification);
         }
+        stats.vod = stats.resourceClassification(SystemClock.elapsedRealtime()).streamKind()
+                == PlaybackAutoContext.StreamKind.VOD;
         String upper = text.toUpperCase(Locale.US);
         if (upper.contains("#EXT-X-BYTERANGE:") || upper.contains("BYTERANGE=")) stats.hasByteRange = true;
         if (!result.variants().isEmpty()) stats.recordVariants(result.variants());
@@ -1706,6 +1704,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
         private volatile long lastErrorAtMs;
         private volatile String lastUrl;
         private volatile PlaybackResourceClassifier.Classification classification;
+        private final HlsManifestTimelineTracker hlsTimeline = new HlsManifestTimelineTracker();
         private volatile HlsPlaylistRewriter.Variant selectedVariant;
         private volatile int variantCount;
         private volatile List<HlsVariant> variants = List.of();
@@ -1762,6 +1761,18 @@ public final class MpvHlsProxy extends NanoHTTPD {
 
         private HlsVariantSnapshot variantSnapshot() {
             return new HlsVariantSnapshot(variants, variantCount);
+        }
+
+        private void observeHls(
+                String playlistUrl,
+                PlaybackResourceClassifier.Classification observation) {
+            hlsTimeline.observe(playlistUrl == null ? "direct" : Util.md5(playlistUrl), observation);
+        }
+
+        private PlaybackResourceClassifier.Classification resourceClassification(
+                long nowElapsedMs) {
+            PlaybackResourceClassifier.Classification fallback = classification;
+            return hlsTimeline.snapshot(fallback, nowElapsedMs).classification();
         }
     }
 

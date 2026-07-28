@@ -166,6 +166,7 @@ public class PlayerManager implements ParseCallback {
     private String currentDanmakuKey;
     private String loadingDanmakuKey;
     private String lastLoggedRouteTraceId = PlaybackTrace.NONE;
+    private IjkTimelinePublicationKey lastIjkTimelinePublicationKey;
     private PlaybackAutoContext.SessionToken playbackAutoSession = PlaybackAutoContext.SessionToken.none();
     private long playbackTrackSequence;
     private long danmakuLoadStartedAtMs;
@@ -3703,6 +3704,7 @@ public class PlayerManager implements ParseCallback {
     private void beginPlaybackTrace(String reason) {
         endPlaybackTelemetrySession("replace-" + reason);
         playbackBufferingTracker.reset();
+        lastIjkTimelinePublicationKey = null;
         playbackTrace.begin();
         long now = SystemClock.elapsedRealtime();
         playbackAutoSession = playbackAutoContextStore.beginSession(playbackTrace.current(), now);
@@ -4753,6 +4755,22 @@ public class PlayerManager implements ParseCallback {
         }
 
         @Override
+        public void onTimelineChanged(@NonNull Timeline timeline, int reason) {
+            if (!(engine instanceof IjkPlayerEngine)) return;
+            int index = player == null ? C.INDEX_UNSET : player.getCurrentMediaItemIndex();
+            if (timeline.isEmpty() || index < 0 || index >= timeline.getWindowCount()) return;
+            Timeline.Window window = timeline.getWindow(index, new Timeline.Window());
+            if (window.manifest == null) return;
+            IjkTimelinePublicationKey key = new IjkTimelinePublicationKey(
+                    window.manifest,
+                    window.liveConfiguration,
+                    window.isDynamic);
+            if (key.equals(lastIjkTimelinePublicationKey)) return;
+            lastIjkTimelinePublicationKey = key;
+            publishPlaybackAutoContext(false);
+        }
+
+        @Override
         public void onPositionDiscontinuity(@NonNull Player.PositionInfo oldPosition, @NonNull Player.PositionInfo newPosition, int reason) {
             rtspLiveLagController.onPositionDiscontinuity(playbackAutoSession);
             resetNetworkProtectionSession("discontinuity-" + reason);
@@ -4849,6 +4867,12 @@ public class PlayerManager implements ParseCallback {
             callback.onError(getPlaybackErrorMessage(failure));
         }
     };
+
+    private record IjkTimelinePublicationKey(
+            Object manifest,
+            MediaItem.LiveConfiguration liveConfiguration,
+            boolean dynamic) {
+    }
 
     private PlaybackRoute.Resolution getEffectivePlaybackRoute() {
         PlaybackRoute.Resolution route = engine == null ? null : engine.getEffectivePlaybackRoute();

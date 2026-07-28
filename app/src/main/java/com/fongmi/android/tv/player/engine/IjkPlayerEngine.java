@@ -19,7 +19,6 @@ import com.fongmi.android.tv.player.exo.TrackUtil;
 import com.fongmi.android.tv.utils.ResUtil;
 
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 import tv.danmaku.ijk.media.player.IjkMediaPlayer;
 
@@ -101,12 +100,12 @@ public class IjkPlayerEngine implements PlayerEngine {
 
     @Override
     public boolean isLive() {
-        return player.getDuration() < TimeUnit.MINUTES.toMillis(1) || player.isCurrentMediaItemLive();
+        return player.getStreamSceneDecision().live();
     }
 
     @Override
     public boolean isVod() {
-        return player.getDuration() > TimeUnit.MINUTES.toMillis(1) && !player.isCurrentMediaItemLive();
+        return player.getStreamSceneDecision().vod();
     }
 
     @Override

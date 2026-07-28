@@ -99,6 +99,7 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
     private boolean repeatOne;
     private boolean ownsSurface;
     private boolean currentDash;
+    private volatile boolean resourceObservationActive;
     private volatile PlaybackResourceClassifier.Classification resourceClassification;
     private volatile String currentPlayableUrl;
     private float volume;
@@ -148,14 +149,24 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
 
     private MediaItemData mediaItemData() {
         long duration = duration();
-        return new MediaItemData.Builder(mediaItem.mediaId)
+        IjkStreamScenePolicy.Decision scene = streamSceneDecision(duration);
+        MediaItemData.Builder builder = new MediaItemData.Builder(mediaItem.mediaId)
                 .setMediaItem(mediaItem)
                 .setMediaMetadata(mediaItem.mediaMetadata)
                 .setDurationUs(duration == C.TIME_UNSET ? C.TIME_UNSET : duration * 1000)
-                .setIsSeekable(duration > 0)
-                .setIsDynamic(duration == C.TIME_UNSET)
-                .setTracks(currentTracks)
-                .build();
+                .setIsSeekable(scene.seekable())
+                .setIsDynamic(scene.dynamic())
+                .setManifest(scene.timelineSnapshot())
+                .setTracks(currentTracks);
+        if (scene.authoritative() && scene.live()) {
+            MediaItem.LiveConfiguration.Builder live =
+                    new MediaItem.LiveConfiguration.Builder();
+            if (scene.targetOffsetMs() != C.TIME_UNSET) {
+                live.setTargetOffsetMs(scene.targetOffsetMs());
+            }
+            builder.setLiveConfiguration(live.build());
+        }
+        return builder.build();
     }
 
     Tracks getCurrentTracksSnapshot() {
@@ -213,6 +224,7 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
 
     @Override
     protected ListenableFuture<?> handleSetMediaItems(List<MediaItem> mediaItems, int startIndex, long startPositionMs) {
+        invalidateResourceObservation();
         mediaItem = mediaItems.isEmpty() ? null : mediaItems.get(0);
         setPendingSeek(mediaItem != null && startPositionMs > 0 ? startPositionMs : C.TIME_UNSET);
         playbackState = mediaItem == null ? Player.STATE_IDLE : Player.STATE_IDLE;
@@ -226,18 +238,21 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
 
     @Override
     protected ListenableFuture<?> handleAddMediaItems(int index, List<MediaItem> mediaItems) {
+        invalidateResourceObservation();
         mediaItem = mediaItems.isEmpty() ? null : mediaItems.get(0);
         return Futures.immediateVoidFuture();
     }
 
     @Override
     protected ListenableFuture<?> handleReplaceMediaItems(int fromIndex, int toIndex, List<MediaItem> mediaItems) {
+        if (mediaItems.isEmpty()) invalidateResourceObservation();
         mediaItem = mediaItems.isEmpty() ? null : mediaItems.get(0);
         return Futures.immediateVoidFuture();
     }
 
     @Override
     protected ListenableFuture<?> handleRemoveMediaItems(int fromIndex, int toIndex) {
+        invalidateResourceObservation();
         mediaItem = null;
         playbackState = Player.STATE_IDLE;
         loading = false;
@@ -434,11 +449,13 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
             playerError = null;
             ijk.reset();
             hlsProxy.clear();
+            invalidateResourceObservation();
             ijk.setWakeMode(App.get(), PowerManager.PARTIAL_WAKE_LOCK);
             Uri sourceUri = mediaItem.localConfiguration.uri;
             Map<String, String> headers = ExoUtil.extractHeaders(mediaItem);
             String playableUrl = sourceUri.toString();
             resourceClassification = PlaybackResourceClassifier.classifyRequest(playableUrl, mediaItem.localConfiguration.mimeType, mediaItem.localConfiguration.mimeType);
+            resourceObservationActive = true;
             boolean dash = isLikelyDash(mediaItem, playableUrl);
             currentDash = dash;
             if (BuildConfig.DEBUG) Log.e("WebHTV-IJK", "open dash=" + dash + " uri=" + playableUrl + " headers=" + headers.keySet());
@@ -479,9 +496,8 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         }
         ijk.reset();
         hlsProxy.clear();
+        invalidateResourceObservation();
         currentDash = false;
-        resourceClassification = null;
-        currentPlayableUrl = null;
         loading = false;
         bufferingPercent = 0;
         currentTracks = Tracks.EMPTY;
@@ -494,6 +510,12 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
 
     private void startStateRefresh() {
         App.post(stateRefreshRunnable, STATE_REFRESH_INTERVAL_MS);
+    }
+
+    private void invalidateResourceObservation() {
+        resourceObservationActive = false;
+        resourceClassification = null;
+        currentPlayableUrl = null;
     }
 
     private void stopStateRefresh() {
@@ -709,9 +731,19 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
 
     PlaybackResourceClassifier.Classification getResourceClassification() {
         PlaybackResourceClassifier.Classification current = resourceClassification;
-        PlaybackResourceClassifier.Classification proxy = hlsProxy.resourceClassification();
+        PlaybackResourceClassifier.Classification proxy = resourceObservationActive
+                ? hlsProxy.resourceClassification() : null;
         if (proxy != null) current = PlaybackResourceClassifier.merge(current, proxy);
         return current;
+    }
+
+    IjkStreamScenePolicy.Decision getStreamSceneDecision() {
+        return streamSceneDecision(duration());
+    }
+
+    private IjkStreamScenePolicy.Decision streamSceneDecision(long durationMs) {
+        return IjkStreamScenePolicy.resolve(
+                getResourceClassification(), durationMs, SystemClock.elapsedRealtime());
     }
 
     PlaybackRoute.Resolution getPlaybackRouteResolution() {
