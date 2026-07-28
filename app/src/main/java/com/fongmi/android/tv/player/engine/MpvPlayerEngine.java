@@ -258,6 +258,11 @@ public class MpvPlayerEngine implements PlayerEngine {
         return player.applyAutoCacheBaseline(forwardBytes, backBytes);
     }
 
+    /** Observer-only native cache counters; this never performs a synchronous property query. */
+    public PlayerCacheState getAutoCacheSnapshot() {
+        return player.getCachedCacheState();
+    }
+
     public void clearAutoCacheBaseline() {
         player.clearAutoCacheBaseline();
     }

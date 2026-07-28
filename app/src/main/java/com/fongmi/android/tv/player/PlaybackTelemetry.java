@@ -88,6 +88,7 @@ public final class PlaybackTelemetry {
         THROUGHPUT("throughput"),
         MPV_OUTPUT("mpv-output"),
         MPV_CACHE("mpv-cache"),
+        MPV_FORWARD_CACHE("mpv-forward-cache"),
         DISPLAY_MODE("display-mode"),
         TUNNELING("tunneling"),
         LOAD_CONTROL("load-control"),

@@ -35,6 +35,18 @@ public class MpvAutoCacheBaselineStateTest {
     }
 
     @Test
+    public void laterRuntimeTargetAtomicallyReplacesInitialStagedTarget() {
+        MpvAutoCacheBaselineState state = new MpvAutoCacheBaselineState();
+        assertTrue(state.stage(true, 48L * 1024 * 1024, 0));
+
+        assertTrue(state.stage(true, 128L * 1024 * 1024, 0));
+
+        assertEquals(String.valueOf(128L * 1024 * 1024),
+                state.snapshot().get("demuxer-max-bytes"));
+        assertEquals("0", state.snapshot().get("demuxer-max-back-bytes"));
+    }
+
+    @Test
     public void rejectedOrClearedBaselineCannotLeakIntoLaterContext() {
         MpvAutoCacheBaselineState state = new MpvAutoCacheBaselineState();
         assertTrue(state.stage(true, 48L * 1024 * 1024, 0));

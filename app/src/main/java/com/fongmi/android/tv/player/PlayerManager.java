@@ -69,6 +69,8 @@ import com.fongmi.android.tv.player.mpv.MpvAutoController;
 import com.fongmi.android.tv.player.mpv.MpvAutoControlPolicy;
 import com.fongmi.android.tv.player.mpv.MpvAutoOutputPolicy;
 import com.fongmi.android.tv.player.mpv.MpvConfigStore;
+import com.fongmi.android.tv.player.mpv.MpvForwardCacheController;
+import com.fongmi.android.tv.player.mpv.MpvForwardCachePolicy;
 import com.fongmi.android.tv.setting.DanmakuSetting;
 import com.fongmi.android.tv.setting.ExoPerformanceSetting;
 import com.fongmi.android.tv.setting.MpvPerformanceSetting;
@@ -131,6 +133,8 @@ public class PlayerManager implements ParseCallback {
     private final ExoNetworkGuardController networkProtectionController;
     private final ExoRtspLiveLagController rtspLiveLagController;
     private final MpvAutoController mpvAutoController;
+    private final MpvForwardCacheController mpvForwardCacheController;
+    private final PlaybackMemoryCoordinator.Registration mpvForwardMemoryRegistration;
     private final ForwardBufferTrend networkProtectionTrend;
     private final LiveDanmakuBatcher liveDanmakuBatcher;
     private final LiveDanmakuBuffer liveDanmakuBuffer;
@@ -210,6 +214,9 @@ public class PlayerManager implements ParseCallback {
         this.networkProtectionController = new ExoNetworkGuardController();
         this.rtspLiveLagController = new ExoRtspLiveLagController();
         this.mpvAutoController = new MpvAutoController();
+        this.mpvForwardCacheController = new MpvForwardCacheController();
+        this.mpvForwardMemoryRegistration = PlaybackMemoryCoordinator.process().addListener(update ->
+                App.post(() -> onMpvForwardMemoryUpdate(update)));
         this.networkProtectionTrend = new ForwardBufferTrend();
         this.liveDanmakuBuffer = new LiveDanmakuBuffer();
         this.liveDanmakuMetrics = new LiveDanmakuMetrics();
@@ -236,6 +243,7 @@ public class PlayerManager implements ParseCallback {
         App.removeCallbacks(runnable);
         App.removeCallbacks(networkProtectionRunnable);
         App.removeCallbacks(playbackTelemetryRunnable);
+        mpvForwardMemoryRegistration.close();
         stopNativeAudioSession();
         clearDanmaku("release");
         releaseLiveDanmakuSession();
@@ -1241,6 +1249,7 @@ public class PlayerManager implements ParseCallback {
         MpvAutoController.Snapshot before = mpvAutoController.snapshot();
         if (!automatic) {
             mpv.clearAutoCacheBaseline();
+            mpvForwardCacheController.suppress(playbackAutoSession);
             return;
         }
 
@@ -1248,6 +1257,7 @@ public class PlayerManager implements ParseCallback {
         boolean applied = false;
         boolean staged = false;
         String applyResult = "not-requested";
+        MpvForwardCacheController.Trigger forwardTrigger = null;
         if (decision.requestsApply()) {
             started = mpvAutoController.beginApply(playbackAutoSession, decision);
             MpvPlayer.AutoCacheBaselineResult result = started
@@ -1263,6 +1273,16 @@ public class PlayerManager implements ParseCallback {
             }
         } else {
             mpv.clearAutoCacheBaseline();
+            mpvForwardCacheController.suppress(playbackAutoSession);
+        }
+        if (applied) {
+            MpvForwardCacheController.Snapshot forwardBefore = mpvForwardCacheController.snapshot();
+            boolean preserveForwardTarget = forwardBefore.baselineInitialized();
+            mpvForwardCacheController.recordBaseline(
+                    playbackAutoSession, decision.forwardBytes(), preserveForwardTarget);
+            forwardTrigger = preserveForwardTarget
+                    ? MpvForwardCacheController.Trigger.REBUILD
+                    : MpvForwardCacheController.Trigger.BASELINE;
         }
         MpvAutoController.Snapshot after = mpvAutoController.snapshot();
         PlaybackTelemetry.DecisionOutcome outcome =
@@ -1379,6 +1399,177 @@ public class PlayerManager implements ParseCallback {
                 decision.capped(),
                 after.applyAttempts(),
                 decision.requestsApply() ? applyResult : outcome.label());
+        if (forwardTrigger != null) evaluateMpvForwardCache(forwardTrigger, now);
+    }
+
+    private void onMpvForwardMemoryUpdate(PlaybackMemoryCoordinator.Update update) {
+        if (update == null || !playbackAutoSession.active()
+                || !playbackAutoSession.equals(update.session())) return;
+        evaluateMpvForwardCache(
+                MpvForwardCacheController.Trigger.MEMORY,
+                SystemClock.elapsedRealtime());
+    }
+
+    private void evaluateMpvForwardCache(
+            MpvForwardCacheController.Trigger trigger,
+            long nowElapsedMs) {
+        if (!(engine instanceof MpvPlayerEngine mpv) || !playbackAutoSession.active()) return;
+        long now = Math.max(0, nowElapsedMs);
+        PlaybackAutoContext context = playbackAutoContextStore.snapshot();
+        boolean automatic = PlaybackPerformanceSetting.isAuto(PlayerSetting.MPV);
+        MpvForwardCacheController.Snapshot before = mpvForwardCacheController.snapshot();
+        long baseline = before.initialBaselineBytes() > 0
+                ? before.initialBaselineBytes() : MpvForwardCachePolicy.MIN_FORWARD_BYTES;
+        MpvForwardCachePolicy.Assessment assessment = MpvForwardCachePolicy.assess(
+                context,
+                automatic,
+                isMpv(),
+                MpvPerformanceSetting.isPerformancePriority(),
+                baseline,
+                now);
+        MpvForwardCacheController.Decision decision = mpvForwardCacheController.evaluate(
+                playbackAutoSession,
+                context.session(),
+                assessment,
+                trigger,
+                now);
+        boolean started = false;
+        boolean accepted = false;
+        boolean staged = false;
+        String applyResult = "not-requested";
+        if (decision.requestsApply()) {
+            started = mpvForwardCacheController.beginApply(playbackAutoSession, decision);
+            MpvPlayer.AutoCacheBaselineResult result = started
+                    ? mpv.applyAutoCacheBaseline(
+                    playbackTrace.current(), decision.targetBytes(), 0)
+                    : MpvPlayer.AutoCacheBaselineResult.REJECTED;
+            accepted = result.accepted();
+            staged = result.staged();
+            applyResult = result.label();
+            if (started) {
+                mpvForwardCacheController.completeApply(
+                        playbackAutoSession, decision, accepted, staged, now);
+            }
+        }
+        MpvForwardCacheController.Snapshot after = mpvForwardCacheController.snapshot();
+        PlayerCacheState cache = mpv.getAutoCacheSnapshot();
+        PlaybackTelemetry.DecisionOutcome outcome;
+        if (!assessment.active()
+                && assessment.inactiveReason() == MpvForwardCachePolicy.Reason.CONFIG_PRIORITY) {
+            outcome = PlaybackTelemetry.DecisionOutcome.SUPPRESSED;
+        } else if (!decision.requestsApply()) {
+            outcome = PlaybackTelemetry.DecisionOutcome.OBSERVED;
+        } else if (!started || !accepted) {
+            outcome = PlaybackTelemetry.DecisionOutcome.FAILED;
+        } else if (staged) {
+            outcome = PlaybackTelemetry.DecisionOutcome.REQUESTED;
+        } else {
+            outcome = PlaybackTelemetry.DecisionOutcome.APPLIED;
+        }
+        String oldValue = forwardTargetLabel(decision.oldNativeTargetBytes());
+        String targetValue = forwardTargetLabel(decision.targetBytes());
+        String resultValue = forwardTargetLabel(after.nativeTargetBytes());
+        String suppression = !decision.requestsApply()
+                ? decision.reason().label()
+                : !started
+                ? "action-rejected"
+                : !accepted
+                ? "native-apply-failed"
+                : "none";
+        List<PlaybackTelemetry.DecisionInput> inputs = new ArrayList<>();
+        addBitrateInput(inputs, "average_bps", assessment.averageBitrate());
+        addBitrateInput(inputs, "peak_bps", assessment.peakBitrate());
+        addNumberInput(inputs, "media_target", assessment.mediaReliable()
+                ? assessment.mediaTargetBytes() : -1,
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH);
+        addNumberInput(inputs, "safe_capacity", assessment.safeTargetBytes(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH);
+        addNumberInput(inputs, "initial_baseline", after.initialBaselineBytes(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH);
+        addNumberInput(inputs, "actual_fw", cache.forwardBytes(),
+                PlaybackAutoContext.ValueSource.NATIVE_RUNTIME,
+                PlaybackAutoContext.Confidence.MEDIUM);
+        addNumberInput(inputs, "actual_total", cache.totalBytes(),
+                PlaybackAutoContext.ValueSource.NATIVE_RUNTIME,
+                PlaybackAutoContext.Confidence.MEDIUM);
+        PlaybackAutoContext.Fact<PlaybackAutoContext.MemorySnapshot> memoryFact =
+                context.device().memorySnapshot();
+        addNumberInput(inputs, "native_heap",
+                memoryFact.isUsable(now) && memoryFact.value().nativeHeapAllocatedBytes() != null
+                        ? memoryFact.value().nativeHeapAllocatedBytes() : -1,
+                memoryFact.isUsable(now) ? memoryFact.source() : PlaybackAutoContext.ValueSource.UNKNOWN,
+                memoryFact.isUsable(now) ? memoryFact.confidence() : PlaybackAutoContext.Confidence.UNKNOWN);
+        PlaybackAutoContext.Fact<Long> pssFact = context.device().diagnosticPssBytes();
+        addNumberInput(inputs, "diagnostic_pss",
+                pssFact.isUsable(now) ? pssFact.value() : -1,
+                pssFact.isUsable(now) ? pssFact.source() : PlaybackAutoContext.ValueSource.UNKNOWN,
+                pssFact.isUsable(now) ? pssFact.confidence() : PlaybackAutoContext.Confidence.UNKNOWN);
+        PlaybackAutoContext.Fact<PlaybackAutoContext.MemoryPressure> pressureFact =
+                context.device().memoryPressure();
+        if (pressureFact.isUsable(now)) {
+            inputs.add(PlaybackTelemetry.DecisionInput.text(
+                    "memory_pressure", pressureFact.value().label(),
+                    pressureFact.source(), pressureFact.confidence()));
+        } else {
+            inputs.add(PlaybackTelemetry.DecisionInput.unknown("memory_pressure"));
+        }
+        addNumberInput(inputs, "stable_samples", after.demandSamples(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH);
+        addNumberInput(inputs, "cooldown_ms", decision.cooldownRemainingMs(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH);
+        playbackTelemetryCoordinator.publishDecision(
+                playbackAutoSession,
+                new PlaybackTelemetry.DecisionEvent(
+                        PlaybackTelemetry.DecisionDomain.MPV_FORWARD_CACHE,
+                        outcome,
+                        oldValue,
+                        targetValue,
+                        resultValue,
+                        decision.reason().label(),
+                        suppression,
+                        inputs),
+                now);
+        PlaybackTrace.log("mpv-forward-cache", playbackTrace.current(),
+                "state=%s trigger=%s action=%s reason=%s old=%s target=%s result=%s fw=%d total=%d stable=%d cooldown=%d apply=%s",
+                after.state().label(), trigger == null ? "runtime" : trigger.label(),
+                decision.action().label(), decision.reason().label(), oldValue,
+                targetValue, resultValue, cache.forwardBytes(), cache.totalBytes(),
+                after.demandSamples(), decision.cooldownRemainingMs(), applyResult);
+    }
+
+    private static String forwardTargetLabel(long bytes) {
+        return bytes < 0 ? "unknown" : "forward-" + bytes;
+    }
+
+    private static void addBitrateInput(
+            List<PlaybackTelemetry.DecisionInput> inputs,
+            String name,
+            MpvForwardCachePolicy.BitrateEvidence evidence) {
+        if (evidence != null && evidence.reliable()) {
+            inputs.add(PlaybackTelemetry.DecisionInput.number(
+                    name, evidence.bitsPerSecond(), evidence.valueSource(), evidence.confidence()));
+        } else {
+            inputs.add(PlaybackTelemetry.DecisionInput.unknown(name));
+        }
+    }
+
+    private static void addNumberInput(
+            List<PlaybackTelemetry.DecisionInput> inputs,
+            String name,
+            long value,
+            PlaybackAutoContext.ValueSource source,
+            PlaybackAutoContext.Confidence confidence) {
+        if (value < 0 || source == PlaybackAutoContext.ValueSource.UNKNOWN
+                || confidence == PlaybackAutoContext.Confidence.UNKNOWN) {
+            inputs.add(PlaybackTelemetry.DecisionInput.unknown(name));
+        } else {
+            inputs.add(PlaybackTelemetry.DecisionInput.number(name, value, source, confidence));
+        }
     }
 
     public void applyPerformanceSettings() {
@@ -2577,6 +2768,7 @@ public class PlayerManager implements ParseCallback {
         playbackAutoSession = playbackAutoContextStore.beginSession(playbackTrace.current(), now);
         rtspLiveLagController.beginSession(playbackAutoSession);
         mpvAutoController.beginSession(playbackAutoSession);
+        mpvForwardCacheController.beginSession(playbackAutoSession);
         playbackTrackSequence = 1;
         playbackMediaFactsCoordinator.beginSession(playbackAutoSession);
         PlaybackMemoryMonitor.process().beginSession(playbackAutoSession);
@@ -2653,6 +2845,10 @@ public class PlayerManager implements ParseCallback {
         playbackTelemetryCoordinator.publishRuntime(
                 playbackAutoSession, observation, now);
         evaluateExoRtspLiveLag(observation, now);
+        if (isMpv()) {
+            evaluateMpvForwardCache(
+                    MpvForwardCacheController.Trigger.RUNTIME, now);
+        }
     }
 
     private void schedulePlaybackTelemetry() {
@@ -3064,6 +3260,7 @@ public class PlayerManager implements ParseCallback {
     }
 
     private void clearPlaybackAutoContext() {
+        mpvForwardCacheController.endSession(playbackAutoSession);
         mpvAutoController.endSession(playbackAutoSession);
         PlaybackSystemConditionMonitor.process().endSession(playbackAutoSession);
         PlaybackMemoryMonitor.process().endSession(playbackAutoSession);

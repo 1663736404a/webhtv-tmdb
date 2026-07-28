@@ -35,6 +35,16 @@ public class MpvAutoCacheOptionPolicyTest {
     }
 
     @Test
+    public void acceptsEveryAutomaticForwardControllerTier() {
+        for (long mib : new long[]{24, 48, 64, 96, 128, 192}) {
+            Map<String, String> options = MpvAutoCacheOptionPolicy.resolve(
+                    true, mib * 1024 * 1024, 0);
+            assertEquals(String.valueOf(mib * 1024 * 1024),
+                    options.get("demuxer-max-bytes"));
+        }
+    }
+
+    @Test
     public void rejectsOutOfRangeOrInconsistentLimits() {
         assertTrue(MpvAutoCacheOptionPolicy.resolve(true, 8L * 1024 * 1024, 0).isEmpty());
         assertTrue(MpvAutoCacheOptionPolicy.resolve(true, 256L * 1024 * 1024, 0).isEmpty());
