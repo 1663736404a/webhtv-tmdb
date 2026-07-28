@@ -104,6 +104,19 @@ public final class MpvBackCacheController {
             Trigger trigger,
             MpvBackCachePolicy.SeekObservation seekObservation,
             long nowElapsedMs) {
+        return evaluate(token, factsSession, assessment,
+                MpvResourcePressureController.Decision.unrestricted(),
+                trigger, seekObservation, nowElapsedMs);
+    }
+
+    public synchronized Decision evaluate(
+            PlaybackAutoContext.SessionToken token,
+            PlaybackAutoContext.SessionToken factsSession,
+            MpvBackCachePolicy.Assessment assessment,
+            MpvResourcePressureController.Decision resourceDecision,
+            Trigger trigger,
+            MpvBackCachePolicy.SeekObservation seekObservation,
+            long nowElapsedMs) {
         Trigger source = trigger == null ? Trigger.RUNTIME : trigger;
         long now = Math.max(0, nowElapsedMs);
         if (!isCurrent(token) || factsSession == null || !token.equals(factsSession)) {
@@ -127,6 +140,9 @@ public final class MpvBackCacheController {
                 false,
                 false)
                 : assessment;
+        MpvResourcePressureController.Decision resource = resourceDecision == null
+                ? MpvResourcePressureController.Decision.unrestricted()
+                : resourceDecision;
         if (!current.active()) {
             state = current.reason() == MpvBackCachePolicy.Reason.CONFIG_PRIORITY
                     ? State.SUPPRESSED : State.INACTIVE;
@@ -147,6 +163,10 @@ public final class MpvBackCacheController {
         observeMemory(current);
         MpvBackCachePolicy.SeekObservation seek = seekObservation == null
                 ? MpvBackCachePolicy.SeekObservation.none() : seekObservation;
+        long resourceCeiling = resource.active()
+                ? resource.backCeilingBytes()
+                : MpvBackCachePolicy.MAX_BACK_BYTES;
+        long effectiveSafeBack = Math.min(current.safeBackBytes(), resourceCeiling);
         boolean behaviorExpired = behaviorExpired(now);
         if (behaviorExpired) clearBehavior();
         if (source == Trigger.SEEK && current.eligible() && seek.qualifying()) {
@@ -156,7 +176,7 @@ public final class MpvBackCacheController {
         boolean canAdoptNative = source == Trigger.BASELINE || source == Trigger.REBUILD;
         if (behaviorExpired) {
             return targetOrAdopt(source, Reason.BEHAVIOR_EXPIRED, 0,
-                    current.safeBackBytes(), canAdoptNative, now);
+                    effectiveSafeBack, canAdoptNative, now);
         }
         if (!current.eligible()) {
             clearBehavior();
@@ -168,7 +188,7 @@ public final class MpvBackCacheController {
                 default -> Reason.INELIGIBLE;
             };
             return targetOrAdopt(source, reason, 0,
-                    current.safeBackBytes(), canAdoptNative, now);
+                    effectiveSafeBack, canAdoptNative, now);
         }
 
         if (current.forceZero()) {
@@ -186,23 +206,45 @@ public final class MpvBackCacheController {
                 default -> Reason.NO_TOTAL_HEADROOM;
             };
             return targetOrAdopt(source, reason, 0,
-                    current.safeBackBytes(), canAdoptNative, now);
+                    effectiveSafeBack, canAdoptNative, now);
         }
 
-        if (current.safeBackBytes() < controlledTargetBytes) {
-            enterRecovery(RecoveryClass.CAPACITY, previousSafeBack,
-                    current.safeBackBytes(), current.memorySampleAtElapsedMs(), now);
-            return targetOrAdopt(source, Reason.CAPACITY_REDUCTION,
-                    current.safeBackBytes(), current.safeBackBytes(),
+        if (effectiveSafeBack < controlledTargetBytes) {
+            boolean resourceLimited = resourceCeiling < current.safeBackBytes();
+            if (!resourceLimited) {
+                enterRecovery(RecoveryClass.CAPACITY, previousSafeBack,
+                        current.safeBackBytes(), current.memorySampleAtElapsedMs(), now);
+            }
+            return targetOrAdopt(source,
+                    resourceLimited ? resourceLimitReason(resource)
+                            : Reason.CAPACITY_REDUCTION,
+                    effectiveSafeBack, effectiveSafeBack,
                     canAdoptNative, now);
         }
 
-        long desired = Math.min(learnedTargetBytes, current.safeBackBytes());
+        long unconstrainedDesired = Math.min(
+                learnedTargetBytes, current.safeBackBytes());
+        long desired = Math.min(unconstrainedDesired, resourceCeiling);
+        if (unconstrainedDesired > controlledTargetBytes
+                && desired <= controlledTargetBytes
+                && resource.active()
+                && !resource.expansionAllowed()) {
+            state = State.BEHAVIOR_WAIT;
+            return remember(hold(source, Reason.RESOURCE_EXPANSION_HOLD,
+                    effectiveSafeBack, now));
+        }
         if (recoveryClass != RecoveryClass.NONE) {
+            if (controlledTargetBytes < desired
+                    && resource.active()
+                    && !resource.expansionAllowed()) {
+                state = State.RECOVERY_WAIT;
+                return remember(hold(source, Reason.RESOURCE_EXPANSION_HOLD,
+                        effectiveSafeBack, now));
+            }
             if (!current.normalMemoryEvidence()) {
                 state = State.RECOVERY_WAIT;
                 return remember(hold(source, Reason.RECOVERY_WAIT,
-                        current.safeBackBytes(), now));
+                        effectiveSafeBack, now));
             }
             boolean stable = normalSamples >= 2
                     && elapsed(now, normalSinceElapsedMs) >= RECOVERY_STABLE_MS;
@@ -214,44 +256,56 @@ public final class MpvBackCacheController {
                 if (!stable || !cooledDown || !stepReady) {
                     state = State.RECOVERY_WAIT;
                     return remember(hold(source, Reason.RECOVERY_WAIT,
-                            current.safeBackBytes(), now));
+                            effectiveSafeBack, now));
                 }
                 return targetOrAdopt(source, Reason.RECOVERY_STEP,
                         MpvBackCachePolicy.nextTier(controlledTargetBytes, desired),
-                        current.safeBackBytes(), false, now);
+                        effectiveSafeBack, false, now);
             }
             if (!stable || !cooledDown) {
                 state = State.RECOVERY_WAIT;
                 return remember(hold(source, Reason.RECOVERY_WAIT,
-                        current.safeBackBytes(), now));
+                        effectiveSafeBack, now));
             }
             clearRecovery();
         }
 
         if (nativeTargetBytes != controlledTargetBytes) {
+            if (resource.active()
+                    && !resource.expansionAllowed()
+                    && nativeTargetBytes >= 0
+                    && nativeTargetBytes < controlledTargetBytes) {
+                return targetOrAdopt(source, Reason.RESOURCE_CONTEXT_HOLD,
+                        nativeTargetBytes, effectiveSafeBack, true, now);
+            }
             return targetOrAdopt(source, Reason.CONTEXT_RESTORE,
-                    controlledTargetBytes, current.safeBackBytes(), false, now);
+                    controlledTargetBytes, effectiveSafeBack, false, now);
         }
 
         if (desired > controlledTargetBytes) {
+            if (resource.active() && !resource.expansionAllowed()) {
+                state = State.BEHAVIOR_WAIT;
+                return remember(hold(source, Reason.RESOURCE_EXPANSION_HOLD,
+                        effectiveSafeBack, now));
+            }
             boolean stepReady = lastIncreaseAtElapsedMs < 0
                     || elapsed(now, lastIncreaseAtElapsedMs)
                     >= EXPANSION_STEP_INTERVAL_MS;
             if (!stepReady) {
                 state = State.BEHAVIOR_WAIT;
                 return remember(hold(source, Reason.EXPANSION_COOLDOWN,
-                        current.safeBackBytes(), now));
+                        effectiveSafeBack, now));
             }
             return targetOrAdopt(source, Reason.BEHAVIOR_EXPANSION,
                     MpvBackCachePolicy.nextTier(controlledTargetBytes, desired),
-                    current.safeBackBytes(), false, now);
+                    effectiveSafeBack, false, now);
         }
 
         state = State.ACTIVE;
         Reason stableReason = source == Trigger.SEEK
                 ? reasonForSeek(seek) : backwardSeekEvidence == 0
                 ? Reason.WAITING_FOR_BACKWARD_SEEK : Reason.TARGET_STABLE;
-        return remember(hold(source, stableReason, current.safeBackBytes(), now));
+        return remember(hold(source, stableReason, effectiveSafeBack, now));
     }
 
     /** Commits a controller action before the combined native update. */
@@ -442,6 +496,10 @@ public final class MpvBackCacheController {
                 || reason == Reason.MEMORY_UNKNOWN
                 || reason == Reason.NO_TOTAL_HEADROOM
                 || reason == Reason.CAPACITY_REDUCTION
+                || reason == Reason.RESOURCE_HARD_PRESSURE
+                || reason == Reason.RESOURCE_LIMIT
+                || reason == Reason.RESOURCE_EXPANSION_HOLD
+                || reason == Reason.RESOURCE_CONTEXT_HOLD
                 || reason == Reason.RECOVERY_WAIT
                 || reason == Reason.RECOVERY_STEP) {
             return State.RECOVERY_WAIT;
@@ -452,6 +510,13 @@ public final class MpvBackCacheController {
             return State.BEHAVIOR_WAIT;
         }
         return State.ACTIVE;
+    }
+
+    private static Reason resourceLimitReason(
+            MpvResourcePressureController.Decision resource) {
+        return resource.inputLevel() == MpvResourcePressurePolicy.Level.HARD
+                ? Reason.RESOURCE_HARD_PRESSURE
+                : Reason.RESOURCE_LIMIT;
     }
 
     private static Reason reasonForSeek(MpvBackCachePolicy.SeekObservation seek) {
@@ -536,6 +601,7 @@ public final class MpvBackCacheController {
         BASELINE("baseline"),
         RUNTIME("runtime"),
         MEMORY("memory"),
+        RESOURCE("resource"),
         SEEK("seek"),
         REBUILD("rebuild");
 
@@ -580,6 +646,10 @@ public final class MpvBackCacheController {
         MEMORY_UNKNOWN("memory-unknown"),
         NO_TOTAL_HEADROOM("no-total-headroom"),
         CAPACITY_REDUCTION("capacity-reduction"),
+        RESOURCE_HARD_PRESSURE("resource-hard-pressure"),
+        RESOURCE_LIMIT("resource-limit"),
+        RESOURCE_EXPANSION_HOLD("resource-expansion-hold"),
+        RESOURCE_CONTEXT_HOLD("resource-context-hold"),
         RECOVERY_WAIT("recovery-wait"),
         RECOVERY_STEP("recovery-step"),
         CONTEXT_RESTORE("context-restore"),

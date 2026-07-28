@@ -90,6 +90,7 @@ public final class PlaybackTelemetry {
         MPV_CACHE("mpv-cache"),
         MPV_FORWARD_CACHE("mpv-forward-cache"),
         MPV_BACK_CACHE("mpv-back-cache"),
+        MPV_RESOURCE_PRESSURE("mpv-resource-pressure"),
         MPV_HLS_VARIANT("mpv-hls-variant"),
         DISPLAY_MODE("display-mode"),
         TUNNELING("tunneling"),

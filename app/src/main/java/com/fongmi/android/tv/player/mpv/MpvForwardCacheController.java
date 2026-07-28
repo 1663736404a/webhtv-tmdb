@@ -35,6 +35,7 @@ public final class MpvForwardCacheController {
     private long lastDemandSampleAtElapsedMs = -1;
     private long lastIncreaseAtElapsedMs = -1;
     private long lastDecreaseAtElapsedMs = -1;
+    private boolean resourceRecoveryPending;
     private int evaluations;
     private int applyAttempts;
     private boolean lastApplySucceeded;
@@ -100,6 +101,18 @@ public final class MpvForwardCacheController {
             MpvForwardCachePolicy.Assessment assessment,
             Trigger trigger,
             long nowElapsedMs) {
+        return evaluate(token, factsSession, assessment,
+                MpvResourcePressureController.Decision.unrestricted(),
+                trigger, nowElapsedMs);
+    }
+
+    public synchronized Decision evaluate(
+            PlaybackAutoContext.SessionToken token,
+            PlaybackAutoContext.SessionToken factsSession,
+            MpvForwardCachePolicy.Assessment assessment,
+            MpvResourcePressureController.Decision resourceDecision,
+            Trigger trigger,
+            long nowElapsedMs) {
         Trigger source = trigger == null ? Trigger.RUNTIME : trigger;
         long now = Math.max(0, nowElapsedMs);
         if (!isCurrent(token) || factsSession == null || !token.equals(factsSession)) {
@@ -116,6 +129,9 @@ public final class MpvForwardCacheController {
                 ? MpvForwardCachePolicy.Assessment.inactive(
                 initialBaselineBytes, MpvForwardCachePolicy.Reason.NOT_AUTOMATIC_MPV)
                 : assessment;
+        MpvResourcePressureController.Decision resource = resourceDecision == null
+                ? MpvResourcePressureController.Decision.unrestricted()
+                : resourceDecision;
         if (!current.active()) {
             state = current.inactiveReason() == MpvForwardCachePolicy.Reason.CONFIG_PRIORITY
                     ? State.SUPPRESSED : State.INACTIVE;
@@ -138,20 +154,33 @@ public final class MpvForwardCacheController {
         observeMemory(current);
         boolean canAdoptNative = source == Trigger.BASELINE || source == Trigger.REBUILD;
         long safeTarget = current.safeTargetBytes();
+        long resourceCeiling = resource.active()
+                ? resource.forwardCeilingBytes()
+                : MpvForwardCachePolicy.MAX_FORWARD_BYTES;
+        long effectiveSafeTarget = Math.min(safeTarget, resourceCeiling);
 
         if (current.critical()) {
             enterPressure(RecoveryClass.CRITICAL,
                     current.memorySampleAtElapsedMs(), now);
             return targetOrAdopt(source, Reason.CRITICAL_PRESSURE,
                     MpvForwardCachePolicy.MIN_FORWARD_BYTES,
-                    safeTarget, canAdoptNative, now);
+                    effectiveSafeTarget, canAdoptNative, now);
         }
 
-        if (safeTarget < controlledTargetBytes) {
-            enterCapacityReduction(previousSafeTarget, safeTarget,
+        if (effectiveSafeTarget < controlledTargetBytes) {
+            boolean resourceLimited = resourceCeiling < safeTarget;
+            if (resourceLimited) {
+                resourceRecoveryPending = true;
+            } else {
+                enterCapacityReduction(previousSafeTarget, safeTarget, now);
+            }
+            return targetOrAdopt(source,
+                    resourceLimited ? resourceLimitReason(resource)
+                            : Reason.CAPACITY_REDUCTION,
+                    effectiveSafeTarget,
+                    effectiveSafeTarget,
+                    canAdoptNative,
                     now);
-            return targetOrAdopt(source, Reason.CAPACITY_REDUCTION,
-                    safeTarget, safeTarget, canAdoptNative, now);
         }
 
         if (current.pressureUsable()
@@ -163,18 +192,30 @@ public final class MpvForwardCacheController {
                     current.memorySampleAtElapsedMs(), now);
             long target = Math.min(safeTarget, moderateTargetBytes);
             return targetOrAdopt(source, Reason.MODERATE_PRESSURE,
-                    target, safeTarget, canAdoptNative, now);
+                    target, effectiveSafeTarget, canAdoptNative, now);
         }
 
         long recoveryCeiling = current.mediaReliable()
-                ? Math.min(current.mediaTargetBytes(), safeTarget)
-                : Math.min(initialBaselineBytes, safeTarget);
+                ? Math.min(current.mediaTargetBytes(), effectiveSafeTarget)
+                : Math.min(initialBaselineBytes, effectiveSafeTarget);
         if (recoveryClass != RecoveryClass.NONE) {
+            if (controlledTargetBytes < recoveryCeiling
+                    && resource.active()
+                    && !resource.expansionAllowed()) {
+                state = State.RECOVERY_WAIT;
+                return remember(Decision.hold(source,
+                        Reason.RESOURCE_EXPANSION_HOLD,
+                        nativeTargetBytes,
+                        controlledTargetBytes,
+                        effectiveSafeTarget,
+                        normalSamples,
+                        resource.cooldownRemainingMs()));
+            }
             if (!current.normalMemoryEvidence()) {
                 state = State.RECOVERY_WAIT;
                 return remember(Decision.hold(source, Reason.RECOVERY_WAIT,
                         nativeTargetBytes, controlledTargetBytes,
-                        safeTarget, normalSamples, cooldownRemainingMs(now)));
+                        effectiveSafeTarget, normalSamples, cooldownRemainingMs(now)));
             }
             boolean stable = normalSamples >= 2
                     && elapsed(now, normalSinceElapsedMs) >= RECOVERY_STABLE_MS;
@@ -186,18 +227,18 @@ public final class MpvForwardCacheController {
                     state = State.RECOVERY_WAIT;
                     return remember(Decision.hold(source, Reason.RECOVERY_WAIT,
                             nativeTargetBytes, controlledTargetBytes,
-                            safeTarget, normalSamples, cooldownRemainingMs(now)));
+                            effectiveSafeTarget, normalSamples, cooldownRemainingMs(now)));
                 }
                 long target = MpvForwardCachePolicy.nextTier(
                         controlledTargetBytes, recoveryCeiling);
                 return targetOrAdopt(source, Reason.RECOVERY_STEP,
-                        target, safeTarget, canAdoptNative, now);
+                        target, effectiveSafeTarget, canAdoptNative, now);
             }
             if (!stable || !cooledDown) {
                 state = State.RECOVERY_WAIT;
                 return remember(Decision.hold(source, Reason.RECOVERY_WAIT,
                         nativeTargetBytes, controlledTargetBytes,
-                        safeTarget, normalSamples, cooldownRemainingMs(now)));
+                        effectiveSafeTarget, normalSamples, cooldownRemainingMs(now)));
             }
             recoveryClass = RecoveryClass.NONE;
             moderateTargetBytes = -1;
@@ -206,19 +247,66 @@ public final class MpvForwardCacheController {
             normalSamples = 0;
         }
 
+        if (resourceRecoveryPending) {
+            long restoreCeiling = current.mediaReliable()
+                    ? Math.min(current.mediaTargetBytes(), effectiveSafeTarget)
+                    : Math.min(initialBaselineBytes, effectiveSafeTarget);
+            if (controlledTargetBytes < restoreCeiling) {
+                if (!resource.expansionAllowed()) {
+                    state = State.RECOVERY_WAIT;
+                    return remember(Decision.hold(source,
+                            Reason.RESOURCE_EXPANSION_HOLD,
+                            nativeTargetBytes,
+                            controlledTargetBytes,
+                            effectiveSafeTarget,
+                            normalSamples,
+                            resource.cooldownRemainingMs()));
+                }
+                return targetOrAdopt(source, Reason.RESOURCE_RECOVERY_STEP,
+                        MpvForwardCachePolicy.nextTier(
+                                controlledTargetBytes, restoreCeiling),
+                        effectiveSafeTarget, false, now);
+            }
+            resourceRecoveryPending = false;
+        }
+
         if (nativeTargetBytes != controlledTargetBytes) {
+            if (resource.active()
+                    && !resource.expansionAllowed()
+                    && nativeTargetBytes >= 0
+                    && nativeTargetBytes < controlledTargetBytes) {
+                resourceRecoveryPending = true;
+                return targetOrAdopt(source, Reason.RESOURCE_CONTEXT_HOLD,
+                        nativeTargetBytes, effectiveSafeTarget, true, now);
+            }
             return targetOrAdopt(source, Reason.CONTEXT_RESTORE,
-                    controlledTargetBytes, safeTarget, false, now);
+                    controlledTargetBytes, effectiveSafeTarget, false, now);
         }
 
         if (!current.mediaReliable()) {
             state = State.ACTIVE;
             return remember(Decision.hold(source, Reason.UNKNOWN_MEDIA_HOLD,
                     nativeTargetBytes, controlledTargetBytes,
-                    safeTarget, normalSamples, cooldownRemainingMs(now)));
+                    effectiveSafeTarget, normalSamples, cooldownRemainingMs(now)));
         }
 
-        long mediaCeiling = Math.min(current.mediaTargetBytes(), safeTarget);
+        long unconstrainedMediaCeiling = Math.min(
+                current.mediaTargetBytes(), safeTarget);
+        long mediaCeiling = Math.min(
+                unconstrainedMediaCeiling, resourceCeiling);
+        if (unconstrainedMediaCeiling > controlledTargetBytes
+                && mediaCeiling <= controlledTargetBytes
+                && resource.active()
+                && !resource.expansionAllowed()) {
+            state = State.DEMAND_WAIT;
+            return remember(Decision.hold(source,
+                    Reason.RESOURCE_EXPANSION_HOLD,
+                    nativeTargetBytes,
+                    controlledTargetBytes,
+                    effectiveSafeTarget,
+                    normalSamples,
+                    resource.cooldownRemainingMs()));
+        }
         if (mediaCeiling < controlledTargetBytes) {
             boolean stable = demandSamples >= DEMAND_DECREASE_MIN_SAMPLES
                     && elapsed(now, demandCandidateSinceElapsedMs)
@@ -230,15 +318,25 @@ public final class MpvForwardCacheController {
                 state = State.DEMAND_WAIT;
                 return remember(Decision.hold(source, Reason.DEMAND_DECREASE_WAIT,
                         nativeTargetBytes, controlledTargetBytes,
-                        safeTarget, normalSamples, cooldownRemainingMs(now)));
+                        effectiveSafeTarget, normalSamples, cooldownRemainingMs(now)));
             }
             long target = Math.max(mediaCeiling,
                     MpvForwardCachePolicy.previousTier(controlledTargetBytes));
             return targetOrAdopt(source, Reason.DEMAND_DECREASE_STEP,
-                    target, safeTarget, false, now);
+                    target, effectiveSafeTarget, false, now);
         }
 
         if (mediaCeiling > controlledTargetBytes) {
+            if (resource.active() && !resource.expansionAllowed()) {
+                state = State.DEMAND_WAIT;
+                return remember(Decision.hold(source,
+                        Reason.RESOURCE_EXPANSION_HOLD,
+                        nativeTargetBytes,
+                        controlledTargetBytes,
+                        effectiveSafeTarget,
+                        normalSamples,
+                        resource.cooldownRemainingMs()));
+            }
             boolean stable = demandSamples >= EXPANSION_MIN_SAMPLES
                     && elapsed(now, demandCandidateSinceElapsedMs) >= EXPANSION_STABLE_MS;
             boolean stepReady = lastIncreaseAtElapsedMs < 0
@@ -248,18 +346,18 @@ public final class MpvForwardCacheController {
                 state = State.DEMAND_WAIT;
                 return remember(Decision.hold(source, Reason.DEMAND_INCREASE_WAIT,
                         nativeTargetBytes, controlledTargetBytes,
-                        safeTarget, normalSamples, cooldownRemainingMs(now)));
+                        effectiveSafeTarget, normalSamples, cooldownRemainingMs(now)));
             }
             long target = MpvForwardCachePolicy.nextTier(
                     controlledTargetBytes, mediaCeiling);
             return targetOrAdopt(source, Reason.DEMAND_INCREASE_STEP,
-                    target, safeTarget, false, now);
+                    target, effectiveSafeTarget, false, now);
         }
 
         state = State.ACTIVE;
         return remember(Decision.hold(source, Reason.TARGET_STABLE,
                 nativeTargetBytes, controlledTargetBytes,
-                safeTarget, normalSamples, cooldownRemainingMs(now)));
+                effectiveSafeTarget, normalSamples, cooldownRemainingMs(now)));
     }
 
     /** Commits an action before calling MPV so synchronous callbacks cannot duplicate it. */
@@ -327,6 +425,7 @@ public final class MpvForwardCacheController {
                 demandSamples,
                 lastIncreaseAtElapsedMs,
                 lastDecreaseAtElapsedMs,
+                resourceRecoveryPending,
                 evaluations,
                 applyAttempts,
                 lastApplySucceeded,
@@ -372,6 +471,11 @@ public final class MpvForwardCacheController {
         if (reason == Reason.CRITICAL_PRESSURE
                 || reason == Reason.MODERATE_PRESSURE
                 || reason == Reason.CAPACITY_REDUCTION
+                || reason == Reason.RESOURCE_HARD_PRESSURE
+                || reason == Reason.RESOURCE_LIMIT
+                || reason == Reason.RESOURCE_EXPANSION_HOLD
+                || reason == Reason.RESOURCE_RECOVERY_STEP
+                || reason == Reason.RESOURCE_CONTEXT_HOLD
                 || reason == Reason.RECOVERY_WAIT
                 || reason == Reason.RECOVERY_STEP) {
             return State.RECOVERY_WAIT;
@@ -381,6 +485,13 @@ public final class MpvForwardCacheController {
             return State.DEMAND_WAIT;
         }
         return State.ACTIVE;
+    }
+
+    private static Reason resourceLimitReason(
+            MpvResourcePressureController.Decision resource) {
+        return resource.inputLevel() == MpvResourcePressurePolicy.Level.HARD
+                ? Reason.RESOURCE_HARD_PRESSURE
+                : Reason.RESOURCE_LIMIT;
     }
 
     private void observeDemand(
@@ -506,6 +617,7 @@ public final class MpvForwardCacheController {
         lastDemandSampleAtElapsedMs = -1;
         lastIncreaseAtElapsedMs = -1;
         lastDecreaseAtElapsedMs = -1;
+        resourceRecoveryPending = false;
     }
 
     private static long elapsed(long nowElapsedMs, long thenElapsedMs) {
@@ -517,6 +629,7 @@ public final class MpvForwardCacheController {
         BASELINE("baseline"),
         RUNTIME("runtime"),
         MEMORY("memory"),
+        RESOURCE("resource"),
         REBUILD("rebuild");
 
         private final String label;
@@ -554,6 +667,11 @@ public final class MpvForwardCacheController {
         CRITICAL_PRESSURE("critical-pressure"),
         MODERATE_PRESSURE("moderate-pressure"),
         CAPACITY_REDUCTION("capacity-reduction"),
+        RESOURCE_HARD_PRESSURE("resource-hard-pressure"),
+        RESOURCE_LIMIT("resource-limit"),
+        RESOURCE_EXPANSION_HOLD("resource-expansion-hold"),
+        RESOURCE_RECOVERY_STEP("resource-recovery-step"),
+        RESOURCE_CONTEXT_HOLD("resource-context-hold"),
         RECOVERY_WAIT("recovery-wait"),
         RECOVERY_STEP("recovery-step"),
         CONTEXT_RESTORE("context-restore"),
@@ -690,6 +808,7 @@ public final class MpvForwardCacheController {
             int demandSamples,
             long lastIncreaseAtElapsedMs,
             long lastDecreaseAtElapsedMs,
+            boolean resourceRecoveryPending,
             int evaluations,
             int applyAttempts,
             boolean lastApplySucceeded,

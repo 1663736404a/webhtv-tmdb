@@ -267,6 +267,10 @@ public class MpvPlayerEngine implements PlayerEngine {
         player.clearAutoCacheBaseline();
     }
 
+    public boolean setAutomaticPreloadAllowed(boolean allowed) {
+        return player.setAutomaticPreloadAllowed(allowed);
+    }
+
     public MpvPlayer.AutoHlsBitrateResult applyAutoHlsBitrate(
             String traceId, String option) {
         player.setPlaybackTraceId(traceId);

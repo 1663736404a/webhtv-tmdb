@@ -593,6 +593,10 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         autoCacheBaselineState.clear();
     }
 
+    public boolean setAutomaticPreloadAllowed(boolean allowed) {
+        return hlsProxy.setAutomaticPreloadAllowed(allowed);
+    }
+
     public AutoHlsBitrateResult applyAutoHlsBitrate(String option) {
         if (!autoHlsBitrateState.stage(
                 config.performanceOptionsPriority(),
