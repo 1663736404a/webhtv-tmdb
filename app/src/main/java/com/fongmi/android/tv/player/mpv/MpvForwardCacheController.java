@@ -81,6 +81,19 @@ public final class MpvForwardCacheController {
         state = State.SUPPRESSED;
     }
 
+    /** Synchronizes the forward half after a combined forward/back native update. */
+    public synchronized boolean syncNativeTarget(
+            PlaybackAutoContext.SessionToken token,
+            long targetBytes) {
+        if (!isCurrent(token) || !baselineInitialized) return false;
+        nativeTargetBytes = MpvForwardCachePolicy.normalizeTier(targetBytes);
+        if (state == State.CONTEXT_RESTORE_PENDING
+                && nativeTargetBytes == controlledTargetBytes) {
+            state = State.ACTIVE;
+        }
+        return true;
+    }
+
     public synchronized Decision evaluate(
             PlaybackAutoContext.SessionToken token,
             PlaybackAutoContext.SessionToken factsSession,

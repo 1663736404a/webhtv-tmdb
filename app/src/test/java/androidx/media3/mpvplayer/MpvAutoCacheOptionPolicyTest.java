@@ -45,10 +45,24 @@ public class MpvAutoCacheOptionPolicyTest {
     }
 
     @Test
+    public void acceptsAutomaticBackControllerTiersWhenCombinedTargetIsValid() {
+        for (long mib : new long[]{16, 32, 64}) {
+            Map<String, String> options = MpvAutoCacheOptionPolicy.resolve(
+                    true, 64L * 1024 * 1024, mib * 1024 * 1024);
+            assertEquals(String.valueOf(mib * 1024 * 1024),
+                    options.get("demuxer-max-back-bytes"));
+            assertEquals(String.valueOf(64L * 1024 * 1024),
+                    options.get("demuxer-max-bytes"));
+        }
+    }
+
+    @Test
     public void rejectsOutOfRangeOrInconsistentLimits() {
         assertTrue(MpvAutoCacheOptionPolicy.resolve(true, 8L * 1024 * 1024, 0).isEmpty());
         assertTrue(MpvAutoCacheOptionPolicy.resolve(true, 256L * 1024 * 1024, 0).isEmpty());
         assertTrue(MpvAutoCacheOptionPolicy.resolve(true, 24L * 1024 * 1024, -1).isEmpty());
+        assertTrue(MpvAutoCacheOptionPolicy.resolve(true, 64L * 1024 * 1024,
+                8L * 1024 * 1024).isEmpty());
         assertTrue(MpvAutoCacheOptionPolicy.resolve(true, 24L * 1024 * 1024,
                 32L * 1024 * 1024).isEmpty());
     }
