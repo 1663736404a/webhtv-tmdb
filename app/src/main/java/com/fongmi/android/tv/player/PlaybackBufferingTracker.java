@@ -42,6 +42,10 @@ public final class PlaybackBufferingTracker {
         return rebufferCount;
     }
 
+    public boolean isBuffering() {
+        return buffering;
+    }
+
     public long getRebufferTotalMs() {
         return rebufferTotalMs;
     }

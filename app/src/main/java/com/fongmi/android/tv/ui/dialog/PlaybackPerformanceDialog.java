@@ -174,7 +174,7 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
         scrollParams.topMargin = dp(10);
         root.addView(scroll, scrollParams);
 
-        addHelpIntro(content, "当前播放器内核：" + playerName() + "。不知道怎么选时保持“自动”（默认）；每项说明都会明确告诉你什么情况更流畅、异常时改哪一档，以及对应代价。EXO会按当前协议、分片和链路动态锁定起播/重缓冲门槛，历史按网络和资源隔离、自动过期，并协调预载；MPV会在符合条件的电视4K场景自动使用低开销电视直出；IJK自动档采用稳定基线。多数底层参数需要重新进入播放或重建播放器后生效。");
+        addHelpIntro(content, "当前播放器内核：" + playerName() + "。不知道怎么选时保持“自动”（默认）；每项说明都会明确告诉你什么情况更流畅、异常时改哪一档，以及对应代价。EXO会按当前协议、分片和链路动态锁定起播/重缓冲门槛，历史按网络和资源隔离、自动过期，并协调预载；MPV会在符合条件的电视4K场景自动使用低开销电视直出，并让HLS按可信吞吐保守起步、持续风险时逐档重载降码率；IJK自动档采用稳定基线。多数底层参数需要重新进入播放或重建播放器后生效。");
         String section = "";
         for (PlaybackPerformanceOption option : options()) {
             if (!section.equals(option.section())) {

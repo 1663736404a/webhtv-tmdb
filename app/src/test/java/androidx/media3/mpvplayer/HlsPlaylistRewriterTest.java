@@ -38,6 +38,8 @@ public class HlsPlaylistRewriterTest {
         assertVariant(result.variants().get(0), "source:video/720.m3u8", 4_500_000, 4_000_000, 1280, 720);
         assertVariant(result.variants().get(1), "source:https://video.example/1080.m3u8", 9_000_000, 7_800_000, 1920, 1080);
         assertVariant(result.variants().get(2), "source:video/4k.m3u8", 28_000_000, 24_000_000, 3840, 2160);
+        assertEquals(HlsPlaylistRewriter.VariantKind.STREAM,
+                result.variants().get(0).variant().kind());
         assertEquals(5, mappings.size());
         assertEquals(HlsPlaylistRewriter.UriRole.OTHER, mappings.get(0).context().role());
         assertEquals(HlsPlaylistRewriter.UriRole.OTHER, mappings.get(1).context().role());
@@ -62,6 +64,12 @@ public class HlsPlaylistRewriterTest {
         assertTrue(result.text().contains("proxy:main.m3u8"));
         assertVariant(result.variants().get(0), "source:iframe.m3u8", 950_000, 800_000, 640, 360);
         assertVariant(result.variants().get(1), "source:thumbs.m3u8", 120_000, 100_000, 320, 180);
+        assertEquals(HlsPlaylistRewriter.VariantKind.I_FRAME,
+                result.variants().get(0).variant().kind());
+        assertEquals(HlsPlaylistRewriter.VariantKind.IMAGE,
+                result.variants().get(1).variant().kind());
+        assertEquals(HlsPlaylistRewriter.VariantKind.STREAM,
+                result.variants().get(2).variant().kind());
     }
 
     @Test

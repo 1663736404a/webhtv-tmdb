@@ -267,6 +267,21 @@ public class MpvPlayerEngine implements PlayerEngine {
         player.clearAutoCacheBaseline();
     }
 
+    public MpvPlayer.AutoHlsBitrateResult applyAutoHlsBitrate(
+            String traceId, String option) {
+        player.setPlaybackTraceId(traceId);
+        return player.applyAutoHlsBitrate(option);
+    }
+
+    public void clearAutoHlsBitrate() {
+        player.clearAutoHlsBitrate();
+    }
+
+    /** Cached track/proxy HLS state; this method never performs a native query. */
+    public MpvPlayer.AutoHlsRuntimeSnapshot getAutoHlsRuntimeSnapshot() {
+        return player.getAutoHlsRuntimeSnapshot();
+    }
+
     @Override
     public void setNativeLutShader(MpvLutShader shader) {
         player.setLutShader(shader);
@@ -495,6 +510,7 @@ public class MpvPlayerEngine implements PlayerEngine {
                 .rebufferMs(MpvPerformanceSetting.getRebufferMs())
                 .performanceOptionsPriority(MpvPerformanceSetting.isPerformancePriority())
                 .automaticCacheTime(PlaybackPerformanceSetting.isAuto(PlayerSetting.MPV))
+                .automaticHlsVariant(PlaybackPerformanceSetting.isAuto(PlayerSetting.MPV))
                 .option("framedrop", MpvPerformanceSetting.getFrameDropOption())
                 .option("video-sync", MpvPerformanceSetting.getSyncOption())
                 .option("interpolation", MpvPerformanceSetting.isInterpolation() ? "yes" : "no")

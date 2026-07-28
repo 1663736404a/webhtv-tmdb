@@ -39,6 +39,7 @@ public final class MpvPlayerConfig {
     private final int rebufferMs;
     private final boolean performanceOptionsPriority;
     private final boolean automaticCacheTime;
+    private final boolean automaticHlsVariant;
     private final Map<String, String> extraOptions;
 
     private MpvPlayerConfig(Builder builder) {
@@ -65,6 +66,7 @@ public final class MpvPlayerConfig {
         rebufferMs = builder.rebufferMs;
         performanceOptionsPriority = builder.performanceOptionsPriority;
         automaticCacheTime = builder.automaticCacheTime;
+        automaticHlsVariant = builder.automaticHlsVariant;
         extraOptions = Collections.unmodifiableMap(new LinkedHashMap<>(builder.extraOptions));
     }
 
@@ -166,6 +168,10 @@ public final class MpvPlayerConfig {
         return automaticCacheTime;
     }
 
+    public boolean automaticHlsVariant() {
+        return automaticHlsVariant;
+    }
+
     public Map<String, String> extraOptions() {
         return extraOptions;
     }
@@ -196,6 +202,7 @@ public final class MpvPlayerConfig {
         private int rebufferMs = 5_000;
         private boolean performanceOptionsPriority = true;
         private boolean automaticCacheTime;
+        private boolean automaticHlsVariant;
 
         private Builder(Context context) {
             Context app = context.getApplicationContext();
@@ -316,6 +323,11 @@ public final class MpvPlayerConfig {
 
         public Builder automaticCacheTime(boolean automaticCacheTime) {
             this.automaticCacheTime = automaticCacheTime;
+            return this;
+        }
+
+        public Builder automaticHlsVariant(boolean automaticHlsVariant) {
+            this.automaticHlsVariant = automaticHlsVariant;
             return this;
         }
 

@@ -27,7 +27,7 @@ final class HlsPlaylistRewriter {
             String raw = trimCr(lines[i]);
             String line = raw.trim();
             if (line.startsWith("#EXT-X-STREAM-INF")) {
-                pendingVariant = parseVariant(line);
+                pendingVariant = parseVariant(line, VariantKind.STREAM);
                 out.append(raw);
             } else if (line.startsWith("#") && line.contains("URI=\"")) {
                 UriContext context = uriAttributeContext(line, inheritedVariant);
@@ -81,8 +81,13 @@ final class HlsPlaylistRewriter {
 
     private static UriContext uriAttributeContext(String line, Variant inheritedVariant) {
         String upper = line.toUpperCase(Locale.US);
-        if (upper.startsWith("#EXT-X-I-FRAME-STREAM-INF") || upper.startsWith("#EXT-X-IMAGE-STREAM-INF")) {
-            return new UriContext(UriRole.VARIANT_PLAYLIST, parseVariant(line));
+        if (upper.startsWith("#EXT-X-I-FRAME-STREAM-INF")) {
+            return new UriContext(UriRole.VARIANT_PLAYLIST,
+                    parseVariant(line, VariantKind.I_FRAME));
+        }
+        if (upper.startsWith("#EXT-X-IMAGE-STREAM-INF")) {
+            return new UriContext(UriRole.VARIANT_PLAYLIST,
+                    parseVariant(line, VariantKind.IMAGE));
         }
         if (upper.startsWith("#EXT-X-PART") || (upper.startsWith("#EXT-X-PRELOAD-HINT") && upper.contains("TYPE=PART"))) {
             return new UriContext(UriRole.MEDIA_SEGMENT, inheritedVariant);
@@ -103,11 +108,11 @@ final class HlsPlaylistRewriter {
         return new MappedUri(source, rewritten);
     }
 
-    private static Variant parseVariant(String line) {
+    private static Variant parseVariant(String line, VariantKind kind) {
         long bandwidth = parseLongAttribute(line, "BANDWIDTH");
         long averageBandwidth = parseLongAttribute(line, "AVERAGE-BANDWIDTH");
         int[] resolution = parseResolution(attributeValue(line, "RESOLUTION"));
-        return new Variant(bandwidth, averageBandwidth, resolution[0], resolution[1]);
+        return new Variant(bandwidth, averageBandwidth, resolution[0], resolution[1], kind);
     }
 
     private static int[] parseResolution(String value) {
@@ -171,13 +176,32 @@ final class HlsPlaylistRewriter {
         OTHER
     }
 
+    enum VariantKind {
+        STREAM,
+        I_FRAME,
+        IMAGE
+    }
+
     record UriContext(UriRole role, Variant variant) {
     }
 
     record MappedUri(String sourceUri, String rewrittenUri) {
     }
 
-    record Variant(long bandwidth, long averageBandwidth, int width, int height) {
+    record Variant(
+            long bandwidth,
+            long averageBandwidth,
+            int width,
+            int height,
+            VariantKind kind) {
+
+        Variant(long bandwidth, long averageBandwidth, int width, int height) {
+            this(bandwidth, averageBandwidth, width, height, VariantKind.STREAM);
+        }
+
+        Variant {
+            kind = kind == null ? VariantKind.STREAM : kind;
+        }
     }
 
     record VariantEntry(String uri, Variant variant) {

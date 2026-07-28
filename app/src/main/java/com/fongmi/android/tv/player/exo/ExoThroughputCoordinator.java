@@ -3,6 +3,7 @@ package com.fongmi.android.tv.player.exo;
 import com.fongmi.android.tv.player.PlaybackAutoContext;
 import com.fongmi.android.tv.player.PlaybackAutoContextStore;
 import com.fongmi.android.tv.player.PlaybackSystemConditionCoordinator;
+import com.fongmi.android.tv.player.PlaybackThroughputHistory;
 
 import java.util.Objects;
 
@@ -13,29 +14,42 @@ final class ExoThroughputCoordinator implements AutoCloseable {
             new ExoThroughputCoordinator(
                     PlaybackAutoContextStore.process(),
                     new ExoThroughputEstimator(),
-                    PlaybackSystemConditionCoordinator.process());
+                    PlaybackSystemConditionCoordinator.process(),
+                    PlaybackThroughputHistory.process());
 
     private final PlaybackAutoContextStore store;
     private final ExoThroughputEstimator estimator;
+    private final PlaybackThroughputHistory throughputHistory;
     private final PlaybackSystemConditionCoordinator.Registration systemConditionRegistration;
     private long networkGeneration;
 
     ExoThroughputCoordinator(PlaybackAutoContextStore store) {
-        this(store, new ExoThroughputEstimator(), null);
+        this(store, new ExoThroughputEstimator(), null,
+                new PlaybackThroughputHistory());
     }
 
     ExoThroughputCoordinator(
             PlaybackAutoContextStore store,
             ExoThroughputEstimator estimator) {
-        this(store, estimator, null);
+        this(store, estimator, null, new PlaybackThroughputHistory());
     }
 
     ExoThroughputCoordinator(
             PlaybackAutoContextStore store,
             ExoThroughputEstimator estimator,
             PlaybackSystemConditionCoordinator systemConditionCoordinator) {
+        this(store, estimator, systemConditionCoordinator,
+                new PlaybackThroughputHistory());
+    }
+
+    ExoThroughputCoordinator(
+            PlaybackAutoContextStore store,
+            ExoThroughputEstimator estimator,
+            PlaybackSystemConditionCoordinator systemConditionCoordinator,
+            PlaybackThroughputHistory throughputHistory) {
         this.store = Objects.requireNonNull(store);
         this.estimator = Objects.requireNonNull(estimator);
+        this.throughputHistory = Objects.requireNonNull(throughputHistory);
         this.systemConditionRegistration = systemConditionCoordinator == null
                 ? null : systemConditionCoordinator.addListener(this::onSystemConditionUpdate);
     }
@@ -133,7 +147,7 @@ final class ExoThroughputCoordinator implements AutoCloseable {
         }
         ExoThroughputPathPolicy.Decision path = ExoThroughputPathPolicy.resolve(
                 context, nowElapsedMs, preloadContended);
-        return estimator.observe(
+        ExoThroughputEstimator.Update update = estimator.observe(
                 current,
                 nowElapsedMs,
                 bytesTransferred,
@@ -142,6 +156,23 @@ final class ExoThroughputCoordinator implements AutoCloseable {
                 path,
                 preloadContended,
                 fullNetworkSpeed);
+        ExoThroughputEstimator.Snapshot snapshot = update.snapshot();
+        if (update.accepted()) {
+            throughputHistory.record(
+                    context,
+                    new PlaybackThroughputHistory.Evidence(
+                            snapshot.effectiveEstimateBitsPerSecond(),
+                            snapshot.shortEstimateBitsPerSecond(),
+                            snapshot.longEstimateBitsPerSecond(),
+                            snapshot.longSampleCount(),
+                            snapshot.longWindowMs(),
+                            snapshot.predictionErrorPermille(),
+                            snapshot.confidence(),
+                            snapshot.pathTrust() == ExoThroughputPathPolicy.Trust.TRUSTED,
+                            snapshot.preloadContended()),
+                    nowElapsedMs);
+        }
+        return update;
     }
 
     synchronized ExoThroughputEstimator.Snapshot snapshot() {
@@ -167,6 +198,7 @@ final class ExoThroughputCoordinator implements AutoCloseable {
         PlaybackAutoContext.SessionToken current = currentSession();
         ExoThroughputEstimator.Snapshot snapshot = estimator.snapshot();
         if (!current.active() || !current.equals(update.session())) return;
+        throughputHistory.invalidate();
         networkGeneration = nextGeneration(networkGeneration);
         if (!current.equals(snapshot.session())) return;
         long safePrior = safeNetworkPrior(

@@ -3,7 +3,9 @@ package com.fongmi.android.tv.player.exo;
 import com.fongmi.android.tv.player.PlaybackAutoContext;
 import com.fongmi.android.tv.player.PlaybackAutoContextStore;
 import com.fongmi.android.tv.player.PlaybackRoute;
+import com.fongmi.android.tv.player.PlaybackNetworkIdentityPolicy;
 import com.fongmi.android.tv.player.PlaybackSystemConditionCoordinator;
+import com.fongmi.android.tv.player.PlaybackThroughputHistory;
 
 import org.junit.Test;
 
@@ -193,6 +195,62 @@ public class ExoThroughputCoordinatorTest {
                 ExoThroughputEstimator.Reason.NETWORK_CHANGED_DURING_SAMPLE,
                 crossed.reason());
         assertEquals(0, coordinator.snapshot().sampleCount());
+        coordinator.close();
+    }
+
+    @Test
+    public void networkCallbackClearsReusableStartupThroughputHistory() {
+        PlaybackAutoContextStore store = new PlaybackAutoContextStore();
+        PlaybackSystemConditionCoordinator conditions =
+                new PlaybackSystemConditionCoordinator(store);
+        PlaybackThroughputHistory history = new PlaybackThroughputHistory();
+        ExoThroughputCoordinator coordinator = new ExoThroughputCoordinator(
+                store, new ExoThroughputEstimator(), conditions, history);
+        PlaybackAutoContext.SessionToken session = beginExoSession(
+                store, "p-history-1", 0);
+        assertTrue(conditions.beginSession(session));
+        String digest = PlaybackNetworkIdentityPolicy.digest(1001);
+        PlaybackAutoContext.NetworkSnapshot network =
+                new PlaybackAutoContext.NetworkSnapshot(
+                        true, true, false, false,
+                        PlaybackAutoContext.NetworkTransport.WIFI,
+                        PlaybackAutoContext.DataSaverState.DISABLED,
+                        digest);
+        assertTrue(conditions.publish(
+                session,
+                PlaybackAutoContext.SystemConditionTrigger.SESSION_START,
+                network,
+                false,
+                null,
+                28,
+                1));
+        assertTrue(history.record(
+                store.snapshot(),
+                new PlaybackThroughputHistory.Evidence(
+                        20_000_000L,
+                        18_000_000L,
+                        16_000_000L,
+                        4,
+                        15_000,
+                        200,
+                        PlaybackAutoContext.Confidence.HIGH,
+                        true,
+                        false),
+                1).recorded());
+        assertTrue(history.lookup(
+                store.snapshot(), digest, 50).usable());
+
+        conditions.publish(
+                session,
+                PlaybackAutoContext.SystemConditionTrigger.NETWORK_CALLBACK,
+                network,
+                false,
+                null,
+                28,
+                100);
+
+        assertFalse(history.lookup(
+                store.snapshot(), digest, 100).usable());
         coordinator.close();
     }
 

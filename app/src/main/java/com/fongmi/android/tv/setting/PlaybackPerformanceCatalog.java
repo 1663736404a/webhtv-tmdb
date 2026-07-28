@@ -113,7 +113,7 @@ public final class PlaybackPerformanceCatalog {
         options.add(option(MPV_OPTION_PRIORITY, BASIC, "参数优先级", "怎么选：普通用户选“播放性能优先”（默认），界面中的缓存、硬解、同步、丢帧和HLS设置才能可靠生效；只有明确维护了mpv.conf并希望同名配置覆盖界面时选“mpv.conf优先”。选错会出现“界面改了但实际被配置文件覆盖”。"));
         addSharedBuffer(options, false, true);
         options.add(option(MPV_REBUFFER, BUFFER, "重缓冲恢复", "作用：缓存耗尽后至少重新准备多少秒再继续。均衡建议2秒；网络反复卡顿可升到3～5秒；稳定高速网络可用1秒。代价：越高越不易刚恢复又卡住，但每次恢复等待越久。"));
-        options.add(option(MPV_HLS_BITRATE, BUFFER, "HLS码率首选", "怎么选：网络和设备足够时选“最高码率”（默认）；4K HLS卡顿先降到15Mbps，再降到8Mbps；只求能播选最低。代价：这是选初始轨道，不是动态ABR；限制越低画质越低，清单码率标错时判断也会失准。"));
+        options.add(option(MPV_HLS_BITRATE, BUFFER, "HLS码率控制", "怎么选：自动档会用同网络、同真实路径且5分钟内的可信长期吞吐选择起播上限；没有可信历史时先限制到15Mbps。持续吞吐不足、低缓冲并伴随underrun或重缓冲时，最多逐档重载降3次，不会自动升档。手动档仍可固定最高、15Mbps、8Mbps或最低。代价：降档重载会短暂中断，VOD尽量保留位置，直播回默认live edge；清单码率标错时判断仍会失准。"));
         addPreload(options);
         options.add(option(MPV_SYNC, DECODE, "同步模式", "怎么选：保持“音频同步”（默认），兼容性最好。只有屏幕刷新率与视频不匹配、能感到规律性微抖且未开启音频直通时，才试“显示重采样”。代价：显示重采样会轻微调整音频速度并增加处理，直通音频不适用。"));
         options.add(option(MPV_FRAME_DROP, DECODE, "丢帧策略", "怎么选：保持“输出丢帧”（默认），跟不上时优先丢渲染帧以维持音画进度；卡顿仍严重可试“解码丢帧”；不要为追求完整画面关闭丢帧，除非设备性能充足。代价：策略越积极，跳帧越明显。"));
@@ -162,7 +162,7 @@ public final class PlaybackPerformanceCatalog {
 
     private static String profileDescription(int kernel) {
         return switch (kernel) {
-            case PlayerSetting.MPV -> "首选“自动”：电视4K硬解且不需要MPV字幕/LUT/shader/滤镜时自动用低开销电视直出，其他场景保留GPU完整能力。“均衡”固定使用同一组通用参数；“兼容”改用GPU完整＋mediacodec-copy，适合零拷贝异常但4K可能更卡；“轻量”限制HLS至8Mbps并降低缓存，适合低内存/低性能设备。手动改任一项后显示“自定义”。";
+            case PlayerSetting.MPV -> "首选“自动”：电视4K硬解且不需要MPV字幕/LUT/shader/滤镜时自动用低开销电视直出；HLS按可信吞吐保守起步，持续网络风险时逐档重载降码率。“均衡”固定使用同一组通用参数；“兼容”改用GPU完整＋mediacodec-copy，适合零拷贝异常但4K可能更卡；“轻量”限制HLS至8Mbps并降低缓存，适合低内存/低性能设备。手动改任一项后显示“自定义”。";
             case PlayerSetting.IJK -> "首选“自动”：按协议采用稳定的点播/直播基线。“均衡”固定使用15MB读包、标准水位和标准丢帧；“兼容”提高水位、探测和画面队列，起播/恢复更慢但更稳；“轻量”降到4MB、快速探测和积极丢帧，省内存但更容易卡顿和损失画面。手动改任一项后显示“自定义”。";
             default -> "首选“自动”（也是默认）：以均衡参数起步，根据协议、分片、可信吞吐和缓冲趋势动态锁定每次起播/重缓冲门槛；历史按网络和资源隔离并自动过期，同时根据前台余量控制预载。“均衡”固定为1.5秒起播/3秒恢复；“兼容”用同步队列、2秒起播/5秒恢复，适合异步解码异常但启动更慢；“轻量”缩小缓存、1秒起播/2秒恢复，省内存但抗波动更弱。手动改任一项后显示“自定义”。";
         };

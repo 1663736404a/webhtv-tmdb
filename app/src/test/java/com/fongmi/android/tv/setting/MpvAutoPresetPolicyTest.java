@@ -33,4 +33,10 @@ public class MpvAutoPresetPolicyTest {
         assertFalse(PlaybackPerformanceSetting.shouldMigrateMpvAutoBaseline(
                 PlaybackPerformanceSetting.PROFILE_CUSTOM));
     }
+
+    @Test
+    public void automaticHlsTextNoLongerClaimsFixedHighestBitrate() {
+        assertEquals("自动 · 起步≤15Mbps，可逐档降",
+                MpvPerformanceSetting.getHlsBitrateText(true));
+    }
 }
