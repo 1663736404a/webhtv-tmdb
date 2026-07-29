@@ -94,6 +94,7 @@ public final class PlaybackTelemetry {
         MPV_HLS_VARIANT("mpv-hls-variant"),
         MPV_PRELOAD("mpv-preload"),
         IJK_BUFFER("ijk-buffer"),
+        IJK_REALTIME_RECOVERY("ijk-realtime-recovery"),
         DISPLAY_MODE("display-mode"),
         TUNNELING("tunneling"),
         LOAD_CONTROL("load-control"),

@@ -244,6 +244,107 @@ public class IjkBufferControllerTest {
         assertTrue(controller.endSession(second));
     }
 
+    @Test
+    public void realtimeRecoveryUsesSameReloadLaneWithoutChangingConfig() {
+        IjkBufferController controller = controller("realtime", 14, 0);
+        PlaybackAutoContext.SessionToken token = controller.snapshot().session();
+
+        IjkBufferController.Decision decision =
+                controller.requestRealtimeRecovery(
+                        token, token, FOUR, 10_000);
+
+        assertTrue(decision.requestsReload());
+        assertEquals(FOUR, decision.appliedConfig());
+        assertEquals(FOUR, decision.targetConfig());
+        assertEquals(IjkBufferController.Reason.REALTIME_RECOVERY_RELOAD,
+                decision.reason());
+    }
+
+    @Test
+    public void realtimeRecoverySharesCooldownWithBufferReload() {
+        IjkBufferController controller = controller("shared-cooldown", 15, 0);
+        PlaybackAutoContext.SessionToken token = controller.snapshot().session();
+        IjkBufferController.Decision buffer = controller.evaluate(
+                token, token, policy(FOUR,
+                        IjkBufferPolicy.Reason.LOW_LATENCY_CADENCE), EIGHT,
+                IjkBufferController.Trigger.MANIFEST, false, false, 0,
+                1_000);
+        apply(controller, token, buffer, 1_000);
+
+        IjkBufferController.Decision realtime =
+                controller.requestRealtimeRecovery(
+                        token, token, FOUR, 5_000);
+
+        assertEquals(IjkBufferController.Action.HOLD, realtime.action());
+        assertEquals(IjkBufferController.Reason.RELOAD_COOLDOWN,
+                realtime.reason());
+        assertEquals(26_000, realtime.cooldownRemainingMs());
+    }
+
+    @Test
+    public void criticalMemoryCanBypassRealtimeRecoveryCooldown() {
+        IjkBufferController controller = controller("realtime-safety", 18, 0);
+        PlaybackAutoContext.SessionToken token = controller.snapshot().session();
+        IjkBufferController.Decision realtime =
+                controller.requestRealtimeRecovery(
+                        token, token, FIFTEEN, 1_000);
+        apply(controller, token, realtime, 1_000);
+
+        IjkBufferController.Decision critical = controller.evaluate(
+                token, token, policy(FOUR,
+                        IjkBufferPolicy.Reason.CRITICAL_MEMORY), FIFTEEN,
+                IjkBufferController.Trigger.MEMORY, false, true, 0,
+                2_000);
+
+        assertTrue(critical.requestsReload());
+        assertEquals(IjkBufferController.Reason.SAFETY_RELOAD,
+                critical.reason());
+    }
+
+    @Test
+    public void realtimeRecoverySharesApplyInProgressAndAttemptLimit() {
+        IjkBufferController controller = controller("shared-limit", 16, 0);
+        PlaybackAutoContext.SessionToken token = controller.snapshot().session();
+
+        for (int attempt = 0;
+             attempt < IjkBufferController.MAX_RELOAD_ATTEMPTS;
+             attempt++) {
+            long now = attempt * IjkBufferController.RELOAD_COOLDOWN_MS;
+            IjkBufferController.Decision decision =
+                    controller.requestRealtimeRecovery(
+                            token, token, FOUR, now);
+            assertTrue(decision.requestsReload());
+            assertTrue(controller.beginApply(token, decision));
+            assertEquals(IjkBufferController.Reason.APPLY_IN_PROGRESS,
+                    controller.requestRealtimeRecovery(
+                            token, token, FOUR, now).reason());
+            controller.completeApply(token, decision, true, now);
+        }
+
+        IjkBufferController.Decision limited =
+                controller.requestRealtimeRecovery(
+                        token, token, FOUR,
+                        IjkBufferController.MAX_RELOAD_ATTEMPTS
+                                * IjkBufferController.RELOAD_COOLDOWN_MS);
+        assertEquals(IjkBufferController.Reason.RELOAD_LIMIT,
+                limited.reason());
+    }
+
+    @Test
+    public void staleRealtimeRecoveryCannotSpendCurrentSessionBudget() {
+        IjkBufferController controller = controller("realtime-stale", 17, 0);
+        PlaybackAutoContext.SessionToken current = controller.snapshot().session();
+        PlaybackAutoContext.SessionToken stale = token("old", 16);
+
+        IjkBufferController.Decision decision =
+                controller.requestRealtimeRecovery(
+                        current, stale, FOUR, 10_000);
+
+        assertEquals(IjkBufferController.Reason.STALE_SESSION,
+                decision.reason());
+        assertEquals(0, controller.snapshot().reloadAttempts());
+    }
+
     private static IjkBufferController controller(
             String trace,
             long generation,

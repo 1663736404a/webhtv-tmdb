@@ -17,6 +17,7 @@ import com.fongmi.android.tv.player.PlaybackRoute;
 import com.fongmi.android.tv.player.exo.ExoUtil;
 import com.fongmi.android.tv.player.exo.TrackUtil;
 import com.fongmi.android.tv.player.ijk.IjkBufferPolicy;
+import com.fongmi.android.tv.player.ijk.IjkRealtimeRecoveryPolicy;
 import com.fongmi.android.tv.utils.ResUtil;
 
 import java.util.List;
@@ -111,6 +112,10 @@ public class IjkPlayerEngine implements PlayerEngine {
 
     public Long getLiveLagLowerBoundMs() {
         return player.getLiveLagLowerBoundSnapshot();
+    }
+
+    public IjkRealtimeRecoveryPolicy.QueueSnapshot getRealtimeQueueSnapshot() {
+        return player.getRealtimeQueueSnapshot();
     }
 
     @Override

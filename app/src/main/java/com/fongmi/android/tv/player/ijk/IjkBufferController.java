@@ -2,7 +2,7 @@ package com.fongmi.android.tv.player.ijk;
 
 import com.fongmi.android.tv.player.PlaybackAutoContext;
 
-/** Session-safe controller that stages IJK options and gates prepare-time reloads. */
+/** Session-safe controller that stages IJK options and gates all managed IJK reloads. */
 public final class IjkBufferController {
 
     public static final long RELOAD_COOLDOWN_MS = 30_000L;
@@ -163,6 +163,43 @@ public final class IjkBufferController {
                 0, newRebuffer);
     }
 
+    /**
+     * Reserves the same bounded reload lane for an RTSP/RTMP live recovery.
+     * The queue configuration is intentionally unchanged; reconnecting the
+     * media session is the recovery action.
+     */
+    public synchronized Decision requestRealtimeRecovery(
+            PlaybackAutoContext.SessionToken session,
+            PlaybackAutoContext.SessionToken factsSession,
+            IjkBufferPolicy.Config appliedConfig,
+            long nowElapsedMs) {
+        IjkBufferPolicy.Config current = appliedConfig == null
+                ? stagedConfig : appliedConfig;
+        IjkBufferPolicy.Decision policy = currentPolicy(current);
+        if (!isCurrent(session) || !session.equals(factsSession)) {
+            return Decision.hold(current, current, policy,
+                    Reason.STALE_SESSION, 0, false);
+        }
+        evaluations++;
+        if (applyInProgress) {
+            return Decision.hold(current, current, policy,
+                    Reason.APPLY_IN_PROGRESS, 0, false);
+        }
+        if (reloadAttempts >= MAX_RELOAD_ATTEMPTS) {
+            return Decision.hold(current, current, policy,
+                    Reason.RELOAD_LIMIT, cooldownRemaining(nowElapsedMs),
+                    false);
+        }
+        long cooldown = cooldownRemaining(Math.max(0, nowElapsedMs));
+        if (cooldown > 0) {
+            return Decision.hold(current, current, policy,
+                    Reason.RELOAD_COOLDOWN, cooldown, false);
+        }
+        stagedConfig = current;
+        return new Decision(Action.RELOAD, current, current, policy,
+                Reason.REALTIME_RECOVERY_RELOAD, 0, false);
+    }
+
     public synchronized boolean beginApply(
             PlaybackAutoContext.SessionToken session,
             Decision decision) {
@@ -241,6 +278,20 @@ public final class IjkBufferController {
         };
     }
 
+    private static IjkBufferPolicy.Decision currentPolicy(
+            IjkBufferPolicy.Config current) {
+        IjkBufferPolicy.Config safe = current == null
+                ? IjkBufferPolicy.safeInitialConfig() : current;
+        return new IjkBufferPolicy.Decision(
+                true,
+                safe,
+                IjkBufferPolicy.Reason.REALTIME_BASELINE,
+                safe.bufferMb(),
+                false,
+                -1,
+                0);
+    }
+
     public enum Trigger {
         INITIAL,
         MANIFEST,
@@ -263,6 +314,7 @@ public final class IjkBufferController {
         SAFETY_RELOAD("safety-reload"),
         EARLY_SCENE_RELOAD("early-scene-reload"),
         REBUFFER_RELOAD("rebuffer-reload"),
+        REALTIME_RECOVERY_RELOAD("realtime-recovery-reload"),
         STARTUP_EXPANSION_DEFERRED("startup-expansion-deferred"),
         HEALTHY_EXPANSION_DEFERRED("healthy-expansion-deferred"),
         NONCRITICAL_CHANGE_DEFERRED("noncritical-change-deferred"),

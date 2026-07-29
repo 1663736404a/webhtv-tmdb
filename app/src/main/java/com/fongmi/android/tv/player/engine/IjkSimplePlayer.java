@@ -34,6 +34,7 @@ import com.fongmi.android.tv.player.exo.ExoUtil;
 import com.fongmi.android.tv.player.PlaybackResourceClassifier;
 import com.fongmi.android.tv.player.PlaybackRoute;
 import com.fongmi.android.tv.player.ijk.IjkBufferPolicy;
+import com.fongmi.android.tv.player.ijk.IjkRealtimeRecoveryPolicy;
 import com.fongmi.android.tv.setting.IjkPerformanceSetting;
 import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
 import com.fongmi.android.tv.setting.PlayerSetting;
@@ -228,6 +229,29 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         MpvHlsProxy.LiveLagSnapshot snapshot = hlsProxy.liveLagSnapshot(
                 getNativeBufferedDurationSnapshot());
         return snapshot.known() ? snapshot.lowerBoundMs() : null;
+    }
+
+    IjkRealtimeRecoveryPolicy.QueueSnapshot getRealtimeQueueSnapshot() {
+        try {
+            Tracks tracks = currentTracks;
+            return new IjkRealtimeRecoveryPolicy.QueueSnapshot(
+                    true,
+                    tracks.containsType(C.TRACK_TYPE_AUDIO),
+                    tracks.containsType(C.TRACK_TYPE_VIDEO),
+                    ijk.getAudioCachedDuration(),
+                    ijk.getVideoCachedDuration(),
+                    ijk.getAudioCachedBytes(),
+                    ijk.getVideoCachedBytes(),
+                    ijk.getAudioCachedPackets(),
+                    ijk.getVideoCachedPackets());
+        } catch (Throwable error) {
+            if (SpiderDebug.isEnabled()) {
+                SpiderDebug.log("ijk-realtime",
+                        "queue facts unavailable errorType=%s action=keep-unknown",
+                        error.getClass().getSimpleName());
+            }
+            return IjkRealtimeRecoveryPolicy.QueueSnapshot.unknown();
+        }
     }
 
     private long getNativeBufferedDurationSnapshot() {

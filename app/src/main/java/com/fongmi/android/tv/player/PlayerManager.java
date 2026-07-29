@@ -53,6 +53,8 @@ import com.fongmi.android.tv.player.exo.ForwardBufferTrend;
 import com.fongmi.android.tv.player.exo.PlaybackAnalyticsListener;
 import com.fongmi.android.tv.player.ijk.IjkBufferController;
 import com.fongmi.android.tv.player.ijk.IjkBufferPolicy;
+import com.fongmi.android.tv.player.ijk.IjkRealtimeRecoveryController;
+import com.fongmi.android.tv.player.ijk.IjkRealtimeRecoveryPolicy;
 import com.fongmi.android.tv.player.danmaku.DanmakuUrlPolicy;
 import com.fongmi.android.tv.player.danmaku.LiveDanmakuBatcher;
 import com.fongmi.android.tv.player.danmaku.LiveDanmakuBuffer;
@@ -155,6 +157,7 @@ public class PlayerManager implements ParseCallback {
     private final PlaybackMemoryCoordinator.Registration ijkBufferMemoryRegistration;
     private final PlaybackSystemConditionCoordinator.Registration mpvResourceSystemRegistration;
     private final IjkBufferController ijkBufferController;
+    private final IjkRealtimeRecoveryController ijkRealtimeRecoveryController;
     private final ForwardBufferTrend networkProtectionTrend;
     private final LiveDanmakuBatcher liveDanmakuBatcher;
     private final LiveDanmakuBuffer liveDanmakuBuffer;
@@ -172,6 +175,7 @@ public class PlayerManager implements ParseCallback {
     private String lastLoggedRouteTraceId = PlaybackTrace.NONE;
     private IjkTimelinePublicationKey lastIjkTimelinePublicationKey;
     private IjkBufferController.Decision pendingIjkBufferDecision;
+    private IjkRealtimeRecoveryPolicy.Decision pendingIjkRealtimeRecoveryDecision;
     private PlaybackAutoContext.SessionToken playbackAutoSession = PlaybackAutoContext.SessionToken.none();
     private long playbackTrackSequence;
     private long danmakuLoadStartedAtMs;
@@ -245,6 +249,8 @@ public class PlayerManager implements ParseCallback {
         this.mpvResourcePressureController = new MpvResourcePressureController();
         this.mpvPreloadController = new MpvPreloadController();
         this.ijkBufferController = new IjkBufferController();
+        this.ijkRealtimeRecoveryController =
+                new IjkRealtimeRecoveryController();
         this.mpvResourceMemoryRegistration = PlaybackMemoryCoordinator.process().addListener(update ->
                 App.post(() -> onMpvResourceMemoryUpdate(update)));
         this.ijkBufferMemoryRegistration = PlaybackMemoryCoordinator.process().addListener(update ->
@@ -1014,8 +1020,9 @@ public class PlayerManager implements ParseCallback {
     }
 
     public void seekTo(long time) {
-        rtspLiveLagController.onUserSeek(
-                playbackAutoSession, SystemClock.elapsedRealtime());
+        long now = SystemClock.elapsedRealtime();
+        rtspLiveLagController.onUserSeek(playbackAutoSession, now);
+        ijkRealtimeRecoveryController.onUserSeek(playbackAutoSession, now);
         player.seekTo(time);
     }
 
@@ -1764,6 +1771,103 @@ public class PlayerManager implements ParseCallback {
                 liveLagFact.isUsable(now) ? liveLagFact.value() : -1);
     }
 
+    private void evaluateIjkRealtimeRecovery(long nowElapsedMs) {
+        if (!(engine instanceof IjkPlayerEngine ijk)
+                || !playbackAutoSession.active()) return;
+        long now = Math.max(0, nowElapsedMs);
+        PlaybackAutoContext context = playbackAutoContextStore.snapshot();
+        PlaybackAutoContext.Fact<PlaybackAutoContext.Protocol> protocolFact =
+                context.resource().protocol();
+        boolean protocolUsable = protocolFact.isUsable(now);
+        PlaybackAutoContext.Protocol protocol = protocolUsable
+                ? protocolFact.value() : PlaybackAutoContext.Protocol.UNKNOWN;
+        boolean automatic = PlaybackPerformanceSetting.isAuto(
+                PlayerSetting.IJK);
+        boolean realtime = protocol == PlaybackAutoContext.Protocol.RTSP
+                || protocol == PlaybackAutoContext.Protocol.RTMP;
+        if (!automatic || !protocolUsable || !realtime) {
+            ijkRealtimeRecoveryController.onPositionDiscontinuity(
+                    playbackAutoSession);
+            return;
+        }
+        IjkBufferController.Snapshot reloadState =
+                ijkBufferController.snapshot();
+        IjkRealtimeRecoveryController.Input input =
+                new IjkRealtimeRecoveryController.Input(
+                        playbackAutoSession,
+                        automatic,
+                        isIjk(),
+                        protocolUsable,
+                        protocol,
+                        isIjkRealtimePlaybackActive(),
+                        playbackTrace.hasStage(PlaybackTrace.Stage.FIRST_FRAME)
+                                || playbackTrace.hasStage(
+                                PlaybackTrace.Stage.AUDIO_PLAYABLE),
+                        Math.abs(getSpeed() - 1f) < 0.01f,
+                        false,
+                        reloadState.applyInProgress(),
+                        ijk.getRealtimeQueueSnapshot(),
+                        ijk.getAppliedInputBufferConfig(),
+                        now);
+        IjkRealtimeRecoveryPolicy.Decision decision =
+                ijkRealtimeRecoveryController.evaluate(input);
+        IjkRealtimeRecoveryController.Snapshot stateAtDecision =
+                ijkRealtimeRecoveryController.snapshot();
+        IjkBufferController.Decision reloadGate = null;
+        boolean actionStarted = false;
+        boolean restartStarted = false;
+        if (decision.requestsRecovery()) {
+            reloadGate = ijkBufferController.requestRealtimeRecovery(
+                    playbackAutoSession,
+                    context.session(),
+                    ijk.getAppliedInputBufferConfig(),
+                    now);
+            if (reloadGate.requestsReload()) {
+                boolean reloadReserved = ijkBufferController.beginApply(
+                        playbackAutoSession, reloadGate);
+                boolean recoveryReserved = reloadReserved
+                        && ijkRealtimeRecoveryController.beginAction(
+                        playbackAutoSession, decision, now);
+                actionStarted = reloadReserved && recoveryReserved;
+                if (actionStarted) {
+                    pendingIjkBufferDecision = reloadGate;
+                    pendingIjkRealtimeRecoveryDecision = decision;
+                    ijk.stageAutomaticInputBufferConfig(
+                            ijkBufferController.snapshot().stagedConfig());
+                    restartStarted = restartIjkRealtimeRecovery(
+                            ijk, reloadGate, decision);
+                    if (!restartStarted) {
+                        completeIjkBufferManagedReload(
+                                false, "start-failed", now, false);
+                    }
+                } else if (reloadReserved) {
+                    ijkBufferController.completeApply(
+                            playbackAutoSession, reloadGate, false, now);
+                }
+            }
+        }
+        publishIjkRealtimeRecoveryDecision(
+                decision,
+                protocol,
+                reloadGate,
+                stateAtDecision,
+                actionStarted,
+                restartStarted,
+                now);
+    }
+
+    private boolean isIjkRealtimePlaybackActive() {
+        if (player == null || !player.getPlayWhenReady()
+                || player.getPlaybackState() != Player.STATE_READY) {
+            return false;
+        }
+        try {
+            return player.isPlaying();
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
     private boolean restartIjkBuffer(
             IjkPlayerEngine ijk,
             IjkBufferController.Decision decision) {
@@ -1806,31 +1910,89 @@ public class PlayerManager implements ParseCallback {
         return true;
     }
 
+    private boolean restartIjkRealtimeRecovery(
+            IjkPlayerEngine ijk,
+            IjkBufferController.Decision reloadGate,
+            IjkRealtimeRecoveryPolicy.Decision recovery) {
+        if (spec == null || TextUtils.isEmpty(spec.getUrl())
+                || player == null) return false;
+        boolean wasPlayWhenReady = player.getPlayWhenReady();
+        float speed = getSpeed();
+        boolean repeat = isRepeatOne();
+        try {
+            prepareSeq++;
+            App.removeCallbacks(runnable);
+            initTrack = false;
+            playWhenReady = wasPlayWhenReady;
+            ijkBufferManagedReload = true;
+            PlaybackTrace.log("ijk-realtime", playbackTrace.current(),
+                    "action=rebuild-session trigger=%s bufferedMs=%d bytes=%d packets=%d play=%s reloadReason=%s",
+                    recovery.trigger().label(),
+                    recovery.queue().playableDurationMs(),
+                    recovery.queue().totalBytes(),
+                    recovery.queue().totalPackets(),
+                    wasPlayWhenReady,
+                    reloadGate.reason().label());
+            ijk.restart(spec.checkUa(), C.TIME_UNSET, wasPlayWhenReady);
+        } catch (Throwable error) {
+            PlaybackTrace.log("ijk-realtime", playbackTrace.current(),
+                    "action=rebuild-session result=failed errorType=%s",
+                    error.getClass().getSimpleName());
+            return false;
+        }
+        try {
+            if (speed != 1f) setSpeed(speed);
+            setRepeatOne(repeat);
+        } catch (Throwable error) {
+            PlaybackTrace.log("ijk-realtime", playbackTrace.current(),
+                    "action=restore-state result=partial errorType=%s",
+                    error.getClass().getSimpleName());
+        }
+        App.post(runnable, Constant.TIMEOUT_PLAY);
+        return true;
+    }
+
     private void completeIjkBufferManagedReload(
             boolean succeeded,
             String completionReason,
             long nowElapsedMs,
             boolean publishCompletion) {
         IjkBufferController.Decision pending = pendingIjkBufferDecision;
+        IjkRealtimeRecoveryPolicy.Decision recovery =
+                pendingIjkRealtimeRecoveryDecision;
         pendingIjkBufferDecision = null;
-        if (pending != null) {
+        pendingIjkRealtimeRecoveryDecision = null;
+        if (pending != null || recovery != null) {
             long now = Math.max(0, nowElapsedMs);
-            ijkBufferController.completeApply(
-                    playbackAutoSession, pending, succeeded, now);
+            if (pending != null) {
+                ijkBufferController.completeApply(
+                        playbackAutoSession, pending, succeeded, now);
+            }
+            if (recovery != null) {
+                ijkRealtimeRecoveryController.completeAction(
+                        playbackAutoSession, succeeded);
+            }
             if (engine instanceof IjkPlayerEngine ijk
                     && PlaybackPerformanceSetting.isAuto(PlayerSetting.IJK)
                     && playbackAutoSession.active()) {
                 ijk.stageAutomaticInputBufferConfig(
                         ijkBufferController.snapshot().stagedConfig());
             }
-            PlaybackTrace.log("ijk-buffer", playbackTrace.current(),
+            String domain = recovery == null ? "ijk-buffer" : "ijk-realtime";
+            PlaybackTrace.log(domain, playbackTrace.current(),
                     "action=reload-complete result=%s reason=%s target=%s",
                     succeeded ? "ready" : "failed",
                     PlaybackTelemetry.safeLabel(completionReason),
-                    pending.targetConfig().label());
+                    pending == null ? "unknown"
+                            : pending.targetConfig().label());
             if (publishCompletion) {
-                publishIjkBufferCompletion(
-                        pending, succeeded, completionReason, now);
+                if (recovery != null) {
+                    publishIjkRealtimeRecoveryCompletion(
+                            recovery, succeeded, completionReason, now);
+                } else if (pending != null) {
+                    publishIjkBufferCompletion(
+                            pending, succeeded, completionReason, now);
+                }
             }
         }
         ijkBufferManagedReload = false;
@@ -1954,6 +2116,200 @@ public class PlayerManager implements ParseCallback {
                         decision.policy().reason().label(),
                         inputs),
                 nowElapsedMs);
+    }
+
+    private void publishIjkRealtimeRecoveryDecision(
+            IjkRealtimeRecoveryPolicy.Decision decision,
+            PlaybackAutoContext.Protocol protocol,
+            IjkBufferController.Decision reloadGate,
+            IjkRealtimeRecoveryController.Snapshot stateAtDecision,
+            boolean actionStarted,
+            boolean restartStarted,
+            long nowElapsedMs) {
+        if (decision == null) return;
+        boolean suppressed = switch (decision.reason()) {
+            case NOT_AUTOMATIC_IJK,
+                 NOT_REALTIME_PROTOCOL,
+                 INACTIVE,
+                 STARTUP,
+                 NON_UNIT_SPEED,
+                 USER_SEEK,
+                 ACTION_PENDING,
+                 EVIDENCE_UNKNOWN,
+                 STALE_SESSION,
+                 STALE_SAMPLE -> true;
+            default -> false;
+        };
+        PlaybackTelemetry.DecisionOutcome outcome;
+        if (!decision.requestsRecovery()) {
+            outcome = suppressed
+                    ? PlaybackTelemetry.DecisionOutcome.SUPPRESSED
+                    : PlaybackTelemetry.DecisionOutcome.HELD;
+        } else if (reloadGate != null && !reloadGate.requestsReload()) {
+            outcome = PlaybackTelemetry.DecisionOutcome.HELD;
+        } else {
+            outcome = actionStarted && restartStarted
+                    ? PlaybackTelemetry.DecisionOutcome.REQUESTED
+                    : PlaybackTelemetry.DecisionOutcome.FAILED;
+        }
+        String suppression = reloadGate != null
+                && !reloadGate.requestsReload()
+                ? reloadGate.reason().label()
+                : suppressed ? decision.reason().label() : "none";
+        IjkRealtimeRecoveryPolicy.QueueSnapshot queue = decision.queue();
+        IjkBufferController.Snapshot reloadState =
+                ijkBufferController.snapshot();
+        IjkRealtimeRecoveryController.Snapshot recoveryState =
+                stateAtDecision == null
+                        ? ijkRealtimeRecoveryController.snapshot()
+                        : stateAtDecision;
+        List<PlaybackTelemetry.DecisionInput> inputs = new ArrayList<>();
+        inputs.add(PlaybackTelemetry.DecisionInput.text(
+                "protocol", protocol == null
+                        ? PlaybackAutoContext.Protocol.UNKNOWN.label()
+                        : protocol.label(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH));
+        inputs.add(PlaybackTelemetry.DecisionInput.text(
+                "trigger", decision.trigger().label(),
+                PlaybackAutoContext.ValueSource.ESTIMATOR,
+                PlaybackAutoContext.Confidence.MEDIUM));
+        inputs.add(queue.durationUsable()
+                ? PlaybackTelemetry.DecisionInput.number(
+                "buffered_ms", queue.playableDurationMs(),
+                PlaybackAutoContext.ValueSource.NATIVE_RUNTIME,
+                PlaybackAutoContext.Confidence.MEDIUM)
+                : PlaybackTelemetry.DecisionInput.unknown("buffered_ms"));
+        inputs.add(decision.durationGrowthMsPerSecond() == Long.MIN_VALUE
+                ? PlaybackTelemetry.DecisionInput.unknown(
+                "duration_growth_msps")
+                : PlaybackTelemetry.DecisionInput.number(
+                "duration_growth_msps",
+                decision.durationGrowthMsPerSecond(),
+                PlaybackAutoContext.ValueSource.ESTIMATOR,
+                PlaybackAutoContext.Confidence.MEDIUM));
+        inputs.add(PlaybackTelemetry.DecisionInput.number(
+                "cached_bytes", queue.totalBytes(),
+                PlaybackAutoContext.ValueSource.NATIVE_RUNTIME,
+                PlaybackAutoContext.Confidence.MEDIUM));
+        inputs.add(decision.bytesGrowthPerSecond() == Long.MIN_VALUE
+                ? PlaybackTelemetry.DecisionInput.unknown("bytes_growth_ps")
+                : PlaybackTelemetry.DecisionInput.number(
+                "bytes_growth_ps", decision.bytesGrowthPerSecond(),
+                PlaybackAutoContext.ValueSource.ESTIMATOR,
+                PlaybackAutoContext.Confidence.MEDIUM));
+        inputs.add(PlaybackTelemetry.DecisionInput.number(
+                "cached_packets", queue.totalPackets(),
+                PlaybackAutoContext.ValueSource.NATIVE_RUNTIME,
+                PlaybackAutoContext.Confidence.MEDIUM));
+        inputs.add(decision.packetsGrowthPerSecond() == Long.MIN_VALUE
+                ? PlaybackTelemetry.DecisionInput.unknown(
+                "packets_growth_ps")
+                : PlaybackTelemetry.DecisionInput.number(
+                "packets_growth_ps", decision.packetsGrowthPerSecond(),
+                PlaybackAutoContext.ValueSource.ESTIMATOR,
+                PlaybackAutoContext.Confidence.MEDIUM));
+        inputs.add(PlaybackTelemetry.DecisionInput.number(
+                "occupancy_permille",
+                queue.occupancyPermille(
+                        decision.thresholds().maxBufferBytes()),
+                PlaybackAutoContext.ValueSource.ESTIMATOR,
+                PlaybackAutoContext.Confidence.MEDIUM));
+        inputs.add(PlaybackTelemetry.DecisionInput.number(
+                "risk_samples", recoveryState.consecutiveRiskSamples(),
+                PlaybackAutoContext.ValueSource.ESTIMATOR,
+                PlaybackAutoContext.Confidence.MEDIUM));
+        inputs.add(PlaybackTelemetry.DecisionInput.number(
+                "reload_attempts", reloadState.reloadAttempts(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH));
+        inputs.add(PlaybackTelemetry.DecisionInput.number(
+                "cooldown_ms", reloadGate == null
+                        ? 0 : reloadGate.cooldownRemainingMs(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH));
+        playbackTelemetryCoordinator.publishDecision(
+                playbackAutoSession,
+                new PlaybackTelemetry.DecisionEvent(
+                        PlaybackTelemetry.DecisionDomain.IJK_REALTIME_RECOVERY,
+                        outcome,
+                        "monitoring",
+                        decision.action().label(),
+                        actionStarted && restartStarted
+                                ? "rebuild-pending" : "hold",
+                        decision.reason().label(),
+                        suppression,
+                        inputs),
+                nowElapsedMs);
+        if (decision.trigger() != IjkRealtimeRecoveryPolicy.Trigger.NONE
+                || reloadGate != null) {
+            PlaybackTrace.log("ijk-realtime", playbackTrace.current(),
+                    "action=%s reason=%s trigger=%s bufferedMs=%d bytes=%d packets=%d durationGrowth=%d byteGrowth=%d packetGrowth=%d samples=%d reloadGate=%s result=%s",
+                    decision.action().label(),
+                    decision.reason().label(),
+                    decision.trigger().label(),
+                    queue.playableDurationMs(),
+                    queue.totalBytes(),
+                    queue.totalPackets(),
+                    decision.durationGrowthMsPerSecond(),
+                    decision.bytesGrowthPerSecond(),
+                    decision.packetsGrowthPerSecond(),
+                    recoveryState.consecutiveRiskSamples(),
+                    reloadGate == null ? "none"
+                            : reloadGate.reason().label(),
+                    outcome.label());
+        }
+    }
+
+    private void publishIjkRealtimeRecoveryCompletion(
+            IjkRealtimeRecoveryPolicy.Decision decision,
+            boolean succeeded,
+            String completionReason,
+            long nowElapsedMs) {
+        IjkRealtimeRecoveryController.Snapshot recovery =
+                ijkRealtimeRecoveryController.snapshot();
+        IjkBufferController.Snapshot reload =
+                ijkBufferController.snapshot();
+        List<PlaybackTelemetry.DecisionInput> inputs = new ArrayList<>();
+        inputs.add(PlaybackTelemetry.DecisionInput.number(
+                "recovery_attempts", recovery.recoveryAttempts(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH));
+        inputs.add(PlaybackTelemetry.DecisionInput.number(
+                "successful_recoveries", recovery.successfulRecoveries(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH));
+        inputs.add(PlaybackTelemetry.DecisionInput.number(
+                "failed_recoveries", recovery.failedRecoveries(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH));
+        inputs.add(PlaybackTelemetry.DecisionInput.number(
+                "shared_reload_attempts", reload.reloadAttempts(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH));
+        playbackTelemetryCoordinator.publishDecision(
+                playbackAutoSession,
+                new PlaybackTelemetry.DecisionEvent(
+                        PlaybackTelemetry.DecisionDomain.IJK_REALTIME_RECOVERY,
+                        succeeded ? PlaybackTelemetry.DecisionOutcome.APPLIED
+                                : PlaybackTelemetry.DecisionOutcome.FAILED,
+                        "rebuild-pending",
+                        "ready",
+                        succeeded ? "ready" : "failed",
+                        succeeded ? "rebuild-ready" : "rebuild-failed",
+                        succeeded ? "none"
+                                : PlaybackTelemetry.safeLabel(
+                                completionReason),
+                        inputs),
+                nowElapsedMs);
+        PlaybackTrace.log("ijk-realtime", playbackTrace.current(),
+                "action=rebuild-complete result=%s trigger=%s attempts=%d successes=%d failures=%d reason=%s",
+                succeeded ? "ready" : "failed",
+                decision.trigger().label(),
+                recovery.recoveryAttempts(),
+                recovery.successfulRecoveries(),
+                recovery.failedRecoveries(),
+                PlaybackTelemetry.safeLabel(completionReason));
     }
 
     private void onMpvResourceMemoryUpdate(PlaybackMemoryCoordinator.Update update) {
@@ -4078,8 +4434,10 @@ public class PlayerManager implements ParseCallback {
         mpvPreloadController.beginSession(playbackAutoSession);
         mpvHlsManagedReload = false;
         ijkBufferController.beginSession(playbackAutoSession, now);
+        ijkRealtimeRecoveryController.beginSession(playbackAutoSession);
         ijkBufferManagedReload = false;
         pendingIjkBufferDecision = null;
+        pendingIjkRealtimeRecoveryDecision = null;
         playbackTrackSequence = 1;
         playbackMediaFactsCoordinator.beginSession(playbackAutoSession);
         PlaybackMemoryMonitor.process().beginSession(playbackAutoSession);
@@ -4164,6 +4522,7 @@ public class PlayerManager implements ParseCallback {
         evaluateExoRtspLiveLag(observation, now);
         if (phaseOverride != PlaybackAutoContext.PlaybackPhase.ERROR) {
             evaluateIjkBuffer(IjkBufferController.Trigger.RUNTIME, now);
+            evaluateIjkRealtimeRecovery(now);
         }
         if (isMpv()) {
             if (evaluateMpvHlsVariant) {
@@ -4839,8 +5198,10 @@ public class PlayerManager implements ParseCallback {
         mpvResourcePressureController.endSession(playbackAutoSession);
         mpvPreloadController.endSession(playbackAutoSession);
         ijkBufferController.endSession(playbackAutoSession);
+        ijkRealtimeRecoveryController.endSession(playbackAutoSession);
         ijkBufferManagedReload = false;
         pendingIjkBufferDecision = null;
+        pendingIjkRealtimeRecoveryDecision = null;
         mpvHlsManagedReload = false;
         mpvAutoController.endSession(playbackAutoSession);
         PlaybackSystemConditionMonitor.process().endSession(playbackAutoSession);
@@ -4910,8 +5271,11 @@ public class PlayerManager implements ParseCallback {
         if ((mpvHlsManagedReload || ijkBufferManagedReload)
                 && state == Player.STATE_BUFFERING
                 && !playbackBufferingTracker.isBuffering()) {
-            PlaybackTrace.log(mpvHlsManagedReload
-                            ? "mpv-hls-variant" : "ijk-buffer",
+            String domain = mpvHlsManagedReload
+                    ? "mpv-hls-variant"
+                    : pendingIjkRealtimeRecoveryDecision == null
+                    ? "ijk-buffer" : "ijk-realtime";
+            PlaybackTrace.log(domain,
                     playbackTrace.current(),
                     "action=managed-reload-buffering result=excluded-from-rebuffer");
             return;
@@ -5178,6 +5542,8 @@ public class PlayerManager implements ParseCallback {
         @Override
         public void onPositionDiscontinuity(@NonNull Player.PositionInfo oldPosition, @NonNull Player.PositionInfo newPosition, int reason) {
             rtspLiveLagController.onPositionDiscontinuity(playbackAutoSession);
+            ijkRealtimeRecoveryController.onPositionDiscontinuity(
+                    playbackAutoSession);
             resetNetworkProtectionSession("discontinuity-" + reason);
             scheduleNetworkProtection(ExoNetworkGuardController.OBSERVE_INTERVAL_MS);
             if (isMpv()) {
@@ -5242,6 +5608,8 @@ public class PlayerManager implements ParseCallback {
                     false, "playback-error",
                     SystemClock.elapsedRealtime(), true);
             rtspLiveLagController.onPlaybackError(playbackAutoSession);
+            ijkRealtimeRecoveryController.onPlaybackError(
+                    playbackAutoSession);
             // Publish the failing runtime snapshot without letting the periodic
             // HLS timeout path start a rollback before this concrete error is
             // classified. A downgrade error gets exactly one rollback attempt;
