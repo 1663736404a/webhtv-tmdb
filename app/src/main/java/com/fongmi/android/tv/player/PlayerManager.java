@@ -93,6 +93,7 @@ import com.fongmi.android.tv.player.mpv.MpvResourcePressurePolicy;
 import com.fongmi.android.tv.setting.DanmakuSetting;
 import com.fongmi.android.tv.setting.ExoPerformanceSetting;
 import com.fongmi.android.tv.setting.MpvPerformanceSetting;
+import com.fongmi.android.tv.setting.PlaybackExperimentSetting;
 import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
 import com.fongmi.android.tv.setting.PlayerSetting;
 import com.fongmi.android.tv.utils.LocalProxyDebug;
@@ -161,6 +162,8 @@ public class PlayerManager implements ParseCallback {
     private final PlaybackMemoryCoordinator.Registration mpvResourceMemoryRegistration;
     private final PlaybackMemoryCoordinator.Registration ijkBufferMemoryRegistration;
     private final PlaybackSystemConditionCoordinator.Registration mpvResourceSystemRegistration;
+    private final PlaybackExperimentCoordinator playbackExperimentCoordinator;
+    private final PlaybackExperimentCoordinator.Registration playbackExperimentRegistration;
     private final IjkBufferController ijkBufferController;
     private final IjkDecodePressureController ijkDecodePressureController;
     private final IjkRealtimeRecoveryController ijkRealtimeRecoveryController;
@@ -239,8 +242,16 @@ public class PlayerManager implements ParseCallback {
     private ExoNetworkGuardController.State networkProtectionState = ExoNetworkGuardController.State.NORMAL;
     private ExoNetworkGuardController.ProtectionTier networkProtectionTier = ExoNetworkGuardController.ProtectionTier.NONE;
     private String networkProtectionReason = "waiting";
+    private PlaybackExperimentCoordinator.Token networkProtectionExperimentToken;
 
     public PlayerManager(Callback callback) {
+        this.callback = callback;
+        PlaybackExperimentSetting.ensureInitialized();
+        this.playbackExperimentCoordinator =
+                PlaybackExperimentCoordinator.process();
+        this.playbackExperimentRegistration =
+                playbackExperimentCoordinator.addListener(update ->
+                        App.post(() -> onPlaybackExperimentPolicyChanged(update)));
         this.runnable = this::onPlaybackTimeout;
         this.liveDanmakuMetricsRunnable = () -> logLiveDanmakuMetrics("periodic", true);
         this.networkProtectionRunnable = this::evaluateNetworkProtection;
@@ -288,7 +299,6 @@ public class PlayerManager implements ParseCallback {
         this.playerType = PlayerSetting.getPlayer();
         this.engine = buildEngine(playerType, PlayerEngine.HARD);
         this.player = engine.getPlayer();
-        this.callback = callback;
     }
 
     public void release() {
@@ -301,6 +311,7 @@ public class PlayerManager implements ParseCallback {
         mpvResourceMemoryRegistration.close();
         ijkBufferMemoryRegistration.close();
         mpvResourceSystemRegistration.close();
+        playbackExperimentRegistration.close();
         stopNativeAudioSession();
         clearDanmaku("release");
         releaseLiveDanmakuSession();
@@ -330,6 +341,76 @@ public class PlayerManager implements ParseCallback {
         playbackBufferingTracker.reset();
         playbackTrace.clear();
         lastLoggedRouteTraceId = PlaybackTrace.NONE;
+    }
+
+    private boolean experimentAllowed(PlaybackExperimentPolicy.Action action) {
+        return PlaybackExperimentSetting.isAllowed(action);
+    }
+
+    private void onPlaybackExperimentPolicyChanged(
+            PlaybackExperimentCoordinator.Update update) {
+        if (update == null) return;
+        PlaybackExperimentPolicy.State policy =
+                PlaybackExperimentSetting.getState();
+        boolean exoEnabled = policy.domainEnabled(
+                PlaybackExperimentPolicy.Domain.EXO);
+        boolean mpvEnabled = policy.domainEnabled(
+                PlaybackExperimentPolicy.Domain.MPV);
+        boolean ijkEnabled = policy.domainEnabled(
+                PlaybackExperimentPolicy.Domain.IJK);
+
+        if (!exoEnabled) {
+            if (isExo()) resetNetworkProtectionSession("experiment-disabled");
+            rtspLiveLagController.reset();
+            if (engine instanceof ExoPlayerEngine exo) {
+                exo.stopAutomaticPreload("experiment-disabled");
+            }
+        } else if (isExo()) {
+            scheduleNetworkProtection(0);
+        }
+
+        resetMpvOutputEvaluationState();
+        if (!mpvEnabled) {
+            mpvPreloadController.disrupt(playbackAutoSession);
+            if (engine instanceof MpvPlayerEngine mpv) {
+                mpv.stopAutomaticHlsPreload();
+            }
+        } else if (isMpv()) {
+            scheduleMpvAutoOutputEvaluation();
+        }
+
+        if (!ijkEnabled) {
+            if (hasPendingIjkExperimentalReload()) {
+                completeIjkBufferManagedReload(
+                        false,
+                        update.change()
+                                == PlaybackExperimentCoordinator.Change.ROLLBACK
+                                ? "experiment-rollback"
+                                : "experiment-disabled",
+                        SystemClock.elapsedRealtime(),
+                        false);
+            }
+            ijkRuntimeProfileController.cancel(playbackAutoSession);
+        }
+
+        PlaybackTrace.log(
+                "playback-experiment",
+                playbackTrace.current(),
+                "generation=%d change=%s strategy=%s exo=%s mpv=%s ijk=%s action=cancel-experimental-work",
+                update.generation(),
+                update.change(),
+                policy.strategyId(),
+                exoEnabled,
+                mpvEnabled,
+                ijkEnabled);
+    }
+
+    private boolean hasPendingIjkExperimentalReload() {
+        if (pendingIjkRealtimeRecoveryDecision != null
+                || pendingIjkDecodePressureDecision != null) return true;
+        return pendingIjkBufferDecision != null
+                && pendingIjkBufferDecision.reason()
+                != IjkBufferController.Reason.SAFETY_RELOAD;
     }
 
     private void onPlaybackTimeout() {
@@ -815,12 +896,15 @@ public class PlayerManager implements ParseCallback {
         networkProtectionSpeed = 1f;
         networkProtectionSupportedSpeed = 1f;
         networkProtectionMediaBitrate = 0;
+        networkProtectionExperimentToken = null;
         applyEffectiveSpeed(userPlaybackSpeed, reason);
     }
 
     private ExoNetworkGuardEligibility.Decision getNetworkProtectionEligibility() {
         return ExoNetworkGuardEligibility.resolve(new ExoNetworkGuardEligibility.Request(
-                ExoPerformanceSetting.isNetworkProtectionEnabled(),
+                ExoPerformanceSetting.isNetworkProtectionEnabled()
+                        && experimentAllowed(
+                        PlaybackExperimentPolicy.Action.EXO_NETWORK_SPEED),
                 player != null && isExo(),
                 isVod(),
                 Math.abs(userPlaybackSpeed - 1f) < 0.001f,
@@ -860,11 +944,20 @@ public class PlayerManager implements ParseCallback {
             return;
         }
         if (player.getPlaybackState() != Player.STATE_READY || !player.isPlaying()) return;
+        networkProtectionExperimentToken = playbackExperimentCoordinator.capture(
+                PlaybackExperimentPolicy.Action.EXO_NETWORK_SPEED);
         App.post(networkProtectionRunnable, delayMs);
     }
 
     private void evaluateNetworkProtection() {
         if (player == null) return;
+        if (!playbackExperimentCoordinator.isCurrent(
+                networkProtectionExperimentToken)
+                || !experimentAllowed(
+                PlaybackExperimentPolicy.Action.EXO_NETWORK_SPEED)) {
+            resetNetworkProtectionSession("experiment-disabled");
+            return;
+        }
         ExoNetworkGuardEligibility.Decision eligibility = getNetworkProtectionEligibility();
         boolean eligible = eligibility.eligible();
         long nowMs = SystemClock.elapsedRealtime();
@@ -1726,20 +1819,31 @@ public class PlayerManager implements ParseCallback {
         boolean applySucceeded = decision.action()
                 != IjkBufferController.Action.RELOAD;
         if (decision.requestsReload()) {
-            applyStarted = ijkBufferController.beginApply(
-                    playbackAutoSession, decision);
-            if (applyStarted) {
-                ijk.stageAutomaticInputBufferConfig(
-                        ijkBufferController.snapshot().stagedConfig());
-                pendingIjkBufferDecision = decision;
-                boolean restartStarted = restartIjkBuffer(ijk, decision);
-                applySucceeded = restartStarted
-                        && decision.targetConfig().equals(
-                        ijk.getAppliedInputBufferConfig());
-                if (!applySucceeded) {
-                    completeIjkBufferManagedReload(
-                            false, "start-failed", now, false);
-                    if (!restartStarted) ijkBufferManagedReload = false;
+            boolean safetyReload = decision.reason()
+                    == IjkBufferController.Reason.SAFETY_RELOAD;
+            PlaybackExperimentPolicy.Action reloadAction = safetyReload
+                    ? PlaybackExperimentPolicy.Action.IJK_BUFFER_SAFETY_RELOAD
+                    : PlaybackExperimentPolicy.Action.IJK_BUFFER_RELOAD;
+            if (!experimentAllowed(reloadAction)) {
+                decision = ijkBufferController.deferExperimentalReload(
+                        playbackAutoSession, decision);
+                applySucceeded = false;
+            } else {
+                applyStarted = ijkBufferController.beginApply(
+                        playbackAutoSession, decision);
+                if (applyStarted) {
+                    ijk.stageAutomaticInputBufferConfig(
+                            ijkBufferController.snapshot().stagedConfig());
+                    pendingIjkBufferDecision = decision;
+                    boolean restartStarted = restartIjkBuffer(ijk, decision);
+                    applySucceeded = restartStarted
+                            && decision.targetConfig().equals(
+                            ijk.getAppliedInputBufferConfig());
+                    if (!applySucceeded) {
+                        completeIjkBufferManagedReload(
+                                false, "start-failed", now, false);
+                        if (!restartStarted) ijkBufferManagedReload = false;
+                    }
                 }
             }
         }
@@ -1827,7 +1931,8 @@ public class PlayerManager implements ParseCallback {
         PlaybackAutoContext.Protocol protocol = protocolUsable
                 ? protocolFact.value() : PlaybackAutoContext.Protocol.UNKNOWN;
         boolean automatic = PlaybackPerformanceSetting.isAuto(
-                PlayerSetting.IJK);
+                PlayerSetting.IJK) && experimentAllowed(
+                PlaybackExperimentPolicy.Action.IJK_REALTIME_REBUILD);
         boolean realtime = protocol == PlaybackAutoContext.Protocol.RTSP
                 || protocol == PlaybackAutoContext.Protocol.RTMP;
         if (!automatic || !protocolUsable || !realtime) {
@@ -1918,7 +2023,9 @@ public class PlayerManager implements ParseCallback {
                 && decodeFact.isUsable(now);
         IjkDecodePressurePolicy.Input policyInput =
                 new IjkDecodePressurePolicy.Input(
-                        PlaybackPerformanceSetting.isAuto(PlayerSetting.IJK),
+                        PlaybackPerformanceSetting.isAuto(PlayerSetting.IJK)
+                                && experimentAllowed(
+                                PlaybackExperimentPolicy.Action.IJK_DECODE_REBUILD),
                         isIjk(),
                         isIjkPlaybackActive(),
                         playbackTrace.hasStage(PlaybackTrace.Stage.FIRST_FRAME)
@@ -2882,6 +2989,8 @@ public class PlayerManager implements ParseCallback {
         if (engineAction == PlayerEngine.ErrorAction.RECOVERED
                 || error == null
                 || failure == null
+                || !experimentAllowed(
+                PlaybackExperimentPolicy.Action.IJK_RUNTIME_KERNEL_FALLBACK)
                 || !playbackAutoSession.active()) return false;
         long now = SystemClock.elapsedRealtime();
         IjkPlayerEngine.ErrorSnapshot ijkError =
@@ -3337,8 +3446,24 @@ public class PlayerManager implements ParseCallback {
         long targetBack = backDecision != null && backDecision.requestsApply()
                 ? backDecision.targetBytes() : currentBack;
 
-        boolean forwardRequested = forwardDecision != null && forwardDecision.requestsApply();
-        boolean backRequested = backDecision != null && backDecision.requestsApply();
+        boolean cacheExpansionAllowed = experimentAllowed(
+                PlaybackExperimentPolicy.Action.MPV_CACHE_EXPANSION);
+        boolean forwardPolicyRequested = forwardDecision != null
+                && forwardDecision.requestsApply();
+        boolean backPolicyRequested = backDecision != null
+                && backDecision.requestsApply();
+        boolean forwardRequested = forwardPolicyRequested
+                && (targetForward <= currentForward || cacheExpansionAllowed);
+        boolean backRequested = backPolicyRequested
+                && (targetBack <= currentBack || cacheExpansionAllowed);
+        boolean expansionSuppressed = forwardPolicyRequested && !forwardRequested
+                || backPolicyRequested && !backRequested;
+        if (forwardPolicyRequested && !forwardRequested) {
+            targetForward = currentForward;
+        }
+        if (backPolicyRequested && !backRequested) {
+            targetBack = currentBack;
+        }
         boolean applyRequested = forwardRequested || backRequested;
         boolean forwardStarted = !forwardRequested;
         boolean backStarted = !backRequested;
@@ -3346,7 +3471,8 @@ public class PlayerManager implements ParseCallback {
         boolean adopted = false;
         boolean accepted = false;
         boolean staged = false;
-        String applyResult = "not-requested";
+        String applyResult = expansionSuppressed
+                ? "experiment-disabled" : "not-requested";
         MpvCacheTargetCoordinator.Decision combinedDecision = null;
         if (applyRequested) {
             combinedDecision = mpvCacheTargetCoordinator.evaluate(
@@ -3408,6 +3534,10 @@ public class PlayerManager implements ParseCallback {
         MpvBackCacheController.Snapshot backAfter = mpvBackCacheController.snapshot();
         PlayerCacheState cache = mpv.getAutoCacheSnapshot();
         boolean commitStarted = coordinatorStarted || adopted;
+        String forwardApplyResult = forwardPolicyRequested && !forwardRequested
+                ? "experiment-disabled" : applyResult;
+        String backApplyResult = backPolicyRequested && !backRequested
+                ? "experiment-disabled" : applyResult;
         if (forwardDecision != null) {
             publishMpvForwardCacheDecision(
                     forwardTrigger,
@@ -3420,7 +3550,7 @@ public class PlayerManager implements ParseCallback {
                     forwardRequested && forwardStarted && commitStarted,
                     accepted,
                     staged,
-                    applyResult);
+                    forwardApplyResult);
         }
         if (backDecision != null) {
             publishMpvBackCacheDecision(
@@ -3434,9 +3564,9 @@ public class PlayerManager implements ParseCallback {
                     backRequested && backStarted && commitStarted,
                     accepted,
                     staged,
-                    applyResult);
+                    backApplyResult);
         }
-        if (applyRequested) {
+        if (applyRequested || expansionSuppressed) {
             PlaybackTrace.log("mpv-cache-target", playbackTrace.current(),
                     "forward=%d back=%d totalBudget=%d forwardChanged=%s backChanged=%s coordinator=%s result=%s",
                     targetForward, targetBack, backAssessment.totalBudgetBytes(),
@@ -3453,6 +3583,8 @@ public class PlayerManager implements ParseCallback {
             boolean automatic,
             boolean performancePriority,
             long now) {
+        boolean experimentalAutomatic = automatic && experimentAllowed(
+                PlaybackExperimentPolicy.Action.MPV_AUTO_PRELOAD);
         MpvPlayer.AutoHlsRuntimeSnapshot hls = mpv.getAutoHlsRuntimeSnapshot();
         MpvPlayer.AutoHlsPreloadRuntimeSnapshot proxy =
                 mpv.getAutoHlsPreloadRuntimeSnapshot();
@@ -3486,7 +3618,7 @@ public class PlayerManager implements ParseCallback {
         boolean buffering = player != null
                 && player.getPlaybackState() == Player.STATE_BUFFERING;
         MpvPreloadPolicy.Request request = new MpvPreloadPolicy.Request(
-                automatic,
+                experimentalAutomatic,
                 isMpv(),
                 performancePriority,
                 proxy.preloadConfigured(),
@@ -3530,10 +3662,11 @@ public class PlayerManager implements ParseCallback {
                 automatic, performancePriority);
         boolean gateChanged = mpv.updateAutomaticPreloadControl(
                 automaticPreloadManaged,
-                resourceDecision.preloadAllowed(),
-                decision.preloadAllowed());
+                experimentalAutomatic && resourceDecision.preloadAllowed(),
+                experimentalAutomatic && decision.preloadAllowed());
         boolean scheduled = false;
-        if (automaticPreloadManaged && decision.preloadAllowed()
+        if (experimentalAutomatic && automaticPreloadManaged
+                && decision.preloadAllowed()
                 && positionFact.isUsable(now)) {
             mpv.requestAutomaticHlsPreload(Math.max(0, positionFact.value()));
             scheduled = true;
@@ -3823,6 +3956,8 @@ public class PlayerManager implements ParseCallback {
         if (!assessment.active()
                 && assessment.inactiveReason() == MpvForwardCachePolicy.Reason.CONFIG_PRIORITY) {
             outcome = PlaybackTelemetry.DecisionOutcome.SUPPRESSED;
+        } else if ("experiment-disabled".equals(applyResult)) {
+            outcome = PlaybackTelemetry.DecisionOutcome.SUPPRESSED;
         } else if (!decision.requestsApply()) {
             outcome = PlaybackTelemetry.DecisionOutcome.OBSERVED;
         } else if (!started || !accepted) {
@@ -3835,7 +3970,9 @@ public class PlayerManager implements ParseCallback {
         String oldValue = forwardTargetLabel(decision.oldNativeTargetBytes());
         String targetValue = forwardTargetLabel(decision.targetBytes());
         String resultValue = forwardTargetLabel(after.nativeTargetBytes());
-        String suppression = !decision.requestsApply()
+        String suppression = "experiment-disabled".equals(applyResult)
+                ? "experiment-disabled"
+                : !decision.requestsApply()
                 ? decision.reason().label()
                 : !started
                 ? "action-rejected"
@@ -3924,6 +4061,8 @@ public class PlayerManager implements ParseCallback {
         if (!assessment.active()
                 && assessment.reason() == MpvBackCachePolicy.Reason.CONFIG_PRIORITY) {
             outcome = PlaybackTelemetry.DecisionOutcome.SUPPRESSED;
+        } else if ("experiment-disabled".equals(applyResult)) {
+            outcome = PlaybackTelemetry.DecisionOutcome.SUPPRESSED;
         } else if (!decision.requestsApply()) {
             outcome = PlaybackTelemetry.DecisionOutcome.OBSERVED;
         } else if (!started || !accepted) {
@@ -3936,7 +4075,9 @@ public class PlayerManager implements ParseCallback {
         String oldValue = backTargetLabel(decision.oldNativeTargetBytes());
         String targetValue = backTargetLabel(decision.targetBytes());
         String resultValue = backTargetLabel(after.nativeTargetBytes());
-        String suppression = !decision.requestsApply()
+        String suppression = "experiment-disabled".equals(applyResult)
+                ? "experiment-disabled"
+                : !decision.requestsApply()
                 ? decision.reason().label()
                 : !started
                 ? "action-rejected"
@@ -4178,7 +4319,10 @@ public class PlayerManager implements ParseCallback {
         resetMpvOutputEvaluationState();
         mpvExplicitSubtitlePreference = hasRequestedSubtitle(Track.find(getKey()));
         if (!(engine instanceof MpvPlayerEngine mpv)) return;
-        if (MpvPerformanceSetting.getOutputMode() == MpvPerformanceSetting.OUTPUT_AUTO && mpv.isSurfaceDirect()) {
+        if (MpvPerformanceSetting.getOutputMode() == MpvPerformanceSetting.OUTPUT_AUTO
+                && experimentAllowed(
+                PlaybackExperimentPolicy.Action.MPV_AUTO_OUTPUT_REBUILD)
+                && mpv.isSurfaceDirect()) {
             if (SpiderDebug.isEnabled()) SpiderDebug.log("mpv-output", "preserve direct output for new item reason=auto-sticky");
             return;
         }
@@ -4203,12 +4347,25 @@ public class PlayerManager implements ParseCallback {
     }
 
     private void scheduleMpvAutoOutputEvaluation() {
-        if (!isMpv() || MpvPerformanceSetting.getOutputMode() != MpvPerformanceSetting.OUTPUT_AUTO) return;
+        if (!isMpv()
+                || MpvPerformanceSetting.getOutputMode()
+                != MpvPerformanceSetting.OUTPUT_AUTO
+                || !experimentAllowed(
+                PlaybackExperimentPolicy.Action.MPV_AUTO_OUTPUT_REBUILD)) return;
         if (mpvAutoOutputEvaluated || mpvAutoOutputEvaluationScheduled) return;
         mpvAutoOutputEvaluationScheduled = true;
         int seq = ++mpvOutputEvaluationSeq;
+        PlaybackExperimentCoordinator.Token experimentToken =
+                playbackExperimentCoordinator.capture(
+                        PlaybackExperimentPolicy.Action.MPV_AUTO_OUTPUT_REBUILD);
         App.post(() -> {
             if (seq != mpvOutputEvaluationSeq) return;
+            if (!playbackExperimentCoordinator.isCurrent(experimentToken)
+                    || !experimentAllowed(
+                    PlaybackExperimentPolicy.Action.MPV_AUTO_OUTPUT_REBUILD)) {
+                mpvAutoOutputEvaluationScheduled = false;
+                return;
+            }
             mpvAutoOutputEvaluationScheduled = false;
             if (mpvHlsManagedReload) {
                 scheduleMpvAutoOutputEvaluation();
@@ -4226,6 +4383,10 @@ public class PlayerManager implements ParseCallback {
 
     private boolean evaluateMpvAutoOutput() {
         if (!isMpv() || mpvAutoOutputEvaluated || engine == null) return true;
+        if (!experimentAllowed(
+                PlaybackExperimentPolicy.Action.MPV_AUTO_OUTPUT_REBUILD)) {
+            return true;
+        }
         if (mpvHlsManagedReload) return false;
         Tracks tracks = engine.getCurrentTracks();
         boolean tracksReady = tracks != null && !tracks.isEmpty();
@@ -4310,7 +4471,12 @@ public class PlayerManager implements ParseCallback {
 
     private void onMpvVideoSizeProbed(Integer width, Integer height) {
         if (width == null || height == null || width <= 0 || height <= 0) return;
-        if (!isMpv() || MpvPerformanceSetting.getOutputMode() != MpvPerformanceSetting.OUTPUT_AUTO || mpvAutoOutputEvaluated) return;
+        if (!isMpv()
+                || MpvPerformanceSetting.getOutputMode()
+                != MpvPerformanceSetting.OUTPUT_AUTO
+                || !experimentAllowed(
+                PlaybackExperimentPolicy.Action.MPV_AUTO_OUTPUT_REBUILD)
+                || mpvAutoOutputEvaluated) return;
         if (SpiderDebug.isEnabled()) SpiderDebug.log("mpv-output", "auto size probe size=%dx%d attempts=%d", width, height, mpvAutoOutputProbeAttempts);
         mpvAutoOutputEvaluationScheduled = false;
         mpvOutputEvaluationSeq++;
@@ -5496,7 +5662,9 @@ public class PlayerManager implements ParseCallback {
                 && player.getPlaybackState() == Player.STATE_BUFFERING;
         MpvHlsVariantController.RuntimeObservation observation =
                 new MpvHlsVariantController.RuntimeObservation(
-                        PlaybackPerformanceSetting.isAuto(PlayerSetting.MPV),
+                        PlaybackPerformanceSetting.isAuto(PlayerSetting.MPV)
+                                && experimentAllowed(
+                                PlaybackExperimentPolicy.Action.MPV_HLS_RUNTIME_RELOAD),
                         isMpv(),
                         MpvPerformanceSetting.isPerformancePriority(),
                         protocolUsable ? protocolFact.value()
@@ -5854,7 +6022,9 @@ public class PlayerManager implements ParseCallback {
             PlaybackTelemetry.RuntimeObservation observation,
             long nowMs) {
         if (!playbackAutoSession.active()) return;
-        boolean automatic = PlaybackPerformanceSetting.isAuto(PlayerSetting.EXO);
+        boolean automatic = PlaybackPerformanceSetting.isAuto(PlayerSetting.EXO)
+                && experimentAllowed(
+                PlaybackExperimentPolicy.Action.EXO_RTSP_RECOVERY);
         boolean exo = isExo() && engine instanceof ExoPlayerEngine;
         PlaybackResourceClassifier.Classification classification =
                 currentResourceClassification();
@@ -6692,6 +6862,8 @@ public class PlayerManager implements ParseCallback {
         if (!(engine instanceof ExoPlayerEngine exo)
                 || player == null
                 || spec == null
+                || !experimentAllowed(
+                PlaybackExperimentPolicy.Action.EXO_DECODER_RUNTIME_REBUILD)
                 || !exo.prepareDecoderRuntimeFallback()) {
             return false;
         }

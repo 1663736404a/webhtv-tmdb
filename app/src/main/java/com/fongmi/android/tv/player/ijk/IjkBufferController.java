@@ -239,6 +239,30 @@ public final class IjkBufferController {
         return true;
     }
 
+    public synchronized Decision deferExperimentalReload(
+            PlaybackAutoContext.SessionToken session,
+            Decision decision) {
+        if (!isCurrent(session)
+                || decision == null
+                || !decision.requestsReload()
+                || applyInProgress) {
+            IjkBufferPolicy.Config current = decision == null
+                    ? stagedConfig : decision.appliedConfig();
+            return Decision.hold(current, stagedConfig,
+                    decision == null ? currentPolicy(current) : decision.policy(),
+                    Reason.EXPERIMENT_DISABLED, 0, false);
+        }
+        stagedConfig = decision.targetConfig();
+        return new Decision(
+                Action.STAGE,
+                decision.appliedConfig(),
+                decision.targetConfig(),
+                decision.policy(),
+                Reason.EXPERIMENT_DISABLED,
+                decision.cooldownRemainingMs(),
+                decision.newRebuffer());
+    }
+
     public synchronized void completeApply(
             PlaybackAutoContext.SessionToken session,
             Decision decision,
@@ -344,6 +368,7 @@ public final class IjkBufferController {
         REBUFFER_RELOAD("rebuffer-reload"),
         REALTIME_RECOVERY_RELOAD("realtime-recovery-reload"),
         DECODE_PRESSURE_RELOAD("decode-pressure-reload"),
+        EXPERIMENT_DISABLED("experiment-disabled"),
         STARTUP_EXPANSION_DEFERRED("startup-expansion-deferred"),
         HEALTHY_EXPANSION_DEFERRED("healthy-expansion-deferred"),
         NONCRITICAL_CHANGE_DEFERRED("noncritical-change-deferred"),

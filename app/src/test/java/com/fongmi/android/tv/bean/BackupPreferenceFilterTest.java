@@ -46,4 +46,19 @@ public class BackupPreferenceFilterTest {
         assertEquals(3, backup.getWebHomeExtensionPreferenceCount());
         assertEquals(2, backup.getWebHomeExtensionSourceCount());
     }
+
+    @Test
+    public void playbackExperimentStateRemainsDeviceLocal() {
+        SyncOptions everything = new SyncOptions()
+                .config(true)
+                .spider(true)
+                .webHome(true)
+                .settings(true);
+
+        assertFalse(Backup.include("playback_experiment_schema", everything));
+        assertFalse(Backup.include("playback_experiment_enabled", everything));
+        assertFalse(Backup.include("playback_experiment_exo", everything));
+        assertFalse(Backup.include("playback_experiment_mpv", everything));
+        assertFalse(Backup.include("playback_experiment_ijk", everything));
+    }
 }

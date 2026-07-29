@@ -534,6 +534,10 @@ public class ExoPlayerEngine implements PlayerEngine {
                 && decoderRuntimeSession.prepareRuntimeFallback();
     }
 
+    public void stopAutomaticPreload(String reason) {
+        preCache.stopAutomatic(reason);
+    }
+
     /** Discards the stale RTSP queue and seeks only when Media3 exposes a live default edge. */
     public boolean recoverRtspLiveEdge() {
         if (player == null

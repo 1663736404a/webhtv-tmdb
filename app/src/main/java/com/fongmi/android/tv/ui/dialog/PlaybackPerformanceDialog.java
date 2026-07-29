@@ -25,9 +25,12 @@ import androidx.fragment.app.FragmentActivity;
 import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.App;
 import com.fongmi.android.tv.event.ConfigEvent;
+import com.fongmi.android.tv.player.PlaybackExperimentCoordinator;
+import com.fongmi.android.tv.player.PlaybackExperimentPolicy;
 import com.fongmi.android.tv.setting.PlaybackPerformanceCatalog;
 import com.fongmi.android.tv.setting.PlaybackPerformanceOption;
 import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
+import com.fongmi.android.tv.setting.PlaybackExperimentSetting;
 import com.fongmi.android.tv.setting.MpvPerformanceSetting;
 import com.fongmi.android.tv.setting.IjkPerformanceSetting;
 import com.fongmi.android.tv.setting.ExoPerformanceSetting;
@@ -175,6 +178,10 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
         root.addView(scroll, scrollParams);
 
         addHelpIntro(content, "当前播放器内核：" + playerName() + "。不知道怎么选时保持“自动”（默认）；每项说明都会明确告诉你什么情况更流畅、异常时改哪一档，以及对应代价。EXO会按当前协议、分片和链路动态锁定起播/重缓冲门槛，历史按网络和资源隔离、自动过期，并协调预载；MPV会在符合条件的电视4K场景自动使用低开销电视直出，并让HLS按可信吞吐保守起步、持续风险时逐档重载降码率；IJK自动档采用稳定基线。多数底层参数需要重新进入播放或重建播放器后生效。");
+        addHelpSection(content, getString(R.string.player_performance_experiment_section));
+        addHelpItem(content,
+                getString(R.string.player_performance_experiment_strategy),
+                getString(R.string.player_performance_experiment_help));
         String section = "";
         for (PlaybackPerformanceOption option : options()) {
             if (!section.equals(option.section())) {
@@ -405,6 +412,7 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
     private void refreshRows() {
         if (list == null) return;
         list.removeAllViews();
+        addExperimentRows();
         String section = "";
         for (PlaybackPerformanceOption option : options()) {
             if (!section.equals(option.section())) {
@@ -413,6 +421,99 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
             }
             addRow(option.title(), optionValue(option.id()), optionAction(option.id()));
         }
+    }
+
+    private void addExperimentRows() {
+        PlaybackExperimentPolicy.State state =
+                PlaybackExperimentSetting.getState();
+        addHeader(getString(R.string.player_performance_experiment_section));
+        addRow(
+                getString(R.string.player_performance_experiment_strategy),
+                getString(state.enabled()
+                        ? R.string.player_performance_experiment_enabled
+                        : R.string.player_performance_experiment_stable),
+                this::toggleExperimentStrategy);
+        addExperimentDomainRow(
+                R.string.player_performance_experiment_exo,
+                PlaybackExperimentPolicy.Domain.EXO,
+                state.exoEnabled(),
+                state.enabled());
+        addExperimentDomainRow(
+                R.string.player_performance_experiment_mpv,
+                PlaybackExperimentPolicy.Domain.MPV,
+                state.mpvEnabled(),
+                state.enabled());
+        addExperimentDomainRow(
+                R.string.player_performance_experiment_ijk,
+                PlaybackExperimentPolicy.Domain.IJK,
+                state.ijkEnabled(),
+                state.enabled());
+        addRow(
+                getString(R.string.player_performance_experiment_rollback),
+                getString(state.enabled()
+                        ? R.string.player_performance_experiment_rollback_ready
+                        : R.string.player_performance_experiment_rollback_done),
+                state.enabled() ? this::confirmExperimentRollback : null);
+    }
+
+    private void addExperimentDomainRow(
+            int label,
+            PlaybackExperimentPolicy.Domain domain,
+            boolean selected,
+            boolean globalEnabled) {
+        int value = !selected
+                ? R.string.player_performance_experiment_off
+                : globalEnabled
+                ? R.string.player_performance_experiment_on
+                : R.string.player_performance_experiment_standby;
+        addRow(getString(label), getString(value), () -> {
+            PlaybackExperimentSetting.putDomainEnabled(domain, !selected);
+            notifyExperimentPolicyChanged(
+                    PlaybackExperimentCoordinator.Change.POLICY_CHANGED);
+        });
+    }
+
+    private void toggleExperimentStrategy() {
+        if (PlaybackExperimentSetting.isEnabled()) {
+            confirmExperimentRollback();
+            return;
+        }
+        new MaterialAlertDialogBuilder(
+                requireContext(), R.style.ThemeOverlay_WebHTV_LightDialog)
+                .setTitle(R.string.player_performance_experiment_enable_title)
+                .setMessage(R.string.player_performance_experiment_enable_message)
+                .setNegativeButton(R.string.dialog_cancel, null)
+                .setPositiveButton(
+                        R.string.player_performance_experiment_enable_confirm,
+                        (dialog, which) -> {
+                            PlaybackExperimentSetting.putEnabled(true);
+                            notifyExperimentPolicyChanged(
+                                    PlaybackExperimentCoordinator.Change.POLICY_CHANGED);
+                        })
+                .show();
+    }
+
+    private void confirmExperimentRollback() {
+        new MaterialAlertDialogBuilder(
+                requireContext(), R.style.ThemeOverlay_WebHTV_LightDialog)
+                .setTitle(R.string.player_performance_experiment_rollback_title)
+                .setMessage(R.string.player_performance_experiment_rollback_message)
+                .setNegativeButton(R.string.dialog_cancel, null)
+                .setPositiveButton(
+                        R.string.player_performance_experiment_rollback_confirm,
+                        (dialog, which) -> {
+                            PlaybackExperimentSetting.rollbackToStable();
+                            notifyExperimentPolicyChanged(
+                                    PlaybackExperimentCoordinator.Change.ROLLBACK);
+                        })
+                .show();
+    }
+
+    private void notifyExperimentPolicyChanged(
+            PlaybackExperimentCoordinator.Change change) {
+        PlaybackExperimentCoordinator.process().invalidate(change);
+        refreshRows();
+        if (callback != null) callback.run();
     }
 
     private boolean isExo() {

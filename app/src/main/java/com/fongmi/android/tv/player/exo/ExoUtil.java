@@ -57,12 +57,15 @@ import com.fongmi.android.tv.bean.Sub;
 import com.fongmi.android.tv.player.PlayerHelper;
 import com.fongmi.android.tv.player.PlaybackAutoContext;
 import com.fongmi.android.tv.player.PlaybackAutoContextStore;
+import com.fongmi.android.tv.player.PlaybackExperimentCoordinator;
+import com.fongmi.android.tv.player.PlaybackExperimentPolicy;
 import com.fongmi.android.tv.player.PlaybackSystemConditionCoordinator;
 import com.fongmi.android.tv.player.engine.PlaySpec;
 import com.fongmi.android.tv.player.engine.PlayerEngine;
 import com.fongmi.android.tv.player.lut.LutSetting;
 import com.fongmi.android.tv.player.track.LangUtil;
 import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
+import com.fongmi.android.tv.setting.PlaybackExperimentSetting;
 import com.fongmi.android.tv.setting.ExoPerformanceSetting;
 import com.fongmi.android.tv.setting.PlayerSetting;
 import com.fongmi.android.tv.setting.Setting;
@@ -734,6 +737,7 @@ public class ExoUtil {
         private final ExoAutomaticVideoConstraintPolicy.Limit baselineLimit;
         private final List<ExoAutomaticVideoConstraintPolicy.Limit> tiers;
         private final PlaybackSystemConditionCoordinator.Registration systemConditionRegistration;
+        private final PlaybackExperimentCoordinator.Registration experimentRegistration;
         private final Runnable refreshRunnable;
         private PlaybackAutoContext.SessionToken boundSession;
         private ExoAutomaticVideoConstraintPolicy.State constraintState;
@@ -763,6 +767,9 @@ public class ExoUtil {
             this.refreshRunnable = () -> refresh("system-condition", -1);
             this.systemConditionRegistration = PlaybackSystemConditionCoordinator.process()
                     .addListener(update -> App.post(refreshRunnable, 0));
+            this.experimentRegistration = PlaybackExperimentCoordinator.process()
+                    .addListener(update -> App.post(
+                            this::onExperimentPolicyChanged, 0));
         }
 
         @Override
@@ -836,6 +843,7 @@ public class ExoUtil {
             released = true;
             App.removeCallbacks(refreshRunnable);
             systemConditionRegistration.close();
+            experimentRegistration.close();
         }
 
         private void refresh(String trigger, long positionMs) {
@@ -929,6 +937,11 @@ public class ExoUtil {
                 int droppedFrames,
                 long elapsedMs,
                 String errorType) {
+            if (!PlaybackExperimentSetting.isAllowed(
+                    PlaybackExperimentPolicy.Action.EXO_VIDEO_CONSTRAINT)) {
+                applyStableExperimentPolicy();
+                return;
+            }
             constraintState = decision.state();
             lastDecision = decision;
             if (decision.changed()) apply(decision.state().effective());
@@ -968,6 +981,25 @@ public class ExoUtil {
             } else {
                 App.removeCallbacks(refreshRunnable);
             }
+        }
+
+        private void onExperimentPolicyChanged() {
+            if (released) return;
+            if (!PlaybackExperimentSetting.isAllowed(
+                    PlaybackExperimentPolicy.Action.EXO_VIDEO_CONSTRAINT)) {
+                applyStableExperimentPolicy();
+                return;
+            }
+            refresh("experiment-enabled", -1);
+        }
+
+        private void applyStableExperimentPolicy() {
+            App.removeCallbacks(refreshRunnable);
+            constraintState = ExoAutomaticVideoConstraintPolicy.initial(
+                    baselineLimit);
+            lastDecision = null;
+            lastLoggedAction = null;
+            apply(baselineLimit);
         }
 
         private void apply(ExoAutomaticVideoConstraintPolicy.Limit limit) {

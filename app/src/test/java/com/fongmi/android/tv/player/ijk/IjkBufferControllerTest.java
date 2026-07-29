@@ -403,6 +403,51 @@ public class IjkBufferControllerTest {
                 limited.reason());
     }
 
+    @Test
+    public void disabledExperimentStagesReloadWithoutSpendingReloadBudget() {
+        IjkBufferController controller = controller("experiment-stage", 22, 0);
+        PlaybackAutoContext.SessionToken token = controller.snapshot().session();
+        IjkBufferController.Decision reload = controller.evaluate(
+                token, token, policy(FIFTEEN,
+                        IjkBufferPolicy.Reason.REBUFFER_HEADROOM), EIGHT,
+                IjkBufferController.Trigger.RUNTIME, true, true, 1,
+                30_000);
+
+        IjkBufferController.Decision deferred =
+                controller.deferExperimentalReload(token, reload);
+
+        assertEquals(IjkBufferController.Action.STAGE, deferred.action());
+        assertEquals(IjkBufferController.Reason.EXPERIMENT_DISABLED,
+                deferred.reason());
+        assertEquals(EIGHT, deferred.appliedConfig());
+        assertEquals(FIFTEEN, deferred.targetConfig());
+        assertTrue(deferred.newRebuffer());
+        assertEquals(FIFTEEN, controller.snapshot().stagedConfig());
+        assertEquals(0, controller.snapshot().reloadAttempts());
+        assertFalse(controller.snapshot().applyInProgress());
+    }
+
+    @Test
+    public void staleSessionCannotStageDisabledExperimentalReload() {
+        IjkBufferController controller = controller("experiment-current", 23, 0);
+        PlaybackAutoContext.SessionToken current = controller.snapshot().session();
+        PlaybackAutoContext.SessionToken stale = token("experiment-stale", 22);
+        IjkBufferController.Decision reload = controller.evaluate(
+                current, current, policy(FIFTEEN,
+                        IjkBufferPolicy.Reason.REBUFFER_HEADROOM), EIGHT,
+                IjkBufferController.Trigger.RUNTIME, true, true, 1,
+                30_000);
+
+        IjkBufferController.Decision deferred =
+                controller.deferExperimentalReload(stale, reload);
+
+        assertEquals(IjkBufferController.Action.HOLD, deferred.action());
+        assertEquals(IjkBufferController.Reason.EXPERIMENT_DISABLED,
+                deferred.reason());
+        assertEquals(EIGHT, controller.snapshot().stagedConfig());
+        assertEquals(0, controller.snapshot().reloadAttempts());
+    }
+
     private static IjkBufferController controller(
             String trace,
             long generation,

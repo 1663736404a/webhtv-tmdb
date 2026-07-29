@@ -165,6 +165,7 @@ public class Backup {
     }
 
     static boolean include(String key, SyncOptions options) {
+        if (key.startsWith("playback_experiment_")) return false;
         if (key.startsWith("remote_trust_")) return false;
         if (isWebHomeExtensionPref(key)) return options.isWebHome();
         if (key.startsWith("cache_")) return options.isWebHome() || options.isSpider();

@@ -38,6 +38,7 @@ public class PlaybackPerformanceSetting {
     private static final String KEY_BANDWIDTH_METER = "perf_bandwidth_meter";
 
     public static void ensureInitialized() {
+        PlaybackExperimentSetting.ensureInitialized();
         if (!Prefers.getPrefers().contains(KEY_INITIALIZED)) {
             applyAutoValues();
             Prefers.put(KEY_INITIALIZED, true);
