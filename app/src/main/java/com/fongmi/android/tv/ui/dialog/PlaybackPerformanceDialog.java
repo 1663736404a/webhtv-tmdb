@@ -479,11 +479,13 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
             case PlaybackPerformanceCatalog.IJK_BUFFER -> IjkPerformanceSetting.getBufferMb() + "MB";
             case PlaybackPerformanceCatalog.IJK_PACKET_BUFFERING -> onOff(IjkPerformanceSetting.isPacketBuffering());
             case PlaybackPerformanceCatalog.IJK_WATER -> IjkPerformanceSetting.getWaterText();
-            case PlaybackPerformanceCatalog.IJK_PICTURE_QUEUE -> IjkPerformanceSetting.getPictureQueue() + "帧";
+            case PlaybackPerformanceCatalog.IJK_PICTURE_QUEUE -> PlaybackPerformanceSetting.isAuto(PlayerSetting.IJK)
+                    ? "自动 · 3帧" : IjkPerformanceSetting.getPictureQueue() + "帧";
             case PlaybackPerformanceCatalog.IJK_FRAME_DROP -> IjkPerformanceSetting.getDropText();
             case PlaybackPerformanceCatalog.IJK_ACCURATE_SEEK -> onOff(IjkPerformanceSetting.isAccurateSeek());
             case PlaybackPerformanceCatalog.IJK_PROBE -> IjkPerformanceSetting.getProbeText();
-            case PlaybackPerformanceCatalog.IJK_SOFT_TUNE -> IjkPerformanceSetting.getSoftTuneText();
+            case PlaybackPerformanceCatalog.IJK_SOFT_TUNE -> PlaybackPerformanceSetting.isAuto(PlayerSetting.IJK)
+                    ? "自动 · 关闭～积极" : IjkPerformanceSetting.getSoftTuneText();
             case PlaybackPerformanceCatalog.IJK_RTSP_TRANSPORT -> IjkPerformanceSetting.getRtspTransportText();
             case PlaybackPerformanceCatalog.IJK_RECONNECT -> onOff(IjkPerformanceSetting.isReconnect());
             case PlaybackPerformanceCatalog.EXO_FRAME_RATE -> ExoPerformanceSetting.getFrameRateText();

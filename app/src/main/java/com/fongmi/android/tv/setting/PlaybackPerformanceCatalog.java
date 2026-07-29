@@ -129,11 +129,11 @@ public final class PlaybackPerformanceCatalog {
         options.add(option(IJK_BUFFER, BUFFER, "读包缓冲", "怎么选：普通和大码率视频选15MB（默认，当前编译上限）；内存紧张选8MB；极低内存才选4MB。代价：缓冲越小越容易因网络抖动卡顿，越大占用更多内存。"));
         options.add(option(IJK_PACKET_BUFFERING, BUFFER, "Packet缓冲", "怎么选：点播和稳定直播保持开启（默认），数据不足时等待队列恢复；只为降低直播延迟才关闭。代价：开启会增加延迟，关闭在网络抖动时更容易卡顿、花屏。"));
         options.add(option(IJK_WATER, BUFFER, "缓冲水位", "怎么选：点播选“标准”（默认）；网络抖动/直播反复卡选“稳定”；只追求低延迟选“低”。代价：水位越高恢复越稳但等待更久，越低越容易再次断流。"));
-        options.add(option(IJK_PICTURE_QUEUE, BUFFER, "画面队列", "怎么选：点播和低延迟用3帧（默认）；渲染偶发抖动用5帧；8帧只用于明显不稳且能接受更高延迟。代价：队列越大，内存和直播延迟越高。"));
+        options.add(option(IJK_PICTURE_QUEUE, BUFFER, "画面队列", "自动档固定3帧，避免高分辨率盲目扩大 native/图形内存；手动档可选3/5/8帧，渲染偶发抖动可尝试5帧。代价：队列越大，内存和直播延迟越高。"));
         options.add(option(PLAY_CACHE, BUFFER, "HLS 播放缓存", "作用：限制IJK经HLS代理写入的磁盘缓存。频繁回看/拖动可增大；普通播放保持默认即可。代价：增加磁盘占用和写入，它不能扩大IJK native的15MB读包内存。"));
         addPreload(options);
         options.add(option(IJK_FRAME_DROP, DECODE, "丢帧策略", "怎么选：普通播放选“标准”（默认）；低性能设备持续落后时选“积极”；设备性能充足且必须保留每帧才关闭。代价：越积极越能追上进度，但画面跳帧越明显。"));
-        options.add(option(IJK_SOFT_TUNE, DECODE, "软解降负载", "怎么选：默认“温和”；软解高负载、持续掉帧选“积极”；CPU充足且重视画质选关闭。代价：越积极越省CPU，但细节和连续性越差，硬解时帮助有限。"));
+        options.add(option(IJK_SOFT_TUNE, DECODE, "软解降负载", "自动档仅在确认实际软解、持续FPS压力和热状态后从关闭分级到温和/积极；手动档可固定选择。代价：越积极越省CPU，但细节和连续性损失越大，参数变化需要重建。"));
         options.add(option(IJK_ACCURATE_SEEK, DECODE, "精确Seek", "怎么选：默认关闭，拖动可更快恢复；只有必须准确落在目标时间点时开启。代价：需要从关键帧继续解码，拖动等待和CPU占用都会增加，不会改善正常播放流畅度。"));
         options.add(option(IJK_PROBE, DECODE, "流探测", "怎么选：普通资源保持“系统默认”；起播太慢可试“快速”；漏音轨、格式识别失败或直播信息不全时选“完整”。代价：快速可能误判，完整会延长起播。"));
         options.add(option(IJK_RTSP_TRANSPORT, DECODE, "RTSP传输", "怎么选：优先TCP（默认），公网和Wi-Fi更稳定；局域网质量很好且必须低延迟时选UDP；不确定可选自动。代价：TCP延迟略高，UDP丢包时会花屏或卡顿。"));

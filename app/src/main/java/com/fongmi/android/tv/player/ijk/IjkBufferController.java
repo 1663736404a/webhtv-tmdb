@@ -173,6 +173,34 @@ public final class IjkBufferController {
             PlaybackAutoContext.SessionToken factsSession,
             IjkBufferPolicy.Config appliedConfig,
             long nowElapsedMs) {
+        return requestSharedReload(
+                session,
+                factsSession,
+                appliedConfig,
+                nowElapsedMs,
+                Reason.REALTIME_RECOVERY_RELOAD);
+    }
+
+    /** Reserves the same bounded reload lane for prepare-time decode tuning. */
+    public synchronized Decision requestDecodePressureReload(
+            PlaybackAutoContext.SessionToken session,
+            PlaybackAutoContext.SessionToken factsSession,
+            IjkBufferPolicy.Config appliedConfig,
+            long nowElapsedMs) {
+        return requestSharedReload(
+                session,
+                factsSession,
+                appliedConfig,
+                nowElapsedMs,
+                Reason.DECODE_PRESSURE_RELOAD);
+    }
+
+    private Decision requestSharedReload(
+            PlaybackAutoContext.SessionToken session,
+            PlaybackAutoContext.SessionToken factsSession,
+            IjkBufferPolicy.Config appliedConfig,
+            long nowElapsedMs,
+            Reason reloadReason) {
         IjkBufferPolicy.Config current = appliedConfig == null
                 ? stagedConfig : appliedConfig;
         IjkBufferPolicy.Decision policy = currentPolicy(current);
@@ -197,7 +225,7 @@ public final class IjkBufferController {
         }
         stagedConfig = current;
         return new Decision(Action.RELOAD, current, current, policy,
-                Reason.REALTIME_RECOVERY_RELOAD, 0, false);
+                reloadReason, 0, false);
     }
 
     public synchronized boolean beginApply(
@@ -315,6 +343,7 @@ public final class IjkBufferController {
         EARLY_SCENE_RELOAD("early-scene-reload"),
         REBUFFER_RELOAD("rebuffer-reload"),
         REALTIME_RECOVERY_RELOAD("realtime-recovery-reload"),
+        DECODE_PRESSURE_RELOAD("decode-pressure-reload"),
         STARTUP_EXPANSION_DEFERRED("startup-expansion-deferred"),
         HEALTHY_EXPANSION_DEFERRED("healthy-expansion-deferred"),
         NONCRITICAL_CHANGE_DEFERRED("noncritical-change-deferred"),

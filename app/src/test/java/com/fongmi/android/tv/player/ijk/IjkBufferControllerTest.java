@@ -345,6 +345,64 @@ public class IjkBufferControllerTest {
         assertEquals(0, controller.snapshot().reloadAttempts());
     }
 
+    @Test
+    public void decodePressureUsesSameReloadLaneWithoutChangingBuffer() {
+        IjkBufferController controller = controller("decode", 19, 0);
+        PlaybackAutoContext.SessionToken token = controller.snapshot().session();
+
+        IjkBufferController.Decision decision =
+                controller.requestDecodePressureReload(
+                        token, token, EIGHT, 10_000);
+
+        assertTrue(decision.requestsReload());
+        assertEquals(EIGHT, decision.appliedConfig());
+        assertEquals(EIGHT, decision.targetConfig());
+        assertEquals(IjkBufferController.Reason.DECODE_PRESSURE_RELOAD,
+                decision.reason());
+    }
+
+    @Test
+    public void decodePressureSharesCooldownWithRealtimeRecovery() {
+        IjkBufferController controller = controller("decode-cooldown", 20, 0);
+        PlaybackAutoContext.SessionToken token = controller.snapshot().session();
+        IjkBufferController.Decision realtime =
+                controller.requestRealtimeRecovery(
+                        token, token, FOUR, 1_000);
+        apply(controller, token, realtime, 1_000);
+
+        IjkBufferController.Decision decode =
+                controller.requestDecodePressureReload(
+                        token, token, FOUR, 5_000);
+
+        assertEquals(IjkBufferController.Reason.RELOAD_COOLDOWN,
+                decode.reason());
+        assertEquals(26_000, decode.cooldownRemainingMs());
+    }
+
+    @Test
+    public void decodePressureSharesAttemptLimitWithAllIjkReloads() {
+        IjkBufferController controller = controller("decode-limit", 21, 0);
+        PlaybackAutoContext.SessionToken token = controller.snapshot().session();
+
+        for (int attempt = 0;
+             attempt < IjkBufferController.MAX_RELOAD_ATTEMPTS;
+             attempt++) {
+            long now = attempt * IjkBufferController.RELOAD_COOLDOWN_MS;
+            IjkBufferController.Decision decision =
+                    controller.requestDecodePressureReload(
+                            token, token, FOUR, now);
+            apply(controller, token, decision, now);
+        }
+
+        IjkBufferController.Decision limited =
+                controller.requestRealtimeRecovery(
+                        token, token, FOUR,
+                        IjkBufferController.MAX_RELOAD_ATTEMPTS
+                                * IjkBufferController.RELOAD_COOLDOWN_MS);
+        assertEquals(IjkBufferController.Reason.RELOAD_LIMIT,
+                limited.reason());
+    }
+
     private static IjkBufferController controller(
             String trace,
             long generation,

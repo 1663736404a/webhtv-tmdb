@@ -17,6 +17,7 @@ import com.fongmi.android.tv.player.PlaybackRoute;
 import com.fongmi.android.tv.player.exo.ExoUtil;
 import com.fongmi.android.tv.player.exo.TrackUtil;
 import com.fongmi.android.tv.player.ijk.IjkBufferPolicy;
+import com.fongmi.android.tv.player.ijk.IjkDecodePressurePolicy;
 import com.fongmi.android.tv.player.ijk.IjkRealtimeRecoveryPolicy;
 import com.fongmi.android.tv.utils.ResUtil;
 
@@ -118,6 +119,19 @@ public class IjkPlayerEngine implements PlayerEngine {
         return player.getRealtimeQueueSnapshot();
     }
 
+    public void stageAutomaticDecodeControlConfig(
+            IjkDecodePressurePolicy.Config config) {
+        player.stageAutomaticDecodeControlConfig(config);
+    }
+
+    public IjkDecodePressurePolicy.Config getAppliedDecodeControlConfig() {
+        return player.getAppliedDecodeControlConfig();
+    }
+
+    public IjkDecodePressurePolicy.DecodeSnapshot getDecodePressureSnapshot() {
+        return player.getDecodePressureSnapshot();
+    }
+
     @Override
     public void stop() {
         player.stop();
@@ -198,10 +212,12 @@ public class IjkPlayerEngine implements PlayerEngine {
         long bandwidth = tcpBytesPerSecond > Long.MAX_VALUE / 8L
                 ? Long.MAX_VALUE : tcpBytesPerSecond * 8L;
         long bitrate = player.getBitrateSnapshot();
+        IjkDecodePressurePolicy.DecodeSnapshot decode =
+                player.getDecodePressureSnapshot();
         return new RuntimeMetrics(
                 bandwidth > 0 ? bandwidth : null,
                 bitrate > 0 ? bitrate : null,
-                null,
+                decode.available() ? decode.outputFps() : null,
                 null);
     }
 
