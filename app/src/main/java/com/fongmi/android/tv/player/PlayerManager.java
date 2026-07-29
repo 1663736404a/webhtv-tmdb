@@ -51,6 +51,8 @@ import com.fongmi.android.tv.player.exo.ExoRtspLiveLagController;
 import com.fongmi.android.tv.player.exo.ExoRtspLiveLagPolicy;
 import com.fongmi.android.tv.player.exo.ForwardBufferTrend;
 import com.fongmi.android.tv.player.exo.PlaybackAnalyticsListener;
+import com.fongmi.android.tv.player.ijk.IjkBufferController;
+import com.fongmi.android.tv.player.ijk.IjkBufferPolicy;
 import com.fongmi.android.tv.player.danmaku.DanmakuUrlPolicy;
 import com.fongmi.android.tv.player.danmaku.LiveDanmakuBatcher;
 import com.fongmi.android.tv.player.danmaku.LiveDanmakuBuffer;
@@ -150,7 +152,9 @@ public class PlayerManager implements ParseCallback {
     private final MpvResourcePressureController mpvResourcePressureController;
     private final MpvPreloadController mpvPreloadController;
     private final PlaybackMemoryCoordinator.Registration mpvResourceMemoryRegistration;
+    private final PlaybackMemoryCoordinator.Registration ijkBufferMemoryRegistration;
     private final PlaybackSystemConditionCoordinator.Registration mpvResourceSystemRegistration;
+    private final IjkBufferController ijkBufferController;
     private final ForwardBufferTrend networkProtectionTrend;
     private final LiveDanmakuBatcher liveDanmakuBatcher;
     private final LiveDanmakuBuffer liveDanmakuBuffer;
@@ -167,6 +171,7 @@ public class PlayerManager implements ParseCallback {
     private String loadingDanmakuKey;
     private String lastLoggedRouteTraceId = PlaybackTrace.NONE;
     private IjkTimelinePublicationKey lastIjkTimelinePublicationKey;
+    private IjkBufferController.Decision pendingIjkBufferDecision;
     private PlaybackAutoContext.SessionToken playbackAutoSession = PlaybackAutoContext.SessionToken.none();
     private long playbackTrackSequence;
     private long danmakuLoadStartedAtMs;
@@ -203,6 +208,7 @@ public class PlayerManager implements ParseCallback {
     private boolean mpvExplicitSubtitlePreference;
     private boolean mpvSurfaceFallbackTried;
     private boolean mpvHlsManagedReload;
+    private boolean ijkBufferManagedReload;
     private int playerType;
     private int retry;
     private int localProxyRetry;
@@ -238,8 +244,11 @@ public class PlayerManager implements ParseCallback {
         this.mpvHlsVariantController = new MpvHlsVariantController();
         this.mpvResourcePressureController = new MpvResourcePressureController();
         this.mpvPreloadController = new MpvPreloadController();
+        this.ijkBufferController = new IjkBufferController();
         this.mpvResourceMemoryRegistration = PlaybackMemoryCoordinator.process().addListener(update ->
                 App.post(() -> onMpvResourceMemoryUpdate(update)));
+        this.ijkBufferMemoryRegistration = PlaybackMemoryCoordinator.process().addListener(update ->
+                App.post(() -> onIjkBufferMemoryUpdate(update)));
         this.mpvResourceSystemRegistration = PlaybackSystemConditionCoordinator.process().addListener(update ->
                 App.post(() -> onMpvResourceSystemUpdate(update)));
         this.networkProtectionTrend = new ForwardBufferTrend();
@@ -269,6 +278,7 @@ public class PlayerManager implements ParseCallback {
         App.removeCallbacks(networkProtectionRunnable);
         App.removeCallbacks(playbackTelemetryRunnable);
         mpvResourceMemoryRegistration.close();
+        ijkBufferMemoryRegistration.close();
         mpvResourceSystemRegistration.close();
         stopNativeAudioSession();
         clearDanmaku("release");
@@ -299,6 +309,8 @@ public class PlayerManager implements ParseCallback {
     }
 
     private void onPlaybackTimeout() {
+        completeIjkBufferManagedReload(
+                false, "timeout", SystemClock.elapsedRealtime(), true);
         if (retryLutWarmupByRefresh("timeout")) return;
         callback.onError(ResUtil.getString(R.string.error_play_timeout));
     }
@@ -1246,6 +1258,7 @@ public class PlayerManager implements ParseCallback {
     private void rebuildPlayer(boolean resetVideoSurface) {
         stopNativeAudioSession();
         player = engine.rebuild(listener);
+        restoreIjkStagedBufferConfig();
         videoEffectsActive = false;
         videoEffectsDirty = false;
         lutAppliedForItem = false;
@@ -1595,6 +1608,352 @@ public class PlayerManager implements ParseCallback {
                     MpvBackCachePolicy.SeekObservation.none(),
                     now);
         }
+    }
+
+    private void applyIjkAutoInitialControl() {
+        if (!(engine instanceof IjkPlayerEngine ijk)
+                || !playbackAutoSession.active()) return;
+        long now = SystemClock.elapsedRealtime();
+        PlaybackAutoContext context = playbackAutoContextStore.snapshot();
+        IjkBufferPolicy.Request request = buildIjkBufferRequest(
+                context, now, false);
+        IjkBufferPolicy.Decision policy = IjkBufferPolicy.resolve(request);
+        IjkBufferController.Decision decision =
+                ijkBufferController.stageInitial(
+                        playbackAutoSession, context.session(), policy);
+        if (policy.managed()) {
+            ijk.stageAutomaticInputBufferConfig(decision.targetConfig());
+        }
+        publishIjkBufferDecision(
+                decision, request, IjkBufferController.Trigger.INITIAL,
+                false, true, now);
+    }
+
+    private void restoreIjkStagedBufferConfig() {
+        if (!(engine instanceof IjkPlayerEngine ijk)
+                || !PlaybackPerformanceSetting.isAuto(PlayerSetting.IJK)
+                || !playbackAutoSession.active()) return;
+        IjkBufferController.Snapshot snapshot = ijkBufferController.snapshot();
+        if (!playbackAutoSession.equals(snapshot.session())) return;
+        ijk.stageAutomaticInputBufferConfig(snapshot.stagedConfig());
+    }
+
+    private void onIjkBufferMemoryUpdate(
+            PlaybackMemoryCoordinator.Update update) {
+        if (update == null || !playbackAutoSession.active()
+                || !playbackAutoSession.equals(update.session())) return;
+        evaluateIjkBuffer(IjkBufferController.Trigger.MEMORY,
+                SystemClock.elapsedRealtime());
+    }
+
+    private void evaluateIjkBuffer(
+            IjkBufferController.Trigger trigger,
+            long nowElapsedMs) {
+        if (!(engine instanceof IjkPlayerEngine ijk)
+                || !playbackAutoSession.active()) return;
+        long now = Math.max(0, nowElapsedMs);
+        PlaybackAutoContext context = playbackAutoContextStore.snapshot();
+        IjkBufferPolicy.Request request = buildIjkBufferRequest(
+                context, now, true);
+        IjkBufferPolicy.Decision policy = IjkBufferPolicy.resolve(request);
+        IjkBufferController.Decision decision = ijkBufferController.evaluate(
+                playbackAutoSession,
+                context.session(),
+                policy,
+                ijk.getAppliedInputBufferConfig(),
+                trigger,
+                player != null && player.getPlaybackState()
+                        == Player.STATE_BUFFERING,
+                playbackTrace.hasStage(PlaybackTrace.Stage.FIRST_FRAME)
+                        || playbackTrace.hasStage(
+                        PlaybackTrace.Stage.AUDIO_PLAYABLE),
+                request.rebufferUsable() ? request.rebufferCount() : 0,
+                now);
+
+        boolean applyStarted = false;
+        boolean applySucceeded = decision.action()
+                != IjkBufferController.Action.RELOAD;
+        if (decision.requestsReload()) {
+            applyStarted = ijkBufferController.beginApply(
+                    playbackAutoSession, decision);
+            if (applyStarted) {
+                ijk.stageAutomaticInputBufferConfig(
+                        ijkBufferController.snapshot().stagedConfig());
+                pendingIjkBufferDecision = decision;
+                boolean restartStarted = restartIjkBuffer(ijk, decision);
+                applySucceeded = restartStarted
+                        && decision.targetConfig().equals(
+                        ijk.getAppliedInputBufferConfig());
+                if (!applySucceeded) {
+                    completeIjkBufferManagedReload(
+                            false, "start-failed", now, false);
+                    if (!restartStarted) ijkBufferManagedReload = false;
+                }
+            }
+        }
+        if (policy.managed()) {
+            ijk.stageAutomaticInputBufferConfig(
+                    ijkBufferController.snapshot().stagedConfig());
+        }
+        publishIjkBufferDecision(
+                decision, request, trigger, applyStarted,
+                applySucceeded, now);
+    }
+
+    private IjkBufferPolicy.Request buildIjkBufferRequest(
+            PlaybackAutoContext context,
+            long nowElapsedMs,
+            boolean allowEngineScene) {
+        PlaybackAutoContext current = context == null
+                ? PlaybackAutoContext.empty() : context;
+        long now = Math.max(0, nowElapsedMs);
+        PlaybackAutoContext.Fact<PlaybackAutoContext.Protocol> protocolFact =
+                current.resource().protocol();
+        PlaybackAutoContext.Fact<PlaybackAutoContext.StreamKind> streamFact =
+                current.resource().streamKind();
+        PlaybackAutoContext.Fact<PlaybackAutoContext.ManifestFacts> manifestFact =
+                current.resource().manifest();
+        PlaybackAutoContext.Fact<PlaybackAutoContext.MemoryPressure> pressureFact =
+                current.device().memoryPressure();
+        PlaybackAutoContext.Fact<PlaybackAutoContext.MemorySnapshot> snapshotFact =
+                current.device().memorySnapshot();
+        PlaybackAutoContext.Fact<Long> bitrateFact =
+                current.runtime().mediaBitrateBitsPerSecond();
+        PlaybackAutoContext.Fact<Integer> rebufferFact =
+                current.runtime().rebufferCount();
+        PlaybackAutoContext.Fact<Long> liveLagFact =
+                current.runtime().liveLagMs();
+        boolean protocolUsable = protocolFact.isUsable(now);
+        PlaybackAutoContext.Protocol protocol = protocolUsable
+                ? protocolFact.value() : PlaybackAutoContext.Protocol.UNKNOWN;
+        boolean streamUsable = streamFact.isUsable(now);
+        PlaybackAutoContext.StreamKind stream = streamUsable
+                ? streamFact.value() : PlaybackAutoContext.StreamKind.UNKNOWN;
+        boolean segmented = protocol == PlaybackAutoContext.Protocol.HLS
+                || protocol == PlaybackAutoContext.Protocol.DASH;
+        if (!streamUsable && allowEngineScene && !segmented
+                && engine instanceof IjkPlayerEngine ijk) {
+            if (ijk.isVod()) {
+                stream = PlaybackAutoContext.StreamKind.VOD;
+                streamUsable = true;
+            } else if (ijk.isLive()) {
+                stream = PlaybackAutoContext.StreamKind.LIVE;
+                streamUsable = true;
+            }
+        }
+        boolean snapshotUsable = snapshotFact.isUsable(now)
+                && snapshotFact.value().hasEvidence();
+        return new IjkBufferPolicy.Request(
+                PlaybackPerformanceSetting.isAuto(PlayerSetting.IJK),
+                isIjk(),
+                protocolUsable,
+                protocol,
+                streamUsable,
+                stream,
+                manifestFact.isUsable(now),
+                manifestFact.value(),
+                pressureFact.isUsable(now),
+                pressureFact.value(),
+                snapshotUsable,
+                snapshotFact.value(),
+                bitrateFact.isUsable(now) && bitrateFact.value() > 0,
+                bitrateFact.isUsable(now) ? bitrateFact.value() : 0,
+                rebufferFact.isUsable(now),
+                rebufferFact.isUsable(now) ? rebufferFact.value() : 0,
+                liveLagFact.isUsable(now) && liveLagFact.value() >= 0,
+                liveLagFact.isUsable(now) ? liveLagFact.value() : -1);
+    }
+
+    private boolean restartIjkBuffer(
+            IjkPlayerEngine ijk,
+            IjkBufferController.Decision decision) {
+        if (spec == null || TextUtils.isEmpty(spec.getUrl())
+                || player == null) return false;
+        boolean wasPlayWhenReady = player.getPlayWhenReady();
+        float speed = getSpeed();
+        boolean repeat = isRepeatOne();
+        long position = ijk.isVod()
+                ? Math.max(0, player.getCurrentPosition()) : C.TIME_UNSET;
+        try {
+            prepareSeq++;
+            App.removeCallbacks(runnable);
+            initTrack = false;
+            playWhenReady = wasPlayWhenReady;
+            ijkBufferManagedReload = true;
+            PlaybackTrace.log("ijk-buffer", playbackTrace.current(),
+                    "action=reload old=%s target=%s resume=%d play=%s reason=%s",
+                    decision.appliedConfig().label(),
+                    decision.targetConfig().label(),
+                    position == C.TIME_UNSET ? 0 : position,
+                    wasPlayWhenReady,
+                    decision.reason().label());
+            ijk.restart(spec.checkUa(), position, wasPlayWhenReady);
+        } catch (Throwable error) {
+            PlaybackTrace.log("ijk-buffer", playbackTrace.current(),
+                    "action=reload result=failed errorType=%s",
+                    error.getClass().getSimpleName());
+            return false;
+        }
+        try {
+            if (speed != 1f) setSpeed(speed);
+            setRepeatOne(repeat);
+        } catch (Throwable error) {
+            PlaybackTrace.log("ijk-buffer", playbackTrace.current(),
+                    "action=restore-state result=partial errorType=%s",
+                    error.getClass().getSimpleName());
+        }
+        App.post(runnable, Constant.TIMEOUT_PLAY);
+        return true;
+    }
+
+    private void completeIjkBufferManagedReload(
+            boolean succeeded,
+            String completionReason,
+            long nowElapsedMs,
+            boolean publishCompletion) {
+        IjkBufferController.Decision pending = pendingIjkBufferDecision;
+        pendingIjkBufferDecision = null;
+        if (pending != null) {
+            long now = Math.max(0, nowElapsedMs);
+            ijkBufferController.completeApply(
+                    playbackAutoSession, pending, succeeded, now);
+            if (engine instanceof IjkPlayerEngine ijk
+                    && PlaybackPerformanceSetting.isAuto(PlayerSetting.IJK)
+                    && playbackAutoSession.active()) {
+                ijk.stageAutomaticInputBufferConfig(
+                        ijkBufferController.snapshot().stagedConfig());
+            }
+            PlaybackTrace.log("ijk-buffer", playbackTrace.current(),
+                    "action=reload-complete result=%s reason=%s target=%s",
+                    succeeded ? "ready" : "failed",
+                    PlaybackTelemetry.safeLabel(completionReason),
+                    pending.targetConfig().label());
+            if (publishCompletion) {
+                publishIjkBufferCompletion(
+                        pending, succeeded, completionReason, now);
+            }
+        }
+        ijkBufferManagedReload = false;
+    }
+
+    private void publishIjkBufferCompletion(
+            IjkBufferController.Decision decision,
+            boolean succeeded,
+            String completionReason,
+            long nowElapsedMs) {
+        List<PlaybackTelemetry.DecisionInput> inputs = new ArrayList<>();
+        IjkBufferController.Snapshot snapshot = ijkBufferController.snapshot();
+        inputs.add(PlaybackTelemetry.DecisionInput.number(
+                "reload_attempts", snapshot.reloadAttempts(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH));
+        inputs.add(PlaybackTelemetry.DecisionInput.number(
+                "successful_reloads", snapshot.successfulReloads(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH));
+        playbackTelemetryCoordinator.publishDecision(
+                playbackAutoSession,
+                new PlaybackTelemetry.DecisionEvent(
+                        PlaybackTelemetry.DecisionDomain.IJK_BUFFER,
+                        succeeded ? PlaybackTelemetry.DecisionOutcome.APPLIED
+                                : PlaybackTelemetry.DecisionOutcome.FAILED,
+                        decision.appliedConfig().label(),
+                        decision.targetConfig().label(),
+                        succeeded ? decision.targetConfig().label()
+                                : decision.appliedConfig().label(),
+                        succeeded ? "reload-ready" : "reload-failed",
+                        succeeded ? "none"
+                                : PlaybackTelemetry.safeLabel(completionReason),
+                        inputs),
+                nowElapsedMs);
+    }
+
+    private void publishIjkBufferDecision(
+            IjkBufferController.Decision decision,
+            IjkBufferPolicy.Request request,
+            IjkBufferController.Trigger trigger,
+            boolean applyStarted,
+            boolean applySucceeded,
+            long nowElapsedMs) {
+        if (decision == null || request == null) return;
+        PlaybackTelemetry.DecisionOutcome outcome = !decision.policy().managed()
+                ? PlaybackTelemetry.DecisionOutcome.SUPPRESSED
+                : decision.action() == IjkBufferController.Action.RELOAD
+                ? applyStarted && applySucceeded
+                ? PlaybackTelemetry.DecisionOutcome.REQUESTED
+                : PlaybackTelemetry.DecisionOutcome.FAILED
+                : decision.action() == IjkBufferController.Action.STAGE
+                ? PlaybackTelemetry.DecisionOutcome.SELECTED
+                : PlaybackTelemetry.DecisionOutcome.HELD;
+        String result = applyStarted && applySucceeded
+                || decision.action() == IjkBufferController.Action.STAGE
+                ? decision.targetConfig().label()
+                : decision.appliedConfig().label();
+        PlaybackAutoContext.Fact<Long> liveLagFact =
+                playbackAutoContextStore.snapshot().runtime().liveLagMs();
+        boolean liveLagFactUsable = liveLagFact.isUsable(nowElapsedMs);
+        List<PlaybackTelemetry.DecisionInput> inputs = new ArrayList<>();
+        inputs.add(PlaybackTelemetry.DecisionInput.text(
+                "trigger", trigger.name().toLowerCase(java.util.Locale.US),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH));
+        inputs.add(PlaybackTelemetry.DecisionInput.number(
+                "memory_ceiling_mb", decision.policy().memoryCeilingMb(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH));
+        inputs.add(PlaybackTelemetry.DecisionInput.number(
+                "target_first_ms", decision.targetConfig().firstWaterMs(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH));
+        inputs.add(PlaybackTelemetry.DecisionInput.number(
+                "target_next_ms", decision.targetConfig().nextWaterMs(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH));
+        inputs.add(PlaybackTelemetry.DecisionInput.number(
+                "target_last_ms", decision.targetConfig().lastWaterMs(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH));
+        inputs.add(request.mediaBitrateUsable()
+                ? PlaybackTelemetry.DecisionInput.number(
+                "media_bps", request.mediaBitrateBitsPerSecond(),
+                PlaybackAutoContext.ValueSource.NATIVE_RUNTIME,
+                PlaybackAutoContext.Confidence.MEDIUM)
+                : PlaybackTelemetry.DecisionInput.unknown("media_bps"));
+        inputs.add(request.liveLagUsable()
+                ? PlaybackTelemetry.DecisionInput.number(
+                "live_lag_ms", request.liveLagMs(),
+                liveLagFactUsable ? liveLagFact.source()
+                        : PlaybackAutoContext.ValueSource.UNKNOWN,
+                liveLagFactUsable ? liveLagFact.confidence()
+                        : PlaybackAutoContext.Confidence.UNKNOWN)
+                : PlaybackTelemetry.DecisionInput.unknown("live_lag_ms"));
+        inputs.add(request.rebufferUsable()
+                ? PlaybackTelemetry.DecisionInput.number(
+                "rebuffer_count", request.rebufferCount(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH)
+                : PlaybackTelemetry.DecisionInput.unknown("rebuffer_count"));
+        inputs.add(PlaybackTelemetry.DecisionInput.number(
+                "reload_attempts",
+                ijkBufferController.snapshot().reloadAttempts(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH));
+        inputs.add(PlaybackTelemetry.DecisionInput.number(
+                "cooldown_ms", decision.cooldownRemainingMs(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH));
+        playbackTelemetryCoordinator.publishDecision(
+                playbackAutoSession,
+                new PlaybackTelemetry.DecisionEvent(
+                        PlaybackTelemetry.DecisionDomain.IJK_BUFFER,
+                        outcome,
+                        decision.appliedConfig().label(),
+                        decision.targetConfig().label(),
+                        result,
+                        decision.reason().label(),
+                        decision.policy().reason().label(),
+                        inputs),
+                nowElapsedMs);
     }
 
     private void onMpvResourceMemoryUpdate(PlaybackMemoryCoordinator.Update update) {
@@ -2871,6 +3230,7 @@ public class PlayerManager implements ParseCallback {
         spec.setPlaybackTraceId(playbackTrace.ensure());
         spec.refreshPlaybackRoute();
         publishPlaybackAutoContext(false);
+        applyIjkAutoInitialControl();
         applyMpvAutoInitialControl();
         logPlaybackRoute();
         if (SpiderDebug.isEnabled()) SpiderDebug.log("player", "setMediaItem timeout=%d notify=%s spec=%s", timeout, notifyPrepare, debugSpec());
@@ -3717,6 +4077,9 @@ public class PlayerManager implements ParseCallback {
         mpvResourcePressureController.beginSession(playbackAutoSession);
         mpvPreloadController.beginSession(playbackAutoSession);
         mpvHlsManagedReload = false;
+        ijkBufferController.beginSession(playbackAutoSession, now);
+        ijkBufferManagedReload = false;
+        pendingIjkBufferDecision = null;
         playbackTrackSequence = 1;
         playbackMediaFactsCoordinator.beginSession(playbackAutoSession);
         PlaybackMemoryMonitor.process().beginSession(playbackAutoSession);
@@ -3799,6 +4162,9 @@ public class PlayerManager implements ParseCallback {
         playbackTelemetryCoordinator.publishRuntime(
                 playbackAutoSession, observation, now);
         evaluateExoRtspLiveLag(observation, now);
+        if (phaseOverride != PlaybackAutoContext.PlaybackPhase.ERROR) {
+            evaluateIjkBuffer(IjkBufferController.Trigger.RUNTIME, now);
+        }
         if (isMpv()) {
             if (evaluateMpvHlsVariant) {
                 evaluateMpvHlsVariant(observation, now);
@@ -4137,6 +4503,34 @@ public class PlayerManager implements ParseCallback {
                         "native metrics unavailable type=%s action=keep-unknown", error.getClass().getSimpleName());
             }
         }
+        if (player != null && isIjk()) {
+            try {
+                long value = player.getCurrentLiveOffset();
+                if (player.isCurrentMediaItemLive()
+                        && value >= 0 && value != C.TIME_UNSET) {
+                    liveLag = PlaybackTelemetry.Metric.of(
+                            value,
+                            PlaybackAutoContext.ValueSource.PLAYER_CALLBACK,
+                            PlaybackAutoContext.Confidence.HIGH);
+                }
+            } catch (Throwable ignored) {
+            }
+            if (!liveLag.known() && engine instanceof IjkPlayerEngine ijk) {
+                try {
+                    Long value = ijk.getLiveLagLowerBoundMs();
+                    if (value != null && value >= 0) {
+                        liveLag = PlaybackTelemetry.Metric.of(
+                                value,
+                                PlaybackAutoContext.ValueSource.PROXY,
+                                PlaybackAutoContext.Confidence.MEDIUM);
+                    }
+                } catch (Throwable error) {
+                    PlaybackTrace.log("ijk-buffer", playbackTrace.current(),
+                            "live-lag unavailable errorType=%s action=keep-unknown",
+                            error.getClass().getSimpleName());
+                }
+            }
+        }
         long firstFrameMs = playbackTrace.stageElapsedMs(PlaybackTrace.Stage.FIRST_FRAME);
         PlaybackTelemetry.Metric<Long> firstFrame = firstFrameMs < 0 ? PlaybackTelemetry.Metric.unknown()
                 : PlaybackTelemetry.Metric.of(firstFrameMs, PlaybackAutoContext.ValueSource.PLAYER_CALLBACK,
@@ -4444,6 +4838,9 @@ public class PlayerManager implements ParseCallback {
         mpvHlsVariantController.endSession(playbackAutoSession);
         mpvResourcePressureController.endSession(playbackAutoSession);
         mpvPreloadController.endSession(playbackAutoSession);
+        ijkBufferController.endSession(playbackAutoSession);
+        ijkBufferManagedReload = false;
+        pendingIjkBufferDecision = null;
         mpvHlsManagedReload = false;
         mpvAutoController.endSession(playbackAutoSession);
         PlaybackSystemConditionMonitor.process().endSession(playbackAutoSession);
@@ -4510,10 +4907,12 @@ public class PlayerManager implements ParseCallback {
 
     private void recordBufferingState(int state) {
         if (player == null) return;
-        if (mpvHlsManagedReload
+        if ((mpvHlsManagedReload || ijkBufferManagedReload)
                 && state == Player.STATE_BUFFERING
                 && !playbackBufferingTracker.isBuffering()) {
-            PlaybackTrace.log("mpv-hls-variant", playbackTrace.current(),
+            PlaybackTrace.log(mpvHlsManagedReload
+                            ? "mpv-hls-variant" : "ijk-buffer",
+                    playbackTrace.current(),
                     "action=managed-reload-buffering result=excluded-from-rebuffer");
             return;
         }
@@ -4732,6 +5131,10 @@ public class PlayerManager implements ParseCallback {
             publishPlaybackAutoContext(state != Player.STATE_IDLE);
             if (state == Player.STATE_READY) {
                 onMpvHlsPlaybackReady(SystemClock.elapsedRealtime());
+                if (isIjk()) {
+                    completeIjkBufferManagedReload(
+                            true, "ready", SystemClock.elapsedRealtime(), true);
+                }
                 playbackTrace.mark(PlaybackTrace.Stage.READY, "player=" + playerType);
                 markStartupCompletion(true, getCurrentTracks());
                 hardDecodeSwitchRetryArmed = false;
@@ -4768,6 +5171,8 @@ public class PlayerManager implements ParseCallback {
             if (key.equals(lastIjkTimelinePublicationKey)) return;
             lastIjkTimelinePublicationKey = key;
             publishPlaybackAutoContext(false);
+            evaluateIjkBuffer(IjkBufferController.Trigger.MANIFEST,
+                    SystemClock.elapsedRealtime());
         }
 
         @Override
@@ -4833,6 +5238,9 @@ public class PlayerManager implements ParseCallback {
         public void onPlayerError(@NonNull PlaybackException e) {
             App.removeCallbacks(runnable);
             App.removeCallbacks(networkProtectionRunnable);
+            completeIjkBufferManagedReload(
+                    false, "playback-error",
+                    SystemClock.elapsedRealtime(), true);
             rtspLiveLagController.onPlaybackError(playbackAutoSession);
             // Publish the failing runtime snapshot without letting the periodic
             // HLS timeout path start a rollback before this concrete error is
@@ -4912,6 +5320,7 @@ public class PlayerManager implements ParseCallback {
         engine.release();
         engine = buildEngine(playerType, PlayerEngine.HARD);
         player = engine.getPlayer();
+        restoreIjkStagedBufferConfig();
         callback.onPlayerRebuild(player, true);
         this.playWhenReady = wasPlayWhenReady;
         initTrack = false;

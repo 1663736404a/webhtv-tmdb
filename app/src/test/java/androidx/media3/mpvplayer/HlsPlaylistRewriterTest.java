@@ -108,6 +108,11 @@ public class HlsPlaylistRewriterTest {
         assertEquals(2, result.segments().size());
         assertSegment(result.segments().get(0), "source:first.ts", 4.5, 0, false);
         assertSegment(result.segments().get(1), "source:second.ts", 6, 4.5, true);
+        assertEquals(2, result.mediaUnits().size());
+        assertMediaUnit(result.mediaUnits().get(0),
+                "source:first.ts", 4.5, 0, false, false);
+        assertMediaUnit(result.mediaUnits().get(1),
+                "source:second.ts", 6, 4.5, true, false);
         assertTrue(result.text().contains("URI=\"proxy:init.mp4\""));
         assertTrue(result.text().contains("URI=\"data:text/plain;base64,c2VjcmV0\""));
         assertTrue(result.text().contains("proxy:first.ts"));
@@ -132,9 +137,64 @@ public class HlsPlaylistRewriterTest {
 
         assertTrue(result.variants().isEmpty());
         assertEquals(2, mappings.size());
+        assertEquals(1, result.mediaUnits().size());
+        assertMediaUnit(result.mediaUnits().get(0),
+                "source:part-1.m4s", 0.333, 0, false, true);
         assertEquals(HlsPlaylistRewriter.UriRole.MEDIA_SEGMENT, mappings.get(0).context().role());
         assertEquals(selected, mappings.get(0).context().variant());
+        assertEquals(0.333, mappings.get(0).context().durationSeconds(),
+                0.0001);
+        assertEquals(0, mappings.get(0).context().startSeconds(), 0.0001);
         assertEquals(selected, mappings.get(1).context().variant());
+        assertEquals(0, mappings.get(1).context().durationSeconds(), 0.0001);
+        assertEquals(0.333, mappings.get(1).context().startSeconds(),
+                0.0001);
+    }
+
+    @Test
+    public void completedLowLatencyPartsDoNotDoubleCountParentSegment() {
+        String playlist = """
+                #EXTM3U
+                #EXT-X-PART:DURATION=0.5,URI="p1.m4s"
+                #EXT-X-PART:DURATION=0.5,URI="p2.m4s"
+                #EXTINF:1.0,
+                full.m4s
+                #EXT-X-PART:DURATION=0.25,URI="p3.m4s"
+                """;
+
+        HlsPlaylistRewriter.Result result = rewrite(
+                playlist, null, new ArrayList<>());
+
+        assertEquals(1, result.segments().size());
+        assertSegment(result.segments().get(0),
+                "source:full.m4s", 1, 0, false);
+        assertEquals(4, result.mediaUnits().size());
+        assertMediaUnit(result.mediaUnits().get(0),
+                "source:p1.m4s", 0.5, 0, false, true);
+        assertMediaUnit(result.mediaUnits().get(1),
+                "source:p2.m4s", 0.5, 0.5, false, true);
+        assertMediaUnit(result.mediaUnits().get(2),
+                "source:full.m4s", 1, 0, false, false);
+        assertMediaUnit(result.mediaUnits().get(3),
+                "source:p3.m4s", 0.25, 1, false, true);
+    }
+
+    @Test
+    public void parentSegmentRoundingCannotMovePartTimelineBackward() {
+        String playlist = """
+                #EXTM3U
+                #EXT-X-PART:DURATION=0.6,URI="p1.m4s"
+                #EXT-X-PART:DURATION=0.6,URI="p2.m4s"
+                #EXTINF:1.0,
+                full.m4s
+                #EXT-X-PART:DURATION=0.25,URI="p3.m4s"
+                """;
+
+        HlsPlaylistRewriter.Result result = rewrite(
+                playlist, null, new ArrayList<>());
+
+        assertMediaUnit(result.mediaUnits().get(3),
+                "source:p3.m4s", 0.25, 1.2, false, true);
     }
 
     @Test
@@ -150,6 +210,7 @@ public class HlsPlaylistRewriterTest {
         assertEquals(playlist, result.text());
         assertTrue(result.variants().isEmpty());
         assertTrue(result.segments().isEmpty());
+        assertTrue(result.mediaUnits().isEmpty());
     }
 
     private static HlsPlaylistRewriter.Result rewrite(String playlist, HlsPlaylistRewriter.Variant inherited, List<Mapping> mappings) {
@@ -172,6 +233,20 @@ public class HlsPlaylistRewriterTest {
         assertEquals(duration, segment.durationSeconds(), 0.0001);
         assertEquals(start, segment.startSeconds(), 0.0001);
         assertEquals(byteRange, segment.byteRange());
+    }
+
+    private static void assertMediaUnit(
+            HlsPlaylistRewriter.MediaUnit unit,
+            String uri,
+            double duration,
+            double start,
+            boolean byteRange,
+            boolean partial) {
+        assertEquals(uri, unit.uri());
+        assertEquals(duration, unit.durationSeconds(), 0.0001);
+        assertEquals(start, unit.startSeconds(), 0.0001);
+        assertEquals(byteRange, unit.byteRange());
+        assertEquals(partial, unit.partial());
     }
 
     private static int count(String value, String needle) {

@@ -33,7 +33,9 @@ import com.fongmi.android.tv.BuildConfig;
 import com.fongmi.android.tv.player.exo.ExoUtil;
 import com.fongmi.android.tv.player.PlaybackResourceClassifier;
 import com.fongmi.android.tv.player.PlaybackRoute;
+import com.fongmi.android.tv.player.ijk.IjkBufferPolicy;
 import com.fongmi.android.tv.setting.IjkPerformanceSetting;
+import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
 import com.fongmi.android.tv.setting.PlayerSetting;
 import com.fongmi.android.tv.utils.Task;
 import com.github.catvod.crawler.SpiderDebug;
@@ -102,6 +104,8 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
     private volatile boolean resourceObservationActive;
     private volatile PlaybackResourceClassifier.Classification resourceClassification;
     private volatile String currentPlayableUrl;
+    private volatile IjkBufferPolicy.Config automaticInputBufferConfig;
+    private volatile IjkBufferPolicy.Config appliedInputBufferConfig;
     private float volume;
 
     IjkSimplePlayer(int decode) {
@@ -119,6 +123,8 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         pendingSeekRequestedAtMs = C.TIME_UNSET;
         playWhenReady = true;
         volume = 1f;
+        automaticInputBufferConfig = IjkBufferPolicy.safeInitialConfig();
+        appliedInputBufferConfig = IjkBufferPolicy.safeInitialConfig();
     }
 
     @Override
@@ -218,8 +224,43 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         }
     }
 
+    Long getLiveLagLowerBoundSnapshot() {
+        MpvHlsProxy.LiveLagSnapshot snapshot = hlsProxy.liveLagSnapshot(
+                getNativeBufferedDurationSnapshot());
+        return snapshot.known() ? snapshot.lowerBoundMs() : null;
+    }
+
+    private long getNativeBufferedDurationSnapshot() {
+        try {
+            long audio = Math.max(0, ijk.getAudioCachedDuration());
+            long video = Math.max(0, ijk.getVideoCachedDuration());
+            Tracks tracks = currentTracks;
+            return IjkBufferedDurationPolicy.resolve(
+                    tracks.containsType(C.TRACK_TYPE_AUDIO),
+                    tracks.containsType(C.TRACK_TYPE_VIDEO),
+                    audio,
+                    video);
+        } catch (Throwable error) {
+            if (SpiderDebug.isEnabled()) {
+                SpiderDebug.log("ijk-buffer",
+                        "buffer-duration unavailable errorType=%s action=keep-unknown",
+                        error.getClass().getSimpleName());
+            }
+            return 0;
+        }
+    }
+
     void setDecode(int decode) {
         this.decode = decode;
+    }
+
+    void stageAutomaticInputBufferConfig(IjkBufferPolicy.Config config) {
+        automaticInputBufferConfig = config == null
+                ? IjkBufferPolicy.safeInitialConfig() : config;
+    }
+
+    IjkBufferPolicy.Config getAppliedInputBufferConfig() {
+        return appliedInputBufferConfig;
     }
 
     @Override
@@ -600,7 +641,26 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
 
     private void configureOptions(Uri uri, boolean dash) {
         String url = uri.toString();
-        IjkInputBufferPolicy.Decision inputBuffer = IjkInputBufferPolicy.resolve(url, IjkPerformanceSetting.getScene(), IjkPerformanceSetting.getBufferMb());
+        boolean automatic = PlaybackPerformanceSetting.isAuto(PlayerSetting.IJK);
+        IjkBufferOptionPolicy.Decision inputBuffer =
+                IjkBufferOptionPolicy.resolve(
+                        automatic,
+                        automaticInputBufferConfig,
+                        url,
+                        IjkPerformanceSetting.getScene(),
+                        IjkPerformanceSetting.getBufferMb(),
+                        IjkPerformanceSetting.getFirstWaterMs(),
+                        IjkPerformanceSetting.getNextWaterMs(),
+                        IjkPerformanceSetting.getLastWaterMs());
+        appliedInputBufferConfig = inputBuffer.config();
+        SpiderDebug.log("ijk-buffer",
+                "action=prepare mode=%s bufferMb=%d firstMs=%d nextMs=%d lastMs=%d realtime=%s infbuf=%s",
+                automatic ? "automatic" : "fixed",
+                appliedInputBufferConfig.bufferMb(),
+                appliedInputBufferConfig.firstWaterMs(),
+                appliedInputBufferConfig.nextWaterMs(),
+                appliedInputBufferConfig.lastWaterMs(),
+                inputBuffer.realtime(), inputBuffer.infiniteBuffer());
         if (dash) ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "iformat", "dash");
         configureSoftDecodeOptions();
         ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "dns_cache_clear", 1);
@@ -612,9 +672,9 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "framedrop", IjkPerformanceSetting.getFrameDropValue());
         ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "max-buffer-size", inputBuffer.maxBufferBytes());
         ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "packet-buffering", dash ? 0 : (IjkPerformanceSetting.isPacketBuffering() ? 1 : 0));
-        ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "first-high-water-mark-ms", IjkPerformanceSetting.getFirstWaterMs());
-        ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "next-high-water-mark-ms", IjkPerformanceSetting.getNextWaterMs());
-        ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "last-high-water-mark-ms", IjkPerformanceSetting.getLastWaterMs());
+        ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "first-high-water-mark-ms", appliedInputBufferConfig.firstWaterMs());
+        ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "next-high-water-mark-ms", appliedInputBufferConfig.nextWaterMs());
+        ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "last-high-water-mark-ms", appliedInputBufferConfig.lastWaterMs());
         ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec", decode);
         ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-hevc", decode);
         ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-all-videos", decode);

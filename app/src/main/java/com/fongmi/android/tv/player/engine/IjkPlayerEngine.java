@@ -16,6 +16,7 @@ import com.fongmi.android.tv.player.PlaybackResourceClassifier;
 import com.fongmi.android.tv.player.PlaybackRoute;
 import com.fongmi.android.tv.player.exo.ExoUtil;
 import com.fongmi.android.tv.player.exo.TrackUtil;
+import com.fongmi.android.tv.player.ijk.IjkBufferPolicy;
 import com.fongmi.android.tv.utils.ResUtil;
 
 import java.util.List;
@@ -79,12 +80,37 @@ public class IjkPlayerEngine implements PlayerEngine {
 
     @Override
     public void start(PlaySpec spec, boolean playWhenReady) {
+        start(spec, C.TIME_UNSET, playWhenReady);
+    }
+
+    @Override
+    public void start(PlaySpec spec, long position, boolean playWhenReady) {
         this.spec = spec;
-        PlaybackTrace.log("player-engine", getPlaybackTraceId(), "start ijk decode=%d play=%s urlLen=%d headers=%d", decode, playWhenReady, spec.getUrl() == null ? 0 : spec.getUrl().length(), spec.getHeaders() == null ? 0 : spec.getHeaders().size());
-        player.setMediaItem(ExoUtil.getMediaItem(spec, decode));
+        PlaybackTrace.log("player-engine", getPlaybackTraceId(), "start ijk decode=%d position=%d play=%s urlLen=%d headers=%d", decode, position, playWhenReady, spec.getUrl() == null ? 0 : spec.getUrl().length(), spec.getHeaders() == null ? 0 : spec.getHeaders().size());
+        MediaItem item = ExoUtil.getMediaItem(spec, decode);
+        if (position > 0) player.setMediaItem(item, position);
+        else player.setMediaItem(item);
         player.prepare();
         if (playWhenReady) player.play();
         else player.pause();
+    }
+
+    @Override
+    public void restart(PlaySpec spec, long position, boolean playWhenReady) {
+        player.stop();
+        start(spec, position, playWhenReady);
+    }
+
+    public void stageAutomaticInputBufferConfig(IjkBufferPolicy.Config config) {
+        player.stageAutomaticInputBufferConfig(config);
+    }
+
+    public IjkBufferPolicy.Config getAppliedInputBufferConfig() {
+        return player.getAppliedInputBufferConfig();
+    }
+
+    public Long getLiveLagLowerBoundMs() {
+        return player.getLiveLagLowerBoundSnapshot();
     }
 
     @Override

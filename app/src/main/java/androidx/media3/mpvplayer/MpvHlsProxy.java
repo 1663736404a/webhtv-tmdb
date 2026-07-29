@@ -242,6 +242,28 @@ public final class MpvHlsProxy extends NanoHTTPD {
         return PlaybackResourceClassifier.classifyRequest(session.url, null, null);
     }
 
+    public LiveLagSnapshot liveLagSnapshot(long nativeBufferedDurationMs) {
+        if (kernel != PlayerSetting.IJK) return LiveLagSnapshot.unknown();
+        SessionStats stats = sessionStats.get(sessionId);
+        if (stats == null) return LiveLagSnapshot.unknown();
+        long now = SystemClock.elapsedRealtime();
+        PlaybackResourceClassifier.Classification classification =
+                stats.resourceClassification(now);
+        PlaybackAutoContext.StreamKind stream = classification == null
+                ? PlaybackAutoContext.StreamKind.UNKNOWN
+                : classification.streamKind();
+        if (stream != PlaybackAutoContext.StreamKind.LIVE
+                && stream != PlaybackAutoContext.StreamKind.LOW_LATENCY_LIVE) {
+            return LiveLagSnapshot.unknown();
+        }
+        HlsProxyLiveLagTracker.Snapshot snapshot =
+                stats.liveLagSnapshot(now, nativeBufferedDurationMs);
+        return snapshot.known()
+                ? new LiveLagSnapshot(true, snapshot.lowerBoundMs(),
+                snapshot.nativeBufferedDurationMs(), snapshot.outsideWindow())
+                : LiveLagSnapshot.unknown();
+    }
+
     HlsVariantSnapshot variantSnapshot() {
         SessionStats stats = sessionStats.get(sessionId);
         if (stats == null) return HlsVariantSnapshot.empty();
@@ -539,6 +561,12 @@ public final class MpvHlsProxy extends NanoHTTPD {
             String range = requestHeader(httpSession, "range");
             boolean targetPlaylist = isPlaylistUrl(target.url, null);
             if (targetPlaylist) recordSelectedVariant(target);
+            if (kernel == PlayerSetting.IJK
+                    && !targetPlaylist
+                    && target.role() == HlsPlaylistRewriter.UriRole.MEDIA_SEGMENT) {
+                stats(target.sessionId()).observeLiveMediaRequest(
+                        target.url(), SystemClock.elapsedRealtime());
+            }
             String forwardedRange = targetPlaylist ? null : range;
             if (!targetPlaylist && target.cacheable) {
                 Response cached = serveCached(owner, target.url, range, foreground);
@@ -649,7 +677,9 @@ public final class MpvHlsProxy extends NanoHTTPD {
         HlsPlaylistRewriter.Result result = HlsPlaylistRewriter.rewrite(text, inheritedVariant, (uri, cacheable, context) -> {
             String targetUrl = resolve(playlistUrl, uri);
             HlsPlaylistRewriter.Variant targetVariant = context.variant();
-            String rewrittenUrl = proxyItemUrl(targetUrl, session, cacheable, targetVariant);
+            String rewrittenUrl = proxyItemUrl(
+                    targetUrl, session, cacheable, targetVariant,
+                    context.role());
             return new HlsPlaylistRewriter.MappedUri(targetUrl, rewrittenUrl);
         });
         recordPlaylistDetails(session, playlistUrl, text, result, inheritedVariant);
@@ -659,19 +689,24 @@ public final class MpvHlsProxy extends NanoHTTPD {
         return result.text();
     }
 
-    private String proxyItemUrl(String targetUrl, int session, boolean cacheable) {
-        return proxyItemUrl(targetUrl, session, cacheable, null);
-    }
-
-    private String proxyItemUrl(String targetUrl, int session, boolean cacheable, @Nullable HlsPlaylistRewriter.Variant variant) {
+    private String proxyItemUrl(
+            String targetUrl,
+            int session,
+            boolean cacheable,
+            @Nullable HlsPlaylistRewriter.Variant variant,
+            HlsPlaylistRewriter.UriRole role) {
         String id = Long.toString(nextId.incrementAndGet());
-        targets.put(id, new Target(session, targetUrl, System.currentTimeMillis(), cacheable, variant));
+        targets.put(id, new Target(
+                session, targetUrl, System.currentTimeMillis(), cacheable,
+                variant, role));
         return baseUrl() + "/mpv/item?s=" + session + "&id=" + id;
     }
 
     private String proxyDashItemUrl(String targetUrl, int session) {
         String id = Long.toString(nextId.incrementAndGet());
-        targets.put(id, new Target(session, targetUrl, System.currentTimeMillis(), true, null));
+        targets.put(id, new Target(
+                session, targetUrl, System.currentTimeMillis(), true, null,
+                HlsPlaylistRewriter.UriRole.OTHER));
         return baseUrl() + "/mpv/dash-item/" + id + "/media.m4s";
     }
 
@@ -992,8 +1027,24 @@ public final class MpvHlsProxy extends NanoHTTPD {
                     playerPlaylistUri(session), owner.url, text, SystemClock.elapsedRealtime());
             stats.observeHls(playlistUrl, classification);
         }
-        stats.vod = stats.resourceClassification(SystemClock.elapsedRealtime()).streamKind()
+        long now = SystemClock.elapsedRealtime();
+        PlaybackResourceClassifier.Classification effective =
+                stats.resourceClassification(now);
+        stats.vod = effective.streamKind()
                 == PlaybackAutoContext.StreamKind.VOD;
+        String playlistKey = playlistUrl == null
+                ? "direct" : Util.md5(playlistUrl);
+        if (kernel == PlayerSetting.IJK
+                && !result.mediaUnits().isEmpty()
+                && (effective.streamKind() == PlaybackAutoContext.StreamKind.LIVE
+                || effective.streamKind()
+                == PlaybackAutoContext.StreamKind.LOW_LATENCY_LIVE)) {
+            stats.observeLivePlaylist(
+                    playlistKey, result.mediaUnits(), now);
+        } else if (kernel == PlayerSetting.IJK
+                && !result.mediaUnits().isEmpty()) {
+            stats.clearLivePlaylist(playlistKey);
+        }
         String upper = text.toUpperCase(Locale.US);
         if (upper.contains("#EXT-X-BYTERANGE:") || upper.contains("BYTERANGE=")) stats.hasByteRange = true;
         if (!result.variants().isEmpty()) stats.recordVariants(result.variants());
@@ -1281,7 +1332,18 @@ public final class MpvHlsProxy extends NanoHTTPD {
     private record Session(String url, Map<String, String> headers, long createdAtMs) {
     }
 
-    private record Target(int sessionId, String url, long createdAtMs, boolean cacheable, @Nullable HlsPlaylistRewriter.Variant variant) {
+    private record Target(
+            int sessionId,
+            String url,
+            long createdAtMs,
+            boolean cacheable,
+            @Nullable HlsPlaylistRewriter.Variant variant,
+            HlsPlaylistRewriter.UriRole role) {
+
+        private Target {
+            role = role == null
+                    ? HlsPlaylistRewriter.UriRole.OTHER : role;
+        }
     }
 
     private record Range(long start, long end) {
@@ -1705,6 +1767,8 @@ public final class MpvHlsProxy extends NanoHTTPD {
         private volatile String lastUrl;
         private volatile PlaybackResourceClassifier.Classification classification;
         private final HlsManifestTimelineTracker hlsTimeline = new HlsManifestTimelineTracker();
+        private final HlsProxyLiveLagTracker liveLag =
+                new HlsProxyLiveLagTracker();
         private volatile HlsPlaylistRewriter.Variant selectedVariant;
         private volatile int variantCount;
         private volatile List<HlsVariant> variants = List.of();
@@ -1773,6 +1837,47 @@ public final class MpvHlsProxy extends NanoHTTPD {
                 long nowElapsedMs) {
             PlaybackResourceClassifier.Classification fallback = classification;
             return hlsTimeline.snapshot(fallback, nowElapsedMs).classification();
+        }
+
+        private void observeLivePlaylist(
+                String playlistKey,
+                List<HlsPlaylistRewriter.MediaUnit> mediaUnits,
+                long observedAtElapsedMs) {
+            liveLag.observePlaylist(
+                    playlistKey, mediaUnits, observedAtElapsedMs);
+        }
+
+        private void clearLivePlaylist(String playlistKey) {
+            liveLag.clearPlaylist(playlistKey);
+        }
+
+        private void observeLiveMediaRequest(
+                String uri,
+                long requestedAtElapsedMs) {
+            liveLag.observeMediaRequest(uri, requestedAtElapsedMs);
+        }
+
+        private HlsProxyLiveLagTracker.Snapshot liveLagSnapshot(
+                long nowElapsedMs,
+                long nativeBufferedDurationMs) {
+            return liveLag.snapshot(nowElapsedMs, nativeBufferedDurationMs);
+        }
+    }
+
+    public record LiveLagSnapshot(
+            boolean known,
+            long lowerBoundMs,
+            long nativeBufferedDurationMs,
+            boolean outsideWindow) {
+
+        public LiveLagSnapshot {
+            lowerBoundMs = Math.max(0, lowerBoundMs);
+            nativeBufferedDurationMs = Math.max(0,
+                    nativeBufferedDurationMs);
+        }
+
+        public static LiveLagSnapshot unknown() {
+            return new LiveLagSnapshot(false, 0, 0, false);
         }
     }
 
