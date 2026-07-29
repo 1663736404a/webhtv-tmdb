@@ -96,6 +96,7 @@ public final class PlaybackTelemetry {
         IJK_BUFFER("ijk-buffer"),
         IJK_REALTIME_RECOVERY("ijk-realtime-recovery"),
         IJK_DECODE_PRESSURE("ijk-decode-pressure"),
+        IJK_RUNTIME_PROFILE("ijk-runtime-profile"),
         DISPLAY_MODE("display-mode"),
         TUNNELING("tunneling"),
         LOAD_CONTROL("load-control"),

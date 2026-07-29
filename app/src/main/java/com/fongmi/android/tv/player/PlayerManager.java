@@ -57,6 +57,9 @@ import com.fongmi.android.tv.player.ijk.IjkDecodePressureController;
 import com.fongmi.android.tv.player.ijk.IjkDecodePressurePolicy;
 import com.fongmi.android.tv.player.ijk.IjkRealtimeRecoveryController;
 import com.fongmi.android.tv.player.ijk.IjkRealtimeRecoveryPolicy;
+import com.fongmi.android.tv.player.ijk.IjkRuntimeProfileController;
+import com.fongmi.android.tv.player.ijk.IjkRuntimeProfilePolicy;
+import com.fongmi.android.tv.player.ijk.IjkRuntimeProfiles;
 import com.fongmi.android.tv.player.danmaku.DanmakuUrlPolicy;
 import com.fongmi.android.tv.player.danmaku.LiveDanmakuBatcher;
 import com.fongmi.android.tv.player.danmaku.LiveDanmakuBuffer;
@@ -161,6 +164,7 @@ public class PlayerManager implements ParseCallback {
     private final IjkBufferController ijkBufferController;
     private final IjkDecodePressureController ijkDecodePressureController;
     private final IjkRealtimeRecoveryController ijkRealtimeRecoveryController;
+    private final IjkRuntimeProfileController ijkRuntimeProfileController;
     private final ForwardBufferTrend networkProtectionTrend;
     private final LiveDanmakuBatcher liveDanmakuBatcher;
     private final LiveDanmakuBuffer liveDanmakuBuffer;
@@ -217,6 +221,9 @@ public class PlayerManager implements ParseCallback {
     private boolean mpvSurfaceFallbackTried;
     private boolean mpvHlsManagedReload;
     private boolean ijkBufferManagedReload;
+    private boolean ijkRuntimeTemporaryFallback;
+    private boolean ijkRuntimeManualOverride;
+    private boolean pendingIjkRuntimeFallbackReparse;
     private int playerType;
     private int retry;
     private int localProxyRetry;
@@ -257,6 +264,8 @@ public class PlayerManager implements ParseCallback {
                 new IjkDecodePressureController();
         this.ijkRealtimeRecoveryController =
                 new IjkRealtimeRecoveryController();
+        this.ijkRuntimeProfileController =
+                IjkRuntimeProfiles.process().newController();
         this.mpvResourceMemoryRegistration = PlaybackMemoryCoordinator.process().addListener(update ->
                 App.post(() -> onMpvResourceMemoryUpdate(update)));
         this.ijkBufferMemoryRegistration = PlaybackMemoryCoordinator.process().addListener(update ->
@@ -301,6 +310,9 @@ public class PlayerManager implements ParseCallback {
         danmakuController = null;
         endPlaybackTelemetrySession("release");
         clearPlaybackAutoContext();
+        ijkRuntimeTemporaryFallback = false;
+        ijkRuntimeManualOverride = false;
+        pendingIjkRuntimeFallbackReparse = false;
         if (engine == null) return;
         engine.release();
         engine = null;
@@ -1095,6 +1107,7 @@ public class PlayerManager implements ParseCallback {
     }
 
     public void toggleDecode() {
+        beginIjkRuntimeManualOverride();
         int next = engine.isHard() ? PlayerEngine.SOFT : PlayerEngine.HARD;
         boolean resetVideoSurface = playerType == PlayerSetting.EXO && next == PlayerEngine.HARD;
         hardDecodeSwitchRetryArmed = next == PlayerEngine.HARD;
@@ -1106,6 +1119,7 @@ public class PlayerManager implements ParseCallback {
 
     public void switchDecode(PlaySpec freshSpec, long position, float speed, boolean repeat) {
         if (engine == null || player == null || freshSpec == null) return;
+        beginIjkRuntimeManualOverride();
         beginPlaybackTrace("switch-decode-fresh");
         int next = engine.isHard() ? PlayerEngine.SOFT : PlayerEngine.HARD;
         boolean resetVideoSurface = playerType == PlayerSetting.EXO && next == PlayerEngine.HARD;
@@ -1130,6 +1144,7 @@ public class PlayerManager implements ParseCallback {
 
     public void switchDecode(Result result, String key, MediaMetadata metadata, boolean useParse, long position, float speed, boolean repeat) {
         if (engine == null || player == null || result == null || result.hasMsg() || result.getRealUrl().isEmpty()) return;
+        beginIjkRuntimeManualOverride();
         beginPlaybackTrace("switch-decode-result");
         int next = engine.isHard() ? PlayerEngine.SOFT : PlayerEngine.HARD;
         boolean resetVideoSurface = playerType == PlayerSetting.EXO && next == PlayerEngine.HARD;
@@ -1174,6 +1189,7 @@ public class PlayerManager implements ParseCallback {
 
     public void switchPlayer(int type, PlaySpec freshSpec, long position, float speed, boolean repeat) {
         if (engine == null || player == null || freshSpec == null) return;
+        beginIjkRuntimeManualOverride();
         beginPlaybackTrace("switch-player-fresh");
         type = PlayerSetting.sanitizePlayer(type);
         boolean wasPlayWhenReady = player.getPlayWhenReady();
@@ -1199,6 +1215,7 @@ public class PlayerManager implements ParseCallback {
 
     public void switchPlayer(int type, Result result, String key, MediaMetadata metadata, boolean useParse, long position, float speed, boolean repeat) {
         if (engine == null || player == null || result == null || result.hasMsg() || result.getRealUrl().isEmpty()) return;
+        beginIjkRuntimeManualOverride();
         beginPlaybackTrace("switch-player-result");
         type = PlayerSetting.sanitizePlayer(type);
         boolean wasPlayWhenReady = player.getPlayWhenReady();
@@ -1238,6 +1255,7 @@ public class PlayerManager implements ParseCallback {
         if (engine == null || player == null) return;
         type = PlayerSetting.sanitizePlayer(type);
         if (type == playerType) return;
+        beginIjkRuntimeManualOverride();
         beginPlaybackTrace("switch-player");
         long position = getPosition();
         float speed = getSpeed();
@@ -2706,6 +2724,507 @@ public class PlayerManager implements ParseCallback {
                 PlaybackTelemetry.safeLabel(completionReason));
     }
 
+    private void activateIjkRuntimeProfileIfEligible(long nowElapsedMs) {
+        if (ijkRuntimeManualOverride
+                || !playbackAutoSession.active()
+                || playerType != PlayerSetting.IJK
+                || !PlaybackPerformanceSetting.isAuto(PlayerSetting.IJK)
+                || PlayerSetting.getPlayer() != PlayerSetting.IJK) return;
+        long now = Math.max(0, nowElapsedMs);
+        IjkRuntimeProfileController.Facts facts = currentIjkRuntimeFacts(now);
+        IjkRuntimeProfileController.RuntimeSample sample =
+                currentIjkRuntimeSample(null, now);
+        IjkRuntimeProfilePolicy.Path path = engine != null && engine.isHard()
+                ? IjkRuntimeProfilePolicy.Path.IJK_HARD
+                : IjkRuntimeProfilePolicy.Path.IJK_SOFT;
+        if (!ijkRuntimeProfileController.activate(
+                playbackAutoSession, path, facts, sample, now)) return;
+        PlaybackTrace.log(
+                "ijk-runtime-profile",
+                playbackTrace.current(),
+                "action=activate path=%s profile=%s",
+                path.label(),
+                ijkRuntimeProfileController.snapshot().profileId());
+    }
+
+    private IjkRuntimeProfileController.Facts currentIjkRuntimeFacts(
+            long nowElapsedMs) {
+        boolean automatic = PlayerSetting.getPlayer() == PlayerSetting.IJK
+                && PlaybackPerformanceSetting.isAuto(PlayerSetting.IJK)
+                && !ijkRuntimeManualOverride;
+        return IjkRuntimeProfileController.Facts.fromContext(
+                playbackAutoContextStore.snapshot(),
+                automatic,
+                Math.max(0, nowElapsedMs));
+    }
+
+    private IjkRuntimeProfileController.RuntimeSample currentIjkRuntimeSample(
+            PlaybackTelemetry.RuntimeObservation observation,
+            long nowElapsedMs) {
+        boolean active = false;
+        if (player != null) {
+            try {
+                active = player.getPlaybackState() == Player.STATE_READY
+                        && player.getPlayWhenReady()
+                        && player.isPlaying();
+            } catch (Throwable ignored) {
+            }
+        }
+        boolean decodeFpsUsable = false;
+        float decodeFps = 0f;
+        boolean outputFpsUsable = false;
+        float outputFps = 0f;
+        boolean dropRateUsable = false;
+        int dropRatePermille = 0;
+        if (engine instanceof IjkPlayerEngine ijk) {
+            IjkDecodePressurePolicy.DecodeSnapshot decode =
+                    ijk.getDecodePressureSnapshot();
+            decodeFpsUsable = decode.available()
+                    && decode.decodeFps() > 0;
+            decodeFps = decodeFpsUsable ? decode.decodeFps() : 0f;
+            outputFpsUsable = decode.available()
+                    && decode.outputFps() > 0;
+            outputFps = outputFpsUsable ? decode.outputFps() : 0f;
+            IjkPlayerEngine.DropRateSnapshot drop =
+                    ijk.getDropRateSnapshot();
+            dropRateUsable = drop.available();
+            dropRatePermille = drop.permille();
+        } else if (observation != null
+                && observation.renderedFrameRate().known()
+                && observation.renderedFrameRate().value() > 0) {
+            outputFpsUsable = true;
+            outputFps = observation.renderedFrameRate().value();
+        }
+        int rebufferCount = observation != null
+                && observation.rebufferCount().known()
+                ? Math.max(0, observation.rebufferCount().value())
+                : playbackBufferingTracker.getRebufferCount();
+        boolean droppedFramesUsable = observation != null
+                && observation.droppedFrames().known();
+        long droppedFrames = droppedFramesUsable
+                ? Math.max(0, observation.droppedFrames().value()) : 0;
+        long nativeHeapBytes = -1;
+        long pssBytes = -1;
+        PlaybackAutoContext context = playbackAutoContextStore.snapshot();
+        long now = Math.max(0, nowElapsedMs);
+        if (playbackAutoSession.equals(context.session())) {
+            PlaybackAutoContext.Fact<PlaybackAutoContext.MemorySnapshot>
+                    memory = context.device().memorySnapshot();
+            if (memory.isUsable(now)
+                    && memory.value().nativeHeapAllocatedBytes() != null) {
+                nativeHeapBytes = memory.value().nativeHeapAllocatedBytes();
+            }
+            PlaybackAutoContext.Fact<Long> pss =
+                    context.device().diagnosticPssBytes();
+            if (pss.isUsable(now) && pss.value() >= 0) {
+                pssBytes = pss.value();
+            }
+        }
+        return new IjkRuntimeProfileController.RuntimeSample(
+                active,
+                rebufferCount,
+                decodeFpsUsable,
+                decodeFps,
+                outputFpsUsable,
+                outputFps,
+                dropRateUsable,
+                dropRatePermille,
+                droppedFramesUsable,
+                droppedFrames,
+                nativeHeapBytes,
+                pssBytes);
+    }
+
+    private void onIjkRuntimeFirstFrame(long nowElapsedMs) {
+        if (!playbackAutoSession.active()) return;
+        long now = Math.max(0, nowElapsedMs);
+        IjkRuntimeProfileController.Observation observation =
+                ijkRuntimeProfileController.onFirstFrame(
+                        playbackAutoSession,
+                        currentIjkRuntimeFacts(now),
+                        currentIjkRuntimeSample(null, now),
+                        now,
+                        System.currentTimeMillis());
+        publishIjkRuntimeObservation(observation, now);
+    }
+
+    private void evaluateIjkRuntimeProfile(
+            PlaybackTelemetry.RuntimeObservation runtime,
+            long nowElapsedMs) {
+        if (!playbackAutoSession.active()) return;
+        long now = Math.max(0, nowElapsedMs);
+        IjkRuntimeProfileController.Observation observation =
+                ijkRuntimeProfileController.observe(
+                        playbackAutoSession,
+                        currentIjkRuntimeFacts(now),
+                        currentIjkRuntimeSample(runtime, now),
+                        now,
+                        System.currentTimeMillis());
+        publishIjkRuntimeObservation(observation, now);
+    }
+
+    private void finishIjkRuntimeProfileSession(
+            PlaybackTelemetry.RuntimeObservation runtime,
+            long nowElapsedMs) {
+        if (!playbackAutoSession.active()) return;
+        long now = Math.max(0, nowElapsedMs);
+        ijkRuntimeProfileController.finishSession(
+                playbackAutoSession,
+                currentIjkRuntimeFacts(now),
+                currentIjkRuntimeSample(runtime, now),
+                System.currentTimeMillis());
+    }
+
+    private boolean retryIjkRuntimeProfileFallback(
+            PlaybackException error,
+            PlaybackErrorClassifier.Failure failure,
+            PlayerEngine.ErrorAction engineAction) {
+        if (engineAction == PlayerEngine.ErrorAction.RECOVERED
+                || error == null
+                || failure == null
+                || !playbackAutoSession.active()) return false;
+        long now = SystemClock.elapsedRealtime();
+        IjkPlayerEngine.ErrorSnapshot ijkError =
+                engine instanceof IjkPlayerEngine ijk
+                        ? ijk.getLastErrorSnapshot()
+                        : IjkPlayerEngine.ErrorSnapshot.none();
+        IjkRuntimeProfileController.Decision decision =
+                ijkRuntimeProfileController.handleFailure(
+                        playbackAutoSession,
+                        currentIjkRuntimeFacts(now),
+                        currentIjkRuntimeSample(
+                                collectPlaybackTelemetry(
+                                        PlaybackAutoContext.PlaybackPhase.ERROR,
+                                        now),
+                                now),
+                        new IjkRuntimeProfileController.FailureEvent(
+                                failure.stage(),
+                                error.errorCode,
+                                ijkError.what(),
+                                ijkError.extra(),
+                                ijkError.prepared()),
+                        now,
+                        System.currentTimeMillis());
+        publishIjkRuntimeFailureDecision(decision, now);
+        if (!decision.requestsSwitch()) return false;
+        boolean switched = switchIjkRuntimeFallback(decision);
+        if (!switched) {
+            ijkRuntimeProfileController.onSwitchStartFailed(
+                    playbackAutoSession, System.currentTimeMillis());
+            publishIjkRuntimeSwitchStartFailure("switch-start-failed");
+        }
+        return switched;
+    }
+
+    private boolean switchIjkRuntimeFallback(
+            IjkRuntimeProfileController.Decision decision) {
+        if (decision == null
+                || !decision.requestsSwitch()
+                || engine == null
+                || player == null
+                || spec == null
+                || TextUtils.isEmpty(spec.getUrl())) return false;
+        IjkRuntimeProfilePolicy.Path targetPath = decision.targetPath();
+        int targetPlayer = playerTypeForIjkRuntimePath(targetPath);
+        int targetDecode = targetPath == IjkRuntimeProfilePolicy.Path.IJK_SOFT
+                ? PlayerEngine.SOFT : PlayerEngine.HARD;
+        boolean wasPlayWhenReady = player.getPlayWhenReady();
+        float speed = getSpeed();
+        boolean repeat = isRepeatOne();
+        long now = SystemClock.elapsedRealtime();
+        long position = ijkRuntimeVodResumePosition(now);
+        PlayerEngine replacement;
+        try {
+            replacement = buildEngine(targetPlayer, targetDecode);
+        } catch (Throwable error) {
+            PlaybackTrace.log(
+                    "ijk-runtime-profile",
+                    playbackTrace.current(),
+                    "action=build-fallback target=%s result=failed errorType=%s",
+                    targetPath.label(),
+                    error.getClass().getSimpleName());
+            return false;
+        }
+        Player replacementPlayer = replacement.getPlayer();
+        try {
+            prepareSeq++;
+            App.removeCallbacks(runnable);
+            App.removeCallbacks(networkProtectionRunnable);
+            resetNetworkProtectionSession("ijk-runtime-fallback");
+            resetLutRuntimeState("ijk_runtime_fallback", true);
+            stopNativeAudioSession();
+            stopParse();
+            engine.release();
+            engine = replacement;
+            player = replacementPlayer;
+            playerType = targetPlayer;
+            playWhenReady = wasPlayWhenReady;
+            hardDecodeSwitchRetryArmed = false;
+            initTrack = false;
+            ijkRuntimeTemporaryFallback = true;
+            pendingIjkRuntimeFallbackReparse = false;
+            callback.onPlayerRebuild(player, false);
+            PlaybackTrace.log(
+                    "ijk-runtime-profile",
+                    playbackTrace.current(),
+                    "action=switch from=%s target=%s count=%d resume=%d play=%s",
+                    decision.fromPath().label(),
+                    targetPath.label(),
+                    decision.fallbackCount(),
+                    position == C.TIME_UNSET ? 0 : position,
+                    wasPlayWhenReady);
+            pendingIjkRuntimeFallbackReparse = true;
+            if (reparseForPlayerSwitch(position, speed, repeat)) {
+                return true;
+            }
+            pendingIjkRuntimeFallbackReparse = false;
+            setMediaItem(Constant.TIMEOUT_PLAY);
+            if (position > 0) seekTo(position);
+            if (speed != 1f) setSpeed(speed);
+            setRepeatOne(repeat);
+            return true;
+        } catch (Throwable error) {
+            PlaybackTrace.log(
+                    "ijk-runtime-profile",
+                    playbackTrace.current(),
+                    "action=switch target=%s result=failed errorType=%s",
+                    targetPath.label(),
+                    error.getClass().getSimpleName());
+            try {
+                if (engine != replacement) replacement.release();
+            } catch (Throwable ignored) {
+            }
+            return false;
+        }
+    }
+
+    private long ijkRuntimeVodResumePosition(long nowElapsedMs) {
+        PlaybackAutoContext context = playbackAutoContextStore.snapshot();
+        PlaybackAutoContext.Fact<PlaybackAutoContext.StreamKind> stream =
+                context.resource().streamKind();
+        if (!playbackAutoSession.equals(context.session())
+                || !stream.isUsable(Math.max(0, nowElapsedMs))
+                || stream.value() != PlaybackAutoContext.StreamKind.VOD) {
+            return C.TIME_UNSET;
+        }
+        return Math.max(0, getPosition());
+    }
+
+    private static int playerTypeForIjkRuntimePath(
+            IjkRuntimeProfilePolicy.Path path) {
+        if (path == IjkRuntimeProfilePolicy.Path.MPV) {
+            return PlayerSetting.MPV;
+        }
+        if (path == IjkRuntimeProfilePolicy.Path.EXO) {
+            return PlayerSetting.EXO;
+        }
+        return PlayerSetting.IJK;
+    }
+
+    private void prepareIjkRuntimeForUserPlayback() {
+        ijkRuntimeManualOverride = false;
+        pendingIjkRuntimeFallbackReparse = false;
+        if (!ijkRuntimeTemporaryFallback) return;
+        if (PlayerSetting.getPlayer() != PlayerSetting.IJK
+                || !PlaybackPerformanceSetting.isAuto(PlayerSetting.IJK)) {
+            ijkRuntimeTemporaryFallback = false;
+            return;
+        }
+        if (engine instanceof IjkPlayerEngine && engine.isHard()) {
+            playerType = PlayerSetting.IJK;
+            ijkRuntimeTemporaryFallback = false;
+            return;
+        }
+        PlayerEngine replacement;
+        try {
+            replacement = buildEngine(PlayerSetting.IJK, PlayerEngine.HARD);
+        } catch (Throwable error) {
+            PlaybackTrace.log(
+                    "ijk-runtime-profile",
+                    playbackTrace.current(),
+                    "action=restore-default result=failed errorType=%s",
+                    error.getClass().getSimpleName());
+            return;
+        }
+        try {
+            prepareSeq++;
+            stopNativeAudioSession();
+            if (engine != null) engine.release();
+            engine = replacement;
+            player = replacement.getPlayer();
+            playerType = PlayerSetting.IJK;
+            callback.onPlayerRebuild(player, false);
+            ijkRuntimeTemporaryFallback = false;
+            PlaybackTrace.log(
+                    "ijk-runtime-profile",
+                    playbackTrace.current(),
+                    "action=restore-default target=ijk-hard result=applied");
+        } catch (Throwable error) {
+            PlaybackTrace.log(
+                    "ijk-runtime-profile",
+                    playbackTrace.current(),
+                    "action=restore-default result=failed errorType=%s",
+                    error.getClass().getSimpleName());
+        }
+    }
+
+    private void beginIjkRuntimeManualOverride() {
+        ijkRuntimeManualOverride = true;
+        ijkRuntimeTemporaryFallback = false;
+        pendingIjkRuntimeFallbackReparse = false;
+        ijkRuntimeProfileController.cancel(playbackAutoSession);
+    }
+
+    private void publishIjkRuntimeObservation(
+            IjkRuntimeProfileController.Observation observation,
+            long nowElapsedMs) {
+        if (observation == null || !observation.material()) return;
+        List<PlaybackTelemetry.DecisionInput> inputs = new ArrayList<>();
+        inputs.add(PlaybackTelemetry.DecisionInput.text(
+                "profile", observation.profileId(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH));
+        inputs.add(PlaybackTelemetry.DecisionInput.number(
+                "rebuffer_count", observation.rebufferCount(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH));
+        addNumberInput(inputs, "drop_rate_permille",
+                observation.dropRatePermille(),
+                PlaybackAutoContext.ValueSource.NATIVE_RUNTIME,
+                PlaybackAutoContext.Confidence.MEDIUM);
+        addNumberInput(inputs, "rendered_ratio_permille",
+                observation.renderedRatioPermille(),
+                PlaybackAutoContext.ValueSource.ESTIMATOR,
+                PlaybackAutoContext.Confidence.MEDIUM);
+        addNumberInput(inputs, "native_growth_bytes",
+                observation.nativeHeapGrowthBytes(),
+                PlaybackAutoContext.ValueSource.SYSTEM_API,
+                PlaybackAutoContext.Confidence.MEDIUM);
+        addNumberInput(inputs, "pss_growth_bytes",
+                observation.pssGrowthBytes(),
+                PlaybackAutoContext.ValueSource.SYSTEM_API,
+                PlaybackAutoContext.Confidence.LOW);
+        PlaybackTelemetry.DecisionOutcome outcome =
+                observation.fallbackSucceeded()
+                        ? PlaybackTelemetry.DecisionOutcome.APPLIED
+                        : observation.action()
+                        == IjkRuntimeProfileController.ObservationAction.STABLE
+                        ? PlaybackTelemetry.DecisionOutcome.SELECTED
+                        : PlaybackTelemetry.DecisionOutcome.OBSERVED;
+        playbackTelemetryCoordinator.publishDecision(
+                playbackAutoSession,
+                new PlaybackTelemetry.DecisionEvent(
+                        PlaybackTelemetry.DecisionDomain.IJK_RUNTIME_PROFILE,
+                        outcome,
+                        observation.path().label(),
+                        observation.action().label(),
+                        observation.path().label(),
+                        observation.reason().label(),
+                        "none",
+                        inputs),
+                nowElapsedMs);
+        PlaybackTrace.log(
+                "ijk-runtime-profile",
+                playbackTrace.current(),
+                "action=%s reason=%s key=%s path=%s stable=%s fallbackSuccess=%s rebuffers=%d dropPermille=%d renderedPermille=%d nativeGrowth=%d pssGrowth=%d",
+                observation.action().label(),
+                observation.reason().label(),
+                observation.profileId(),
+                observation.path().label(),
+                observation.health().stable(),
+                observation.fallbackSucceeded(),
+                observation.rebufferCount(),
+                observation.dropRatePermille(),
+                observation.renderedRatioPermille(),
+                observation.nativeHeapGrowthBytes(),
+                observation.pssGrowthBytes());
+    }
+
+    private void publishIjkRuntimeFailureDecision(
+            IjkRuntimeProfileController.Decision decision,
+            long nowElapsedMs) {
+        if (decision == null
+                || decision.reason()
+                == IjkRuntimeProfileController.Reason.NOT_MANAGED) return;
+        List<PlaybackTelemetry.DecisionInput> inputs = new ArrayList<>();
+        inputs.add(PlaybackTelemetry.DecisionInput.text(
+                "profile", decision.profileId(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH));
+        inputs.add(PlaybackTelemetry.DecisionInput.text(
+                "failure_kind", decision.assessment().kind().label(),
+                PlaybackAutoContext.ValueSource.PLAYER_CALLBACK,
+                PlaybackAutoContext.Confidence.MEDIUM));
+        inputs.add(PlaybackTelemetry.DecisionInput.number(
+                "fallback_count", decision.fallbackCount(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH));
+        inputs.add(PlaybackTelemetry.DecisionInput.bool(
+                "failure_persisted", decision.failurePersisted(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH));
+        inputs.add(PlaybackTelemetry.DecisionInput.bool(
+                "fallback_failure_recorded",
+                decision.fallbackFailureRecorded(),
+                PlaybackAutoContext.ValueSource.PLAYER_MANAGER,
+                PlaybackAutoContext.Confidence.HIGH));
+        playbackTelemetryCoordinator.publishDecision(
+                playbackAutoSession,
+                new PlaybackTelemetry.DecisionEvent(
+                        PlaybackTelemetry.DecisionDomain.IJK_RUNTIME_PROFILE,
+                        decision.requestsSwitch()
+                                ? PlaybackTelemetry.DecisionOutcome.REQUESTED
+                                : PlaybackTelemetry.DecisionOutcome.HELD,
+                        decision.fromPath().label(),
+                        decision.targetPath() == null
+                                ? "hold" : decision.targetPath().label(),
+                        decision.requestsSwitch()
+                                ? "switch-pending" : decision.fromPath().label(),
+                        decision.reason().label(),
+                        decision.requestsSwitch()
+                                ? "none" : decision.reason().label(),
+                        inputs),
+                nowElapsedMs);
+        PlaybackTrace.log(
+                "ijk-runtime-profile",
+                playbackTrace.current(),
+                "action=%s reason=%s key=%s from=%s target=%s kind=%s persist=%s fallbackCount=%d",
+                decision.action().label(),
+                decision.reason().label(),
+                decision.profileId(),
+                decision.fromPath().label(),
+                decision.targetPath() == null
+                        ? "none" : decision.targetPath().label(),
+                decision.assessment().kind().label(),
+                decision.failurePersisted(),
+                decision.fallbackCount());
+    }
+
+    private void publishIjkRuntimeSwitchStartFailure(String reason) {
+        long now = SystemClock.elapsedRealtime();
+        IjkRuntimeProfileController.Snapshot snapshot =
+                ijkRuntimeProfileController.snapshot();
+        playbackTelemetryCoordinator.publishDecision(
+                playbackAutoSession,
+                new PlaybackTelemetry.DecisionEvent(
+                        PlaybackTelemetry.DecisionDomain.IJK_RUNTIME_PROFILE,
+                        PlaybackTelemetry.DecisionOutcome.FAILED,
+                        snapshot.currentPath().label(),
+                        snapshot.currentPath().label(),
+                        "failed",
+                        IjkRuntimeProfileController.Reason
+                                .SWITCH_START_FAILED.label(),
+                        PlaybackTelemetry.safeLabel(reason),
+                        List.of(
+                                PlaybackTelemetry.DecisionInput.number(
+                                        "fallback_count",
+                                        snapshot.fallbackCount(),
+                                        PlaybackAutoContext.ValueSource
+                                                .PLAYER_MANAGER,
+                                        PlaybackAutoContext.Confidence.HIGH))),
+                now);
+    }
+
     private void onMpvResourceMemoryUpdate(PlaybackMemoryCoordinator.Update update) {
         if (update == null || !playbackAutoSession.active()
                 || !playbackAutoSession.equals(update.session())) return;
@@ -3833,11 +4352,13 @@ public class PlayerManager implements ParseCallback {
     }
 
     public void start(PlaySpec spec, long timeout, boolean playWhenReady) {
+        endPlaybackTelemetrySession("replace-start");
+        prepareIjkRuntimeForUserPlayback();
         clearPendingSwitchRestore();
         clearDanmaku("start");
         this.spec = spec;
         prepareMpvOutputForNewItem();
-        beginPlaybackTrace("start");
+        beginPlaybackTrace("start", false);
         this.playWhenReady = playWhenReady;
         retry = 0;
         localProxyRetry = 0;
@@ -3850,12 +4371,14 @@ public class PlayerManager implements ParseCallback {
     }
 
     public void parse(String key, Result result, boolean useParse, MediaMetadata metadata, boolean playWhenReady) {
+        endPlaybackTelemetrySession("replace-parse");
+        prepareIjkRuntimeForUserPlayback();
         stopParse();
         clearPendingSwitchRestore();
         clearDanmaku("parse");
         spec = PlaySpec.fromParse(result, key, metadata, useParse);
         prepareMpvOutputForNewItem();
-        beginPlaybackTrace("parse");
+        beginPlaybackTrace("parse", false);
         this.playWhenReady = playWhenReady;
         retry = 0;
         localProxyRetry = 0;
@@ -3891,7 +4414,7 @@ public class PlayerManager implements ParseCallback {
     }
 
     private void refreshDirectForPlayerSwitch(Result result, String key, MediaMetadata metadata) {
-        if (SpiderDebug.isEnabled()) SpiderDebug.log("player", "switch player refresh direct type=%d key=%s flag=%s url=%s", playerType, key, result.getFlag(), summarizeUrl(result.getUrl().v()));
+        if (SpiderDebug.isEnabled()) SpiderDebug.log("player", "switch player refresh direct type=%d keyLen=%d flag=%s url=%s", playerType, safeLength(key), result.getFlag(), summarizeUrl(result.getUrl().v()));
         Task.execute(() -> {
             try {
                 Result refreshed = SiteApi.playerContent(key, result.getFlag(), result.getUrl().v(), playerType);
@@ -3937,6 +4460,7 @@ public class PlayerManager implements ParseCallback {
 
     private void clearPendingSwitchRestore() {
         pendingSwitchRestore = false;
+        pendingIjkRuntimeFallbackReparse = false;
         pendingSwitchPositionMs = C.TIME_UNSET;
         pendingSwitchSpeed = 1f;
         pendingSwitchRepeat = false;
@@ -3980,6 +4504,7 @@ public class PlayerManager implements ParseCallback {
         spec.setPlaybackTraceId(playbackTrace.ensure());
         spec.refreshPlaybackRoute();
         publishPlaybackAutoContext(false);
+        activateIjkRuntimeProfileIfEligible(SystemClock.elapsedRealtime());
         applyIjkAutoInitialControl();
         applyMpvAutoInitialControl();
         logPlaybackRoute();
@@ -4796,6 +5321,11 @@ public class PlayerManager implements ParseCallback {
 
     @Override
     public void onParseError() {
+        if (pendingIjkRuntimeFallbackReparse) {
+            ijkRuntimeProfileController.onSwitchStartFailed(
+                    playbackAutoSession, System.currentTimeMillis());
+            publishIjkRuntimeSwitchStartFailure("reparse-failed");
+        }
         clearPendingSwitchRestore();
         callback.onError(ResUtil.getString(R.string.error_play_parse));
     }
@@ -4803,7 +5333,7 @@ public class PlayerManager implements ParseCallback {
     private String debugSpec() {
         if (spec == null) return "null";
         return "trace=" + playbackTrace.current() +
-                ", key=" + spec.getKey() +
+                ", keyLen=" + safeLength(spec.getKey()) +
                 ", url=" + summarizeUrl(spec.getUrl()) +
                 ", format=" + spec.getFormat() +
                 ", headers=" + (spec.getHeaders() == null ? 0 : spec.getHeaders().size()) +
@@ -4812,7 +5342,13 @@ public class PlayerManager implements ParseCallback {
     }
 
     private void beginPlaybackTrace(String reason) {
-        endPlaybackTelemetrySession("replace-" + reason);
+        beginPlaybackTrace(reason, true);
+    }
+
+    private void beginPlaybackTrace(String reason, boolean finishCurrentSession) {
+        if (finishCurrentSession) {
+            endPlaybackTelemetrySession("replace-" + reason);
+        }
         playbackBufferingTracker.reset();
         lastIjkTimelinePublicationKey = null;
         playbackTrace.begin();
@@ -4830,6 +5366,7 @@ public class PlayerManager implements ParseCallback {
         ijkBufferController.beginSession(playbackAutoSession, now);
         ijkDecodePressureController.beginSession(playbackAutoSession);
         ijkRealtimeRecoveryController.beginSession(playbackAutoSession);
+        ijkRuntimeProfileController.beginSession(playbackAutoSession);
         ijkBufferManagedReload = false;
         pendingIjkBufferDecision = null;
         pendingIjkDecodePressureDecision = null;
@@ -4915,6 +5452,7 @@ public class PlayerManager implements ParseCallback {
                 collectPlaybackTelemetry(phaseOverride, now);
         playbackTelemetryCoordinator.publishRuntime(
                 playbackAutoSession, observation, now);
+        evaluateIjkRuntimeProfile(observation, now);
         evaluateExoRtspLiveLag(observation, now);
         if (phaseOverride != PlaybackAutoContext.PlaybackPhase.ERROR) {
             evaluateIjkBuffer(IjkBufferController.Trigger.RUNTIME, now);
@@ -5161,8 +5699,11 @@ public class PlayerManager implements ParseCallback {
         App.removeCallbacks(playbackTelemetryRunnable);
         if (!playbackAutoSession.active()) return;
         long now = SystemClock.elapsedRealtime();
+        PlaybackTelemetry.RuntimeObservation observation =
+                collectPlaybackTelemetry(null, now);
+        finishIjkRuntimeProfileSession(observation, now);
         playbackTelemetryCoordinator.endSession(
-                playbackAutoSession, reason, collectPlaybackTelemetry(null, now), now);
+                playbackAutoSession, reason, observation, now);
         rtspLiveLagController.endSession(playbackAutoSession);
     }
 
@@ -5597,6 +6138,7 @@ public class PlayerManager implements ParseCallback {
         ijkBufferController.endSession(playbackAutoSession);
         ijkDecodePressureController.endSession(playbackAutoSession);
         ijkRealtimeRecoveryController.endSession(playbackAutoSession);
+        ijkRuntimeProfileController.endSession(playbackAutoSession);
         ijkBufferManagedReload = false;
         pendingIjkBufferDecision = null;
         pendingIjkDecodePressureDecision = null;
@@ -5631,16 +6173,13 @@ public class PlayerManager implements ParseCallback {
     private static String summarizeUrl(String url) {
         if (TextUtils.isEmpty(url)) return "";
         Uri uri = Uri.parse(url);
-        String host = uri.getHost();
-        int port = uri.getPort();
-        String path = uri.getPath();
-        StringBuilder builder = new StringBuilder();
-        builder.append(uri.getScheme()).append("://");
-        builder.append(TextUtils.isEmpty(host) ? "unknown" : host);
-        if (port > 0) builder.append(':').append(port);
-        if (!TextUtils.isEmpty(path)) builder.append(path.length() > 48 ? path.substring(0, 48) + "..." : path);
-        builder.append(" len=").append(url.length());
-        return builder.toString();
+        String scheme = uri.getScheme();
+        return "scheme=" + (TextUtils.isEmpty(scheme) ? "unknown" : scheme)
+                + " len=" + url.length();
+    }
+
+    private static int safeLength(String value) {
+        return value == null ? 0 : value.length();
     }
 
     private static String stateName(int state) {
@@ -5660,6 +6199,7 @@ public class PlayerManager implements ParseCallback {
         PlaybackStartupPolicy.Completion completion = PlaybackStartupPolicy.resolve(ready, playerType == PlayerSetting.MPV, hasVideo, hasAudio);
         if (completion == PlaybackStartupPolicy.Completion.FIRST_FRAME) {
             playbackTrace.mark(PlaybackTrace.Stage.FIRST_FRAME, "source=mpv-playback-restart player=" + playerType);
+            onIjkRuntimeFirstFrame(SystemClock.elapsedRealtime());
         } else if (completion == PlaybackStartupPolicy.Completion.AUDIO_PLAYABLE) {
             playbackTrace.mark(PlaybackTrace.Stage.AUDIO_PLAYABLE, "source=ready player=" + playerType);
         }
@@ -5895,6 +6435,7 @@ public class PlayerManager implements ParseCallback {
             if (SpiderDebug.isEnabled()) SpiderDebug.log("player", "state=%s spec=%s", stateName(state), debugSpec());
             publishPlaybackAutoContext(state != Player.STATE_IDLE);
             if (state == Player.STATE_READY) {
+                ijkRuntimeProfileController.onPrepared(playbackAutoSession);
                 onMpvHlsPlaybackReady(SystemClock.elapsedRealtime());
                 if (isIjk()) {
                     completeIjkBufferManagedReload(
@@ -5995,6 +6536,7 @@ public class PlayerManager implements ParseCallback {
         public void onRenderedFirstFrame() {
             playbackTrace.mark(PlaybackTrace.Stage.FIRST_FRAME, "source=media3 player=" + playerType);
             publishPlaybackAutoContext(true);
+            onIjkRuntimeFirstFrame(SystemClock.elapsedRealtime());
             publishPlaybackTelemetry();
         }
 
@@ -6037,6 +6579,7 @@ public class PlayerManager implements ParseCallback {
             if (decoderRuntimeObserved && retryExoDecoderRuntimeFailure(e)) return;
             if (action == PlayerEngine.ErrorAction.DECODE && retryHardDecodeSwitch(e)) return;
             if (action == PlayerEngine.ErrorAction.FATAL && retryLocalProxy(e)) return;
+            if (retryIjkRuntimeProfileFallback(e, failure, action)) return;
             if (action == PlayerEngine.ErrorAction.RELOAD) {
                 callback.onReload(getPlaybackErrorMessage(failure));
                 return;

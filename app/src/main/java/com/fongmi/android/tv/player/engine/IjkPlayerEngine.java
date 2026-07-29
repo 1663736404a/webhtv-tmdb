@@ -132,6 +132,14 @@ public class IjkPlayerEngine implements PlayerEngine {
         return player.getDecodePressureSnapshot();
     }
 
+    public ErrorSnapshot getLastErrorSnapshot() {
+        return player.getLastErrorSnapshot();
+    }
+
+    public DropRateSnapshot getDropRateSnapshot() {
+        return player.getDropRateSnapshot();
+    }
+
     @Override
     public void stop() {
         player.stop();
@@ -228,12 +236,20 @@ public class IjkPlayerEngine implements PlayerEngine {
 
     @Override
     public String getErrorMessage(PlaybackException e) {
-        return e.getMessage();
+        return e == null
+                ? "IJK playback failed"
+                : PlaybackException.getErrorCodeName(e.errorCode);
     }
 
     @Override
     public ErrorAction handleError(PlaybackException e) {
-        PlaybackTrace.log("player-engine", getPlaybackTraceId(), "handleError ijk code=%d message=%s urlLen=%d", e.errorCode, e.getMessage(), spec == null || spec.getUrl() == null ? 0 : spec.getUrl().length());
+        PlaybackTrace.log(
+                "player-engine",
+                getPlaybackTraceId(),
+                "handleError ijk code=%d errorType=%s action=fatal",
+                e == null ? PlaybackException.ERROR_CODE_UNSPECIFIED
+                        : e.errorCode,
+                e == null ? "none" : e.getClass().getSimpleName());
         return ErrorAction.FATAL;
     }
 
@@ -249,5 +265,23 @@ public class IjkPlayerEngine implements PlayerEngine {
             case IjkMediaPlayer.FFP_PROPV_DECODER_AVCODEC -> DecoderKind.SOFTWARE;
             default -> DecoderKind.UNKNOWN;
         };
+    }
+
+    public record ErrorSnapshot(int what, int extra, boolean prepared) {
+
+        public static ErrorSnapshot none() {
+            return new ErrorSnapshot(0, 0, false);
+        }
+    }
+
+    public record DropRateSnapshot(boolean available, int permille) {
+
+        public DropRateSnapshot {
+            permille = Math.max(0, permille);
+        }
+
+        public static DropRateSnapshot unknown() {
+            return new DropRateSnapshot(false, 0);
+        }
     }
 }

@@ -6,7 +6,6 @@ import android.os.Looper;
 import android.os.PowerManager;
 import android.os.SystemClock;
 import android.text.TextUtils;
-import android.util.Log;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
@@ -29,7 +28,6 @@ import androidx.media3.common.util.UnstableApi;
 import androidx.media3.mpvplayer.MpvHlsProxy;
 
 import com.fongmi.android.tv.App;
-import com.fongmi.android.tv.BuildConfig;
 import com.fongmi.android.tv.player.exo.ExoUtil;
 import com.fongmi.android.tv.player.PlaybackResourceClassifier;
 import com.fongmi.android.tv.player.PlaybackRoute;
@@ -110,6 +108,10 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
     private volatile IjkBufferPolicy.Config appliedInputBufferConfig;
     private volatile IjkDecodePressurePolicy.Config automaticDecodeControlConfig;
     private volatile IjkDecodePressurePolicy.Config appliedDecodeControlConfig;
+    private IjkPlayerEngine.ErrorSnapshot lastErrorSnapshot;
+    private boolean prepared;
+    private boolean newlyRenderedFirstFrame;
+    private boolean renderedFirstFrameSeen;
     private float volume;
 
     IjkSimplePlayer(int decode) {
@@ -131,12 +133,15 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         appliedInputBufferConfig = IjkBufferPolicy.safeInitialConfig();
         automaticDecodeControlConfig = IjkDecodePressurePolicy.automaticInitialConfig();
         appliedDecodeControlConfig = IjkDecodePressurePolicy.automaticInitialConfig();
+        lastErrorSnapshot = IjkPlayerEngine.ErrorSnapshot.none();
     }
 
     @Override
     protected State getState() {
         int state = playbackState;
         boolean isLoading = loading && state != Player.STATE_IDLE && state != Player.STATE_ENDED;
+        boolean firstFrameEvent = newlyRenderedFirstFrame;
+        newlyRenderedFirstFrame = false;
         State.Builder builder = new State.Builder()
                 .setAvailableCommands(COMMANDS)
                 .setPlayWhenReady(playWhenReady, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
@@ -146,6 +151,7 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
                 .setRepeatMode(repeatOne ? Player.REPEAT_MODE_ONE : Player.REPEAT_MODE_OFF)
                 .setPlaybackParameters(playbackParameters)
                 .setVideoSize(videoSize)
+                .setNewlyRenderedFirstFrame(firstFrameEvent)
                 .setVolume(volume)
                 .setPlaylist(mediaItem == null ? ImmutableList.of() : ImmutableList.of(mediaItemData()))
                 .setCurrentMediaItemIndex(mediaItem == null ? C.INDEX_UNSET : 0);
@@ -209,6 +215,37 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         } catch (Throwable error) {
             if (SpiderDebug.isEnabled()) SpiderDebug.log("ijk", "decoder fact unavailable type=%s", error.getClass().getSimpleName());
             return IjkMediaPlayer.FFP_PROPV_DECODER_UNKNOWN;
+        }
+    }
+
+    IjkPlayerEngine.ErrorSnapshot getLastErrorSnapshot() {
+        return lastErrorSnapshot;
+    }
+
+    IjkPlayerEngine.DropRateSnapshot getDropRateSnapshot() {
+        try {
+            float rate = ijk.getDropFrameRate();
+            float decodeFps = ijk.getVideoDecodeFramesPerSecond();
+            boolean available = prepared
+                    && renderedFirstFrameSeen
+                    && Float.isFinite(rate)
+                    && rate >= 0f
+                    && Float.isFinite(decodeFps)
+                    && decodeFps > 0f;
+            int permille = available
+                    ? (int) Math.max(0,
+                    Math.min(10_000, Math.round(rate * 1_000f)))
+                    : 0;
+            return new IjkPlayerEngine.DropRateSnapshot(
+                    available, permille);
+        } catch (Throwable error) {
+            if (SpiderDebug.isEnabled()) {
+                SpiderDebug.log(
+                        "ijk-runtime-profile",
+                        "drop-rate unavailable errorType=%s action=keep-unknown",
+                        error.getClass().getSimpleName());
+            }
+            return IjkPlayerEngine.DropRateSnapshot.unknown();
         }
     }
 
@@ -329,6 +366,10 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         selectedVideoFormat = null;
         selectedAudioFormat = null;
         playerError = null;
+        prepared = false;
+        newlyRenderedFirstFrame = false;
+        renderedFirstFrameSeen = false;
+        lastErrorSnapshot = IjkPlayerEngine.ErrorSnapshot.none();
         return Futures.immediateVoidFuture();
     }
 
@@ -402,7 +443,9 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
             clearVideoOutput();
             ijk.stop();
         } catch (Throwable e) {
-            SpiderDebug.log("ijk", "dash switch stop failed error=%s", e.getMessage());
+            SpiderDebug.log("ijk",
+                    "dash switch stop failed errorType=%s action=continue-release",
+                    e.getClass().getSimpleName());
         }
         SpiderDebug.log("ijk", "dash switch deferred release scheduled");
         Task.schedule(() -> {
@@ -410,7 +453,9 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
                 ijk.release();
                 SpiderDebug.log("ijk", "dash switch deferred release complete");
             } catch (Throwable e) {
-                SpiderDebug.log("ijk", "dash switch deferred release failed error=%s", e.getMessage());
+                SpiderDebug.log("ijk",
+                        "dash switch deferred release failed errorType=%s action=release-proxy",
+                        e.getClass().getSimpleName());
             } finally {
                 hlsProxy.release();
             }
@@ -467,6 +512,7 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
 
     @Override
     public void onPrepared(IMediaPlayer mp) {
+        prepared = true;
         playbackState = Player.STATE_READY;
         loading = false;
         playerError = null;
@@ -490,13 +536,18 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
 
     @Override
     public boolean onError(IMediaPlayer mp, int what, int extra) {
+        lastErrorSnapshot = new IjkPlayerEngine.ErrorSnapshot(
+                what, extra, prepared);
         setPendingSeek(C.TIME_UNSET);
         playbackState = Player.STATE_IDLE;
         loading = false;
         stopStateRefresh();
-        playerError = new PlaybackException("IJK error: " + what + ", " + extra, null, errorCode(what));
-        SpiderDebug.log("ijk", "error what=%d extra=%d mapped=%d decode=%d state=%d loading=%s uri=%s", what, extra, playerError.errorCode, decode, playbackState, loading, summarizeUri());
-        if (BuildConfig.DEBUG) Log.e("WebHTV-IJK", "error what=" + what + " extra=" + extra + " uri=" + summarizeUri());
+        playerError = new PlaybackException(
+                "IJK playback failed", null, errorCode(what));
+        SpiderDebug.log("ijk",
+                "error what=%d extra=%d mapped=%d decode=%d prepared=%s action=notify",
+                what, extra, playerError.errorCode, decode, prepared);
+        prepared = false;
         invalidateState();
         return true;
     }
@@ -507,10 +558,16 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
             loading = true;
             playbackState = Player.STATE_BUFFERING;
             startStateRefresh();
-        } else if (what == IMediaPlayer.MEDIA_INFO_BUFFERING_END || what == IMediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START) {
+        } else if (what == IMediaPlayer.MEDIA_INFO_BUFFERING_END
+                || what == IMediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START) {
             loading = false;
             playbackState = Player.STATE_READY;
             startStateRefresh();
+        }
+        if (what == IMediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START
+                && !renderedFirstFrameSeen) {
+            renderedFirstFrameSeen = true;
+            newlyRenderedFirstFrame = true;
         }
         invalidateState();
     }
@@ -543,6 +600,10 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
             playbackState = Player.STATE_BUFFERING;
             loading = true;
             playerError = null;
+            prepared = false;
+            newlyRenderedFirstFrame = false;
+            renderedFirstFrameSeen = false;
+            lastErrorSnapshot = IjkPlayerEngine.ErrorSnapshot.none();
             ijk.reset();
             hlsProxy.clear();
             invalidateResourceObservation();
@@ -554,16 +615,19 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
             resourceObservationActive = true;
             boolean dash = isLikelyDash(mediaItem, playableUrl);
             currentDash = dash;
-            if (BuildConfig.DEBUG) Log.e("WebHTV-IJK", "open dash=" + dash + " uri=" + playableUrl + " headers=" + headers.keySet());
             if (dash) {
-                String originalUrl = playableUrl;
                 playableUrl = hlsProxy.proxyDash(playableUrl, headers);
-                SpiderDebug.log("ijk", "dash compatibility proxy enabled original=%s proxy=%s", originalUrl, playableUrl);
+                SpiderDebug.log("ijk", "proxy action=enabled mode=dash");
             } else if (shouldProxyHls(mediaItem, playableUrl)) {
                 playableUrl = hlsProxy.proxy(playableUrl, headers);
-                SpiderDebug.log("ijk", "hls proxy enabled original=%s proxy=%s", sourceUri, playableUrl);
+                SpiderDebug.log("ijk", "proxy action=enabled mode=hls");
             }
-            SpiderDebug.log("ijk", "open dash=%s decode=%d uri=%s mime=%s headers=%s", dash, decode, summarizeUri(), mediaItem.localConfiguration.mimeType, headers.keySet());
+            SpiderDebug.log("ijk",
+                    "open dash=%s decode=%d mime=%s headers=%d",
+                    dash,
+                    decode,
+                    mediaItem.localConfiguration.mimeType,
+                    headers.size());
             currentPlayableUrl = playableUrl;
             configureOptions(sourceUri, dash);
             bindVideoOutput();
@@ -576,10 +640,16 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
             invalidateState();
             startStateRefresh();
         } catch (Throwable e) {
-            playerError = new PlaybackException(e.getMessage(), e, PlaybackException.ERROR_CODE_IO_UNSPECIFIED);
-            SpiderDebug.log("ijk", "open failed uri=%s error=%s", summarizeUri(), e.getMessage());
+            playerError = new PlaybackException(
+                    "IJK open failed",
+                    e,
+                    PlaybackException.ERROR_CODE_IO_UNSPECIFIED);
+            SpiderDebug.log("ijk",
+                    "open failed errorType=%s action=notify",
+                    e.getClass().getSimpleName());
             playbackState = Player.STATE_IDLE;
             loading = false;
+            prepared = false;
             stopStateRefresh();
             invalidateState();
         }
@@ -600,6 +670,10 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         selectedVideoFormat = null;
         selectedAudioFormat = null;
         videoSize = VideoSize.UNKNOWN;
+        prepared = false;
+        newlyRenderedFirstFrame = false;
+        renderedFirstFrameSeen = false;
+        lastErrorSnapshot = IjkPlayerEngine.ErrorSnapshot.none();
         if (resetState) playbackState = Player.STATE_IDLE;
         stopStateRefresh();
     }
@@ -662,7 +736,9 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
                 ijk.setSurface(surface);
             }
         } catch (Throwable e) {
-            SpiderDebug.log("ijk", "bind surface failed: %s", e.getMessage());
+            SpiderDebug.log("ijk",
+                    "bind surface failed errorType=%s action=keep-current",
+                    e.getClass().getSimpleName());
         }
     }
 
@@ -1122,17 +1198,4 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         };
     }
 
-    private String summarizeUri() {
-        if (mediaItem == null || mediaItem.localConfiguration == null) return "";
-        Uri uri = mediaItem.localConfiguration.uri;
-        String host = uri.getHost();
-        String path = uri.getPath();
-        StringBuilder builder = new StringBuilder();
-        builder.append(uri.getScheme()).append("://");
-        builder.append(TextUtils.isEmpty(host) ? "unknown" : host);
-        if (uri.getPort() > 0) builder.append(':').append(uri.getPort());
-        if (!TextUtils.isEmpty(path)) builder.append(path.length() > 48 ? path.substring(0, 48) + "..." : path);
-        builder.append(" len=").append(uri.toString().length());
-        return builder.toString();
-    }
 }
