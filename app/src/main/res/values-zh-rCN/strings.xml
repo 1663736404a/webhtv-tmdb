@@ -854,6 +854,16 @@
     <string name="player_performance_experiment_exo_frame_unit">%1$d ms / 解码耗时推进%2$s</string>
     <string name="player_performance_experiment_exo_frame_title">将本设备加入 EXO 帧调度实验单元</string>
     <string name="player_performance_experiment_exo_frame_help">这是本机专属分组，只测试 50/75/100ms 帧提前调度和解码耗时推进开关。仅在 EXO 自动档硬解且实验总开关、EXO 分域开关同时开启时生效；变更锁定到下一次播放，当前播放不会被打断。采集值只是 App 侧调度代理，不能当作真实 HWC 呈现时间。</string>
+    <string name="player_performance_profile_merge">均衡档合并</string>
+    <string name="player_performance_profile_merge_enabled">已合并到自动 · 可回滚</string>
+    <string name="player_performance_profile_merge_rolled_back">已恢复旧均衡档</string>
+    <string name="player_performance_profile_merge_help">均衡档默认合并到自动档。旧均衡选择会分别迁移 EXO、MPV、IJK，兼容、轻量和自定义选择保持不变。本机回滚只恢复迁移过且当前仍是自动档的内核，不覆盖迁移后新选的档位。历史 A/B 报告继续保留，但构建和 JVM 测试不能证明真实设备已经完成验收。</string>
+    <string name="player_performance_profile_merge_rollback_title">恢复旧均衡档？</string>
+    <string name="player_performance_profile_merge_rollback_message">将重新显示均衡标签。曾从均衡迁移且当前仍为自动的内核会恢复均衡；迁移后改选的兼容、轻量或自定义不会被覆盖。A/B 采集仍保持关闭，需要时必须重新明确加入。</string>
+    <string name="player_performance_profile_merge_rollback_confirm">恢复均衡档</string>
+    <string name="player_performance_profile_merge_enable_title">重新把均衡档合并到自动？</string>
+    <string name="player_performance_profile_merge_enable_message">各内核的旧均衡选择会迁移到自动并隐藏均衡标签；已有 A/B 样本保留，新增采集停止。兼容、轻量和自定义选择保持不变。</string>
+    <string name="player_performance_profile_merge_enable_confirm">合并到自动档</string>
     <string name="player_performance_experiment_profile_ab_collection">自动/均衡档 A/B 采集</string>
     <string name="player_performance_experiment_profile_ab_invalid">入组损坏或已过期</string>
     <string name="player_performance_experiment_profile_ab_enable_title">加入自动/均衡档验收？</string>
@@ -863,7 +873,7 @@
     <string name="player_performance_experiment_profile_ab_report">自动/均衡档 A/B 报告</string>
     <string name="player_performance_experiment_profile_ab_report_value">自动 %1$d · 均衡 %2$d · %3$s</string>
     <string name="player_performance_experiment_profile_ab_report_title">自动/均衡档本机验收报告</string>
-    <string name="player_performance_experiment_profile_ab_report_summary">状态：%1$s\n自动档样本：%2$d\n均衡档样本：%3$d\n分组数：%4$d\n可验收分组：%5$d\n通过：%6$d\n失败：%7$d\n不足或指标缺失：%8$d\n\n本报告只提供证据，不能自动合并档位或迁移用户。</string>
+    <string name="player_performance_experiment_profile_ab_report_summary">状态：%1$s\n自动档样本：%2$d\n均衡档样本：%3$d\n分组数：%4$d\n可验收分组：%5$d\n通过：%6$d\n失败：%7$d\n不足或指标缺失：%8$d\n\n本机报告只提供证据，不会自行改变当前档位合并状态。</string>
     <string name="player_performance_experiment_profile_ab_no_data">无数据</string>
     <string name="player_performance_experiment_profile_ab_insufficient">样本不足</string>
     <string name="player_performance_experiment_profile_ab_metrics_missing">指标缺失</string>
@@ -880,7 +890,7 @@
     <string name="player_performance_experiment_profile_ab_metric_error_rate">播放错误率</string>
     <string name="player_performance_experiment_profile_ab_clear">清除本机报告</string>
     <string name="player_performance_experiment_profile_ab_clear_title">清除自动/均衡档样本？</string>
-    <string name="player_performance_experiment_profile_ab_clear_message">将删除本机全部自动/均衡档验收样本；入组状态会保留，之后符合条件的播放仍可重新采集。</string>
+    <string name="player_performance_experiment_profile_ab_clear_message">将删除本机全部自动/均衡档验收样本；如恢复旧均衡档，之后仍可重新明确加入采集。</string>
     <string name="player_performance_experiment_profile_ab_clear_confirm">清除样本</string>
     <string name="pan_diagnostic_section">诊断工具</string>
     <string name="pan_diagnostic_entry">链路诊断</string>

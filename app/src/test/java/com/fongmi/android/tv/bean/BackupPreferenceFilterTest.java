@@ -74,6 +74,14 @@ public class BackupPreferenceFilterTest {
                 "playback_experiment_profile_ab_enabled", everything));
         assertFalse(Backup.include(
                 "playback_experiment_profile_ab_samples_v1", everything));
+        assertFalse(Backup.include(
+                "playback_performance_profile_merge_schema", everything));
+        assertFalse(Backup.include(
+                "playback_performance_profile_merge_rolled_back",
+                everything));
+        assertFalse(Backup.include(
+                "playback_performance_profile_merge_migrated_mask",
+                everything));
     }
 
     @Test

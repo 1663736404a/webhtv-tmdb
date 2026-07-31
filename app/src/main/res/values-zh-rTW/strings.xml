@@ -838,6 +838,16 @@
     <string name="player_performance_experiment_exo_frame_unit">%1$d ms / 解碼耗時推進%2$s</string>
     <string name="player_performance_experiment_exo_frame_title">將本裝置加入 EXO 幀調度實驗單元</string>
     <string name="player_performance_experiment_exo_frame_help">這是本機專屬分組，只測試 50/75/100ms 幀提前調度和解碼耗時推進開關。僅在 EXO 自動檔硬解且實驗總開關、EXO 分域開關同時開啟時生效；變更鎖定到下一次播放，目前播放不會被打斷。採集值只是 App 側調度代理，不能當作真實 HWC 呈現時間。</string>
+    <string name="player_performance_profile_merge">均衡檔合併</string>
+    <string name="player_performance_profile_merge_enabled">已合併到自動 · 可回退</string>
+    <string name="player_performance_profile_merge_rolled_back">已恢復舊均衡檔</string>
+    <string name="player_performance_profile_merge_help">均衡檔預設合併到自動檔。舊均衡選擇會分別遷移 EXO、MPV、IJK，相容、輕量和自訂選擇保持不變。本機回退只恢復遷移過且目前仍是自動檔的內核，不覆蓋遷移後新選的檔位。歷史 A/B 報告繼續保留，但建置和 JVM 測試不能證明真實裝置已完成驗收。</string>
+    <string name="player_performance_profile_merge_rollback_title">恢復舊均衡檔？</string>
+    <string name="player_performance_profile_merge_rollback_message">將重新顯示均衡標籤。曾從均衡遷移且目前仍為自動的內核會恢復均衡；遷移後改選的相容、輕量或自訂不會被覆蓋。A/B 採集仍保持關閉，需要時必須重新明確加入。</string>
+    <string name="player_performance_profile_merge_rollback_confirm">恢復均衡檔</string>
+    <string name="player_performance_profile_merge_enable_title">重新把均衡檔合併到自動？</string>
+    <string name="player_performance_profile_merge_enable_message">各內核的舊均衡選擇會遷移到自動並隱藏均衡標籤；已有 A/B 樣本保留，新增採集停止。相容、輕量和自訂選擇保持不變。</string>
+    <string name="player_performance_profile_merge_enable_confirm">合併到自動檔</string>
     <string name="player_performance_experiment_profile_ab_collection">自動/均衡檔 A/B 採集</string>
     <string name="player_performance_experiment_profile_ab_invalid">加入狀態損壞或已過期</string>
     <string name="player_performance_experiment_profile_ab_enable_title">加入自動/均衡檔驗收？</string>
@@ -847,7 +857,7 @@
     <string name="player_performance_experiment_profile_ab_report">自動/均衡檔 A/B 報告</string>
     <string name="player_performance_experiment_profile_ab_report_value">自動 %1$d · 均衡 %2$d · %3$s</string>
     <string name="player_performance_experiment_profile_ab_report_title">自動/均衡檔本機驗收報告</string>
-    <string name="player_performance_experiment_profile_ab_report_summary">狀態：%1$s\n自動檔樣本：%2$d\n均衡檔樣本：%3$d\n分組數：%4$d\n可驗收分組：%5$d\n通過：%6$d\n失敗：%7$d\n不足或指標缺失：%8$d\n\n本報告只提供證據，不能自動合併檔位或遷移使用者。</string>
+    <string name="player_performance_experiment_profile_ab_report_summary">狀態：%1$s\n自動檔樣本：%2$d\n均衡檔樣本：%3$d\n分組數：%4$d\n可驗收分組：%5$d\n通過：%6$d\n失敗：%7$d\n不足或指標缺失：%8$d\n\n本機報告只提供證據，不會自行改變目前檔位合併狀態。</string>
     <string name="player_performance_experiment_profile_ab_no_data">無資料</string>
     <string name="player_performance_experiment_profile_ab_insufficient">樣本不足</string>
     <string name="player_performance_experiment_profile_ab_metrics_missing">指標缺失</string>
@@ -864,7 +874,7 @@
     <string name="player_performance_experiment_profile_ab_metric_error_rate">播放錯誤率</string>
     <string name="player_performance_experiment_profile_ab_clear">清除本機報告</string>
     <string name="player_performance_experiment_profile_ab_clear_title">清除自動/均衡檔樣本？</string>
-    <string name="player_performance_experiment_profile_ab_clear_message">將刪除本機全部自動/均衡檔驗收樣本；加入狀態會保留，之後符合條件的播放仍可重新採集。</string>
+    <string name="player_performance_experiment_profile_ab_clear_message">將刪除本機全部自動/均衡檔驗收樣本；如恢復舊均衡檔，之後仍可重新明確加入採集。</string>
     <string name="player_performance_experiment_profile_ab_clear_confirm">清除樣本</string>
     <string name="pan_diagnostic_section">診斷工具</string>
     <string name="pan_diagnostic_entry">鏈路診斷</string>

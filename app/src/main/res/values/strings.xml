@@ -856,6 +856,16 @@
     <string name="player_performance_experiment_exo_frame_unit">%1$d ms / duration-to-progress %2$s</string>
     <string name="player_performance_experiment_exo_frame_title">Assign this device to an EXO frame scheduling unit</string>
     <string name="player_performance_experiment_exo_frame_help">This device-local assignment tests only 50/75/100 ms early scheduling and duration-to-progress on/off. It takes effect only for EXO automatic hardware decoding when both experiment switches are enabled. Changes are locked at the next playback start; the current playback is not interrupted. Results are diagnostic proxies and do not prove the actual HWC present time.</string>
+    <string name="player_performance_profile_merge">Balanced profile merge</string>
+    <string name="player_performance_profile_merge_enabled">Merged into Auto · rollback available</string>
+    <string name="player_performance_profile_merge_rolled_back">Legacy Balanced restored</string>
+    <string name="player_performance_profile_merge_help">Balanced is merged into Auto by default. Legacy Balanced selections are migrated independently for EXO, MPV and IJK, while Compatible, Light and Custom selections are preserved. Local rollback restores only migrated engines that still remain on Auto; choices made after migration are not overwritten. The historical A/B report stays available, but real device acceptance has not been established by build or JVM tests.</string>
+    <string name="player_performance_profile_merge_rollback_title">Restore the legacy Balanced profile?</string>
+    <string name="player_performance_profile_merge_rollback_message">The Balanced tab will return. Engines migrated from Balanced will be restored only if they are still on Auto. Compatible, Light or Custom choices made after migration will not be changed. A/B collection remains off until you explicitly enroll again.</string>
+    <string name="player_performance_profile_merge_rollback_confirm">Restore Balanced</string>
+    <string name="player_performance_profile_merge_enable_title">Merge Balanced into Auto again?</string>
+    <string name="player_performance_profile_merge_enable_message">Legacy Balanced selections will be migrated to Auto independently for each engine and the Balanced tab will be hidden. Existing A/B samples are retained, while new collection is disabled. Compatible, Light and Custom choices are preserved.</string>
+    <string name="player_performance_profile_merge_enable_confirm">Merge into Auto</string>
     <string name="player_performance_experiment_profile_ab_collection">Auto/balanced A/B collection</string>
     <string name="player_performance_experiment_profile_ab_invalid">Invalid or stale enrollment</string>
     <string name="player_performance_experiment_profile_ab_enable_title">Join Auto/balanced validation?</string>
@@ -865,7 +875,7 @@
     <string name="player_performance_experiment_profile_ab_report">Auto/balanced A/B report</string>
     <string name="player_performance_experiment_profile_ab_report_value">Auto %1$d · Balanced %2$d · %3$s</string>
     <string name="player_performance_experiment_profile_ab_report_title">Auto/balanced local validation report</string>
-    <string name="player_performance_experiment_profile_ab_report_summary">Status: %1$s\nAuto samples: %2$d\nBalanced samples: %3$d\nGroups: %4$d\nEvaluable groups: %5$d\nPassed: %6$d\nFailed: %7$d\nInsufficient or missing: %8$d\n\nThis report is evidence only. It cannot merge or migrate profiles.</string>
+    <string name="player_performance_experiment_profile_ab_report_summary">Status: %1$s\nAuto samples: %2$d\nBalanced samples: %3$d\nGroups: %4$d\nEvaluable groups: %5$d\nPassed: %6$d\nFailed: %7$d\nInsufficient or missing: %8$d\n\nThis device-local report is evidence only and never changes the current merge state by itself.</string>
     <string name="player_performance_experiment_profile_ab_no_data">No data</string>
     <string name="player_performance_experiment_profile_ab_insufficient">Insufficient samples</string>
     <string name="player_performance_experiment_profile_ab_metrics_missing">Metrics missing</string>
@@ -882,7 +892,7 @@
     <string name="player_performance_experiment_profile_ab_metric_error_rate">playback error rate</string>
     <string name="player_performance_experiment_profile_ab_clear">Clear local report</string>
     <string name="player_performance_experiment_profile_ab_clear_title">Clear Auto/balanced samples?</string>
-    <string name="player_performance_experiment_profile_ab_clear_message">All device-local Auto/balanced validation samples will be deleted. Enrollment is kept and new eligible sessions can be collected again.</string>
+    <string name="player_performance_experiment_profile_ab_clear_message">All device-local Auto/balanced validation samples will be deleted. If legacy Balanced is restored, collection can be explicitly enrolled again.</string>
     <string name="player_performance_experiment_profile_ab_clear_confirm">Clear samples</string>
     <string name="pan_diagnostic_section">Diagnostics</string>
     <string name="pan_diagnostic_entry">Link test</string>

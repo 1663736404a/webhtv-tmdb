@@ -37,6 +37,7 @@ import com.fongmi.android.tv.player.exo.ExoNetworkProtectionPolicy;
 import com.fongmi.android.tv.setting.PlaybackPerformanceCatalog;
 import com.fongmi.android.tv.setting.PlaybackPerformanceOption;
 import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
+import com.fongmi.android.tv.setting.PlaybackProfileMergePolicy;
 import com.fongmi.android.tv.setting.PlaybackProfileAbSetting;
 import com.fongmi.android.tv.setting.PlaybackExperimentSetting;
 import com.fongmi.android.tv.setting.ExoFrameSchedulingExperimentSetting;
@@ -197,10 +198,15 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                 getString(R.string
                         .player_performance_experiment_exo_frame_help));
         addHelpItem(content,
-                getString(R.string
-                        .player_performance_experiment_profile_ab_collection),
-                getString(R.string
-                        .player_performance_experiment_profile_ab_help));
+                getString(R.string.player_performance_profile_merge),
+                getString(R.string.player_performance_profile_merge_help));
+        if (!PlaybackPerformanceSetting.isRecommendedMerged()) {
+            addHelpItem(content,
+                    getString(R.string
+                            .player_performance_experiment_profile_ab_collection),
+                    getString(R.string
+                            .player_performance_experiment_profile_ab_help));
+        }
         String section = "";
         for (PlaybackPerformanceOption option : options()) {
             if (!section.equals(option.section())) {
@@ -368,10 +374,7 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
         tabs.setTabTextColors(Color.parseColor("#5F6368"), Color.parseColor("#1A73E8"));
         tabs.setTabRippleColor(ColorStateList.valueOf(Color.TRANSPARENT));
         tabs.setUnboundedRipple(false);
-        int[] labels = {R.string.player_performance_auto, R.string.player_performance_recommended, R.string.player_performance_compatible, R.string.player_performance_lightweight};
-        for (int label : labels) tabs.addTab(tabs.newTab().setText(label), false);
         tabs.setFocusable(false);
-        tabs.post(() -> configureProfileTabFocus(tabs));
         tabs.addOnTabSelectedListener(new TabLayout.OnTabSelectedListener() {
             @Override
             public void onTabSelected(TabLayout.Tab tab) {
@@ -404,27 +407,58 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
 
     private void syncProfileTabs(TabLayout tabs) {
         syncingProfileTabs = true;
+        int[] profiles = PlaybackProfileMergePolicy.selectableProfiles(
+                PlaybackPerformanceSetting.isRecommendedMerged());
+        boolean rebuilt = !profileTabsMatch(tabs, profiles);
+        if (rebuilt) {
+            tabs.removeAllTabs();
+            for (int profile : profiles) {
+                tabs.addTab(tabs.newTab()
+                        .setText(profileLabel(profile))
+                        .setTag(profile), false);
+            }
+        }
         int position = profilePosition(PlaybackPerformanceSetting.getProfile());
         tabs.selectTab(position < 0 ? null : tabs.getTabAt(position));
         syncingProfileTabs = false;
+        if (rebuilt) tabs.post(() -> configureProfileTabFocus(tabs));
+    }
+
+    private boolean profileTabsMatch(TabLayout tabs, int[] profiles) {
+        if (tabs.getTabCount() != profiles.length) return false;
+        for (int index = 0; index < profiles.length; index++) {
+            TabLayout.Tab tab = tabs.getTabAt(index);
+            if (tab == null
+                    || !Integer.valueOf(profiles[index]).equals(tab.getTag())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private int profileAt(int position) {
-        return switch (position) {
-            case 1 -> PlaybackPerformanceSetting.PROFILE_RECOMMENDED;
-            case 2 -> PlaybackPerformanceSetting.PROFILE_COMPATIBLE;
-            case 3 -> PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT;
-            default -> PlaybackPerformanceSetting.PROFILE_AUTO;
-        };
+        int[] profiles = PlaybackProfileMergePolicy.selectableProfiles(
+                PlaybackPerformanceSetting.isRecommendedMerged());
+        return position >= 0 && position < profiles.length
+                ? profiles[position]
+                : PlaybackPerformanceSetting.PROFILE_AUTO;
     }
 
     private int profilePosition(int profile) {
+        return PlaybackProfileMergePolicy.positionOf(
+                profile,
+                PlaybackPerformanceSetting.isRecommendedMerged());
+    }
+
+    private int profileLabel(int profile) {
         return switch (profile) {
-            case PlaybackPerformanceSetting.PROFILE_AUTO -> 0;
-            case PlaybackPerformanceSetting.PROFILE_RECOMMENDED -> 1;
-            case PlaybackPerformanceSetting.PROFILE_COMPATIBLE -> 2;
-            case PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT -> 3;
-            default -> -1;
+            case PlaybackPerformanceSetting.PROFILE_RECOMMENDED ->
+                    R.string.player_performance_recommended;
+            case PlaybackPerformanceSetting.PROFILE_COMPATIBLE ->
+                    R.string.player_performance_compatible;
+            case PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT ->
+                    R.string.player_performance_lightweight;
+            default -> R.string.player_performance_auto;
         };
     }
 
@@ -472,12 +506,23 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                 PlaybackExperimentPolicy.Domain.IJK,
                 state.ijkEnabled(),
                 state.enabled());
+        boolean recommendedMerged =
+                PlaybackPerformanceSetting.isRecommendedMerged();
         addRow(
-                getString(R.string
-                        .player_performance_experiment_profile_ab_collection),
-                profileAbEnrollmentValue(),
-                profileAbEnrollmentMutable()
-                        ? this::toggleProfileAbEnrollment : null);
+                getString(R.string.player_performance_profile_merge),
+                getString(recommendedMerged
+                        ? R.string.player_performance_profile_merge_enabled
+                        : R.string.player_performance_profile_merge_rolled_back),
+                PlaybackPerformanceSetting.canChangeRecommendedMerge()
+                        ? this::toggleRecommendedProfileMerge : null);
+        if (!recommendedMerged) {
+            addRow(
+                    getString(R.string
+                            .player_performance_experiment_profile_ab_collection),
+                    profileAbEnrollmentValue(),
+                    profileAbEnrollmentMutable()
+                            ? this::toggleProfileAbEnrollment : null);
+        }
         addRow(
                 getString(R.string
                         .player_performance_experiment_profile_ab_report),
@@ -572,6 +617,38 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
         return getString(profileAbGateOpenForCurrentKernel()
                 ? R.string.player_performance_experiment_on
                 : R.string.player_performance_experiment_standby);
+    }
+
+    private void toggleRecommendedProfileMerge() {
+        boolean merged = PlaybackPerformanceSetting.isRecommendedMerged();
+        new MaterialAlertDialogBuilder(
+                requireContext(), R.style.ThemeOverlay_WebHTV_LightDialog)
+                .setTitle(merged
+                        ? R.string.player_performance_profile_merge_rollback_title
+                        : R.string.player_performance_profile_merge_enable_title)
+                .setMessage(merged
+                        ? R.string.player_performance_profile_merge_rollback_message
+                        : R.string.player_performance_profile_merge_enable_message)
+                .setNegativeButton(R.string.dialog_cancel, null)
+                .setPositiveButton(
+                        merged
+                                ? R.string.player_performance_profile_merge_rollback_confirm
+                                : R.string.player_performance_profile_merge_enable_confirm,
+                        (dialog, which) -> {
+                            boolean changed = merged
+                                    ? PlaybackPerformanceSetting
+                                    .rollbackRecommendedMerge()
+                                    : PlaybackPerformanceSetting
+                                    .enableRecommendedMerge();
+                            if (!changed) return;
+                            PlaybackProfileAbCoordinator.process()
+                                    .invalidateActive(
+                                            PlaybackProfileAbCoordinator
+                                                    .InvalidationReason
+                                                    .PROFILE_CHANGED);
+                            refresh();
+                        })
+                .show();
     }
 
     private boolean profileAbEnrollmentMutable() {

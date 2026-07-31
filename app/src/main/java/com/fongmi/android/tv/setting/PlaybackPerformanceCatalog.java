@@ -161,6 +161,13 @@ public final class PlaybackPerformanceCatalog {
     }
 
     private static String profileDescription(int kernel) {
+        if (PlaybackPerformanceSetting.isRecommendedMerged()) {
+            return switch (kernel) {
+                case PlayerSetting.MPV -> "首选“自动”：电视4K硬解且不需要MPV字幕/LUT/shader/滤镜时自动用低开销电视直出；HLS按可信吞吐保守起步，持续网络风险时逐档重载降码率。“兼容”改用GPU完整＋mediacodec-copy，适合零拷贝异常但4K可能更卡；“轻量”限制HLS至8Mbps并降低缓存，适合低内存/低性能设备。旧均衡档已合并到自动，可在“实验与回退”中恢复。手动改任一项后显示“自定义”。";
+                case PlayerSetting.IJK -> "首选“自动”：按协议采用稳定的点播/直播基线并根据运行反馈有界调整。“兼容”提高水位、探测和画面队列，起播/恢复更慢但更稳；“轻量”降到4MB、快速探测和积极丢帧，省内存但更容易卡顿和损失画面。旧均衡档已合并到自动，可在“实验与回退”中恢复。手动改任一项后显示“自定义”。";
+                default -> "首选“自动”（也是默认）：以保守参数起步，根据协议、分片、可信吞吐和缓冲趋势动态锁定起播/重缓冲门槛；历史按网络和资源隔离并自动过期，同时根据前台余量控制预载。“兼容”使用同步队列和更保守恢复，适合异步解码异常但启动更慢；“轻量”缩小缓存，省内存但抗波动更弱。旧均衡档已合并到自动，可在“实验与回退”中恢复。手动改任一项后显示“自定义”。";
+            };
+        }
         return switch (kernel) {
             case PlayerSetting.MPV -> "首选“自动”：电视4K硬解且不需要MPV字幕/LUT/shader/滤镜时自动用低开销电视直出；HLS按可信吞吐保守起步，持续网络风险时逐档重载降码率。“均衡”固定使用同一组通用参数；“兼容”改用GPU完整＋mediacodec-copy，适合零拷贝异常但4K可能更卡；“轻量”限制HLS至8Mbps并降低缓存，适合低内存/低性能设备。手动改任一项后显示“自定义”。";
             case PlayerSetting.IJK -> "首选“自动”：按协议采用稳定的点播/直播基线。“均衡”固定使用15MB读包、标准水位和标准丢帧；“兼容”提高水位、探测和画面队列，起播/恢复更慢但更稳；“轻量”降到4MB、快速探测和积极丢帧，省内存但更容易卡顿和损失画面。手动改任一项后显示“自定义”。";

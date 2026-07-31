@@ -1,6 +1,10 @@
 package com.fongmi.android.tv.setting;
 
+import android.content.SharedPreferences;
+
 import com.github.catvod.utils.Prefers;
+
+import java.util.Map;
 
 public class PlaybackPerformanceSetting {
 
@@ -24,6 +28,12 @@ public class PlaybackPerformanceSetting {
     private static final String KEY_EXO_REBUFFER_MIGRATED = "playback_performance_exo_rebuffer_v3";
     private static final String KEY_MPV_REBUFFER_MIGRATED = "playback_performance_mpv_rebuffer_v1";
     private static final String KEY_MPV_AUTO_BASELINE_MIGRATED = "playback_performance_mpv_auto_baseline_v1";
+    private static final String KEY_PROFILE_MERGE_SCHEMA =
+            "playback_performance_profile_merge_schema";
+    private static final String KEY_PROFILE_MERGE_ROLLED_BACK =
+            "playback_performance_profile_merge_rolled_back";
+    private static final String KEY_PROFILE_MERGE_MIGRATED_MASK =
+            "playback_performance_profile_merge_migrated_mask";
     private static final String KEY_CODEC_ASYNC_QUEUEING = "perf_codec_async_queueing";
     private static final String KEY_DYNAMIC_SCHEDULING = "perf_dynamic_scheduling";
     private static final String KEY_VIDEO_DURATION_PROGRESS = "perf_video_duration_progress";
@@ -52,6 +62,7 @@ public class PlaybackPerformanceSetting {
         migrateExoRebuffer();
         migrateMpvRebuffer();
         migrateMpvAutoBaseline();
+        migrateRecommendedProfileMerge();
     }
 
     public static int getProfile() {
@@ -60,11 +71,42 @@ public class PlaybackPerformanceSetting {
 
     public static int getProfile(int kernel) {
         ensureInitialized();
-        return clampProfile(Prefers.getInt(profileKey(PlayerSetting.sanitizePlayer(kernel)), Prefers.getInt(KEY_PROFILE, PROFILE_RECOMMENDED)));
+        return PlaybackProfileMergePolicy.effectiveProfile(
+                rawProfile(kernel),
+                profileMergeResolution().mergeEnabled());
     }
 
     public static void applyAuto() {
         int kernel = PlayerSetting.getPlayer();
+        applyAutoProfile(kernel);
+        putCurrentProfile(PROFILE_AUTO);
+    }
+
+    public static void applyRecommended() {
+        if (isRecommendedMerged()) {
+            applyAuto();
+            return;
+        }
+        applyRecommendedProfile(PlayerSetting.getPlayer());
+        putCurrentProfile(PROFILE_RECOMMENDED);
+    }
+
+    private static void applyRecommendedProfile(int kernel) {
+        KernelPerformanceSetting.applyPreset(kernel, PROFILE_RECOMMENDED);
+        if (kernel == PlayerSetting.EXO) {
+            putRecommendedFlags();
+            ExoPerformanceSetting.applyRecommended();
+            Prefers.put("render", PlayerSetting.RENDER_SURFACE);
+            Prefers.put("tunnel", false);
+            Prefers.put("exo_4k_compat", true);
+        } else if (kernel == PlayerSetting.MPV) {
+            MpvPerformanceSetting.applyRecommended();
+        } else {
+            IjkPerformanceSetting.applyRecommended();
+        }
+    }
+
+    private static void applyAutoProfile(int kernel) {
         KernelPerformanceSetting.applyPreset(kernel, PROFILE_AUTO);
         if (kernel == PlayerSetting.EXO) {
             putRecommendedFlags();
@@ -77,40 +119,13 @@ public class PlaybackPerformanceSetting {
         } else {
             IjkPerformanceSetting.applyRecommended();
         }
-        putCurrentProfile(PROFILE_AUTO);
-    }
-
-    public static void applyRecommended() {
-        KernelPerformanceSetting.applyPreset(PlayerSetting.getPlayer(), PROFILE_RECOMMENDED);
-        applyRecommendedValues();
-        if (PlayerSetting.getPlayer() == PlayerSetting.EXO) ExoPerformanceSetting.applyRecommended();
-        if (PlayerSetting.getPlayer() == PlayerSetting.MPV) MpvPerformanceSetting.applyRecommended();
-        if (PlayerSetting.getPlayer() == PlayerSetting.IJK) IjkPerformanceSetting.applyRecommended();
-        putCurrentProfile(PROFILE_RECOMMENDED);
-    }
-
-    private static void applyRecommendedValues() {
-        int kernel = PlayerSetting.getPlayer();
-        KernelPerformanceSetting.applyPreset(kernel, PROFILE_RECOMMENDED);
-        if (kernel != PlayerSetting.EXO) return;
-        putRecommendedFlags();
-        Prefers.put("render", PlayerSetting.RENDER_SURFACE);
-        Prefers.put("tunnel", false);
-        Prefers.put("exo_4k_compat", true);
     }
 
     private static void applyAutoValues() {
         for (int kernel : new int[]{PlayerSetting.EXO, PlayerSetting.MPV, PlayerSetting.IJK}) {
-            KernelPerformanceSetting.applyPreset(kernel, PROFILE_AUTO);
+            applyAutoProfile(kernel);
             Prefers.put(profileKey(kernel), PROFILE_AUTO);
         }
-        putRecommendedFlags();
-        ExoPerformanceSetting.applyAuto();
-        MpvPerformanceSetting.applyAuto();
-        IjkPerformanceSetting.applyRecommended();
-        Prefers.put("render", PlayerSetting.RENDER_SURFACE);
-        Prefers.put("tunnel", false);
-        Prefers.put("exo_4k_compat", true);
         Prefers.put(KEY_PROFILE, PROFILE_AUTO);
     }
 
@@ -185,6 +200,39 @@ public class PlaybackPerformanceSetting {
 
     public static boolean isRecommended() {
         return getProfile() == PROFILE_RECOMMENDED;
+    }
+
+    public static boolean isRecommendedMerged() {
+        ensureInitialized();
+        return profileMergeResolution().mergeEnabled();
+    }
+
+    public static boolean canChangeRecommendedMerge() {
+        ensureInitialized();
+        return profileMergeResolution().mutable();
+    }
+
+    public static synchronized boolean rollbackRecommendedMerge() {
+        ensureInitialized();
+        PlaybackProfileMergePolicy.Resolution resolution =
+                profileMergeResolution();
+        if (!resolution.mutable()) return false;
+        PlaybackProfileMergePolicy.State state =
+                resolution.state().withRolledBack(true);
+        if (!writeProfileMergeState(state)) return false;
+        completeRecommendedProfileRollback(state);
+        return true;
+    }
+
+    public static synchronized boolean enableRecommendedMerge() {
+        ensureInitialized();
+        PlaybackProfileMergePolicy.Resolution resolution =
+                profileMergeResolution();
+        if (!resolution.mutable()) return false;
+        if (!writeProfileMergeState(
+                resolution.state().withRolledBack(false))) return false;
+        migrateRecommendedProfileMerge();
+        return profileMergeResolution().mergeEnabled();
     }
 
     public static boolean isAuto() {
@@ -468,6 +516,160 @@ public class PlaybackPerformanceSetting {
         return clampProfile(profile) == PROFILE_AUTO;
     }
 
+    private static synchronized void migrateRecommendedProfileMerge() {
+        PlaybackProfileMergePolicy.Resolution resolution =
+                profileMergeResolution();
+        PlaybackProfileMergePolicy.State state = resolution.state();
+        int[] kernels = {
+                PlayerSetting.EXO, PlayerSetting.MPV, PlayerSetting.IJK};
+        boolean[] migrate = new boolean[kernels.length];
+        boolean profileChanged = false;
+        if (resolution.mergeEnabled()) {
+            for (int index = 0; index < kernels.length; index++) {
+                int rawProfile = rawProfile(kernels[index]);
+                migrate[index] = PlaybackProfileMergePolicy.shouldMigrate(
+                        rawProfile, true);
+                if (!migrate[index]) continue;
+                state = state.withMigrated(mergeSlot(kernels[index]));
+                profileChanged = true;
+            }
+        }
+        int globalProfile = rawGlobalProfile();
+        boolean migrateGlobal = resolution.mergeEnabled()
+                && PlaybackProfileMergePolicy.shouldMigrate(
+                globalProfile, true);
+        if ((resolution.writeBack() || profileChanged)
+                && !writeProfileMergeState(state)) {
+            return;
+        }
+        if (!resolution.mergeEnabled()) {
+            if (resolution.sourceValid()
+                    && state.rolledBack()
+                    && state.migratedMask() != 0) {
+                completeRecommendedProfileRollback(state);
+            }
+            return;
+        }
+        for (int index = 0; index < kernels.length; index++) {
+            if (!migrate[index]) continue;
+            try {
+                applyAutoProfile(kernels[index]);
+                Prefers.put(profileKey(kernels[index]), PROFILE_AUTO);
+            } catch (Throwable ignored) {
+            }
+        }
+        if (migrateGlobal) {
+            try {
+                Prefers.put(KEY_PROFILE, PROFILE_AUTO);
+            } catch (Throwable ignored) {
+            }
+        }
+        if (PlaybackProfileAbSetting.isEnrolled()) {
+            PlaybackProfileAbSetting.putEnrolled(false);
+        }
+    }
+
+    private static void completeRecommendedProfileRollback(
+            PlaybackProfileMergePolicy.State state) {
+        PlaybackProfileMergePolicy.State pending = state;
+        for (int kernel : new int[]{
+                PlayerSetting.EXO, PlayerSetting.MPV, PlayerSetting.IJK}) {
+            PlaybackProfileMergePolicy.Slot slot = mergeSlot(kernel);
+            if (!pending.wasMigrated(slot)) continue;
+            int rawProfile = rawProfile(kernel);
+            if (PlaybackProfileMergePolicy.shouldRestore(
+                    pending, slot, rawProfile)) {
+                try {
+                    applyRecommendedProfile(kernel);
+                    Prefers.put(profileKey(kernel), PROFILE_RECOMMENDED);
+                    rawProfile = PROFILE_RECOMMENDED;
+                } catch (Throwable ignored) {
+                    continue;
+                }
+            }
+            if (kernel == PlayerSetting.getPlayer()) {
+                try {
+                    Prefers.put(KEY_PROFILE, rawProfile);
+                } catch (Throwable ignored) {
+                    continue;
+                }
+            }
+            PlaybackProfileMergePolicy.State completed =
+                    pending.withoutMigrated(slot);
+            if (!writeProfileMergeState(completed)) return;
+            pending = completed;
+        }
+        try {
+            Prefers.put(KEY_PROFILE, rawProfile(PlayerSetting.getPlayer()));
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static PlaybackProfileMergePolicy.Resolution
+    profileMergeResolution() {
+        Map<String, ?> values;
+        try {
+            values = Prefers.getPrefers().getAll();
+        } catch (Throwable ignored) {
+            return PlaybackProfileMergePolicy.resolve(
+                    new PlaybackProfileMergePolicy.RawState(
+                            "unavailable", null, null));
+        }
+        return PlaybackProfileMergePolicy.resolve(
+                new PlaybackProfileMergePolicy.RawState(
+                        values.get(KEY_PROFILE_MERGE_SCHEMA),
+                        values.get(KEY_PROFILE_MERGE_ROLLED_BACK),
+                        values.get(KEY_PROFILE_MERGE_MIGRATED_MASK)));
+    }
+
+    private static boolean writeProfileMergeState(
+            PlaybackProfileMergePolicy.State state) {
+        PlaybackProfileMergePolicy.State safe = state == null
+                ? PlaybackProfileMergePolicy.State.legacyRollback() : state;
+        try {
+            SharedPreferences.Editor editor = Prefers.getPrefers().edit();
+            editor.putInt(KEY_PROFILE_MERGE_SCHEMA,
+                    PlaybackProfileMergePolicy.CURRENT_SCHEMA_VERSION);
+            editor.putBoolean(KEY_PROFILE_MERGE_ROLLED_BACK,
+                    safe.rolledBack());
+            editor.putInt(KEY_PROFILE_MERGE_MIGRATED_MASK,
+                    safe.migratedMask());
+            editor.apply();
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static int rawProfile(int kernel) {
+        return rawProfileValue(
+                profileKey(PlayerSetting.sanitizePlayer(kernel)),
+                rawGlobalProfile());
+    }
+
+    private static int rawGlobalProfile() {
+        return rawProfileValue(KEY_PROFILE, PROFILE_AUTO);
+    }
+
+    private static int rawProfileValue(String key, int fallback) {
+        try {
+            Object value = Prefers.getPrefers().getAll().get(key);
+            return value instanceof Number
+                    ? clampProfile(((Number) value).intValue())
+                    : clampProfile(fallback);
+        } catch (Throwable ignored) {
+            return clampProfile(fallback);
+        }
+    }
+
+    private static PlaybackProfileMergePolicy.Slot mergeSlot(int kernel) {
+        return switch (PlayerSetting.sanitizePlayer(kernel)) {
+            case PlayerSetting.MPV -> PlaybackProfileMergePolicy.Slot.MPV;
+            case PlayerSetting.IJK -> PlaybackProfileMergePolicy.Slot.IJK;
+            default -> PlaybackProfileMergePolicy.Slot.EXO;
+        };
+    }
+
     private static void applyKernelSpecificPreset(int kernel, int profile) {
         if (kernel == PlayerSetting.EXO) {
             if (profile == PROFILE_COMPATIBLE) ExoPerformanceSetting.applyCompatible();
@@ -487,7 +689,8 @@ public class PlaybackPerformanceSetting {
     }
 
     private static void putCurrentProfile(int profile) {
-        int value = clampProfile(profile);
+        int value = PlaybackProfileMergePolicy.effectiveProfile(
+                profile, profileMergeResolution().mergeEnabled());
         Prefers.put(profileKey(PlayerSetting.getPlayer()), value);
         Prefers.put(KEY_PROFILE, value);
     }
