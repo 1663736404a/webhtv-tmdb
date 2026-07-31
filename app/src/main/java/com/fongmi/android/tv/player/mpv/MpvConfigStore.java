@@ -913,14 +913,14 @@ public final class MpvConfigStore {
         if (!dir.exists()) dir.mkdirs();
     }
 
-    private static String defaultConfig() {
+    static String defaultConfig() {
         return "# WebHTV MPV default config\n"
                 + "# Loaded by libmpv from files/mpv/mpv.conf. Keep Android-only output options in app code.\n"
                 + "\n"
                 + "profile=fast\n"
                 + "http-allow-redirect=yes\n"
                 + "sub-ass=yes\n"
-                + "sub-ass-override=yes\n"
+                + "sub-ass-override=" + MpvSubtitleStylePolicy.ASS_OVERRIDE + "\n"
                 + "embeddedfonts=yes\n"
                 + "sub-fix-timing=yes\n"
                 + "sub-use-margins=yes\n"

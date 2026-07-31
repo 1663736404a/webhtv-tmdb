@@ -44,6 +44,7 @@ import com.fongmi.android.tv.player.engine.PlayerCacheState;
 import com.fongmi.android.tv.player.iso.IsoSessionManager;
 import com.fongmi.android.tv.player.lut.MpvLutShader;
 import com.fongmi.android.tv.player.mpv.MpvNetworkRecoveryPolicy;
+import com.fongmi.android.tv.player.mpv.MpvSubtitleStylePolicy;
 import com.fongmi.android.tv.setting.PlayerSetting;
 import com.fongmi.android.tv.setting.MpvPerformanceSetting;
 import com.github.catvod.crawler.SpiderDebug;
@@ -1178,7 +1179,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         // fontconfig provider. Keep this in native initialization because user configs
         // may replace the bundled defaults.
         setOption("sub-ass", "yes");
-        setOption("sub-ass-override", "yes");
+        setOption("sub-ass-override", MpvSubtitleStylePolicy.ASS_OVERRIDE);
         setOption("embeddedfonts", "yes");
         setOption("sub-fix-timing", "yes");
         setOption("sub-use-margins", "yes");
