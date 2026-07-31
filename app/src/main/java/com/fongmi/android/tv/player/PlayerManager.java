@@ -1206,6 +1206,9 @@ public class PlayerManager implements ParseCallback {
         hardDecodeSwitchRetryArmed = next == PlayerEngine.HARD;
         beginPlaybackTrace("switch-decode");
         engine.setDecode(next);
+        if (engine instanceof ExoPlayerEngine exo) {
+            exo.prepareFrameSchedulingForNextPlayback();
+        }
         rebuildPlayer(resetVideoSurface);
         setMediaItem();
     }
@@ -4667,6 +4670,7 @@ public class PlayerManager implements ParseCallback {
 
     private void setMediaItemNow(long timeout, boolean notifyPrepare) {
         if (spec == null || spec.getUrl() == null || engine == null) return;
+        prepareExoFrameSchedulingForNewPlayback();
         spec.setPlaybackTraceId(playbackTrace.ensure());
         spec.refreshPlaybackRoute();
         publishPlaybackAutoContext(false);
@@ -4690,6 +4694,12 @@ public class PlayerManager implements ParseCallback {
         startNativeAudioSession(playWhenReady);
         App.post(runnable, timeout);
         if (notifyPrepare) callback.onPrepare();
+    }
+
+    private void prepareExoFrameSchedulingForNewPlayback() {
+        if (!(engine instanceof ExoPlayerEngine exo)) return;
+        if (!exo.prepareFrameSchedulingForNextPlayback()) return;
+        rebuildPlayer(false);
     }
 
     private void applySubtitleStyle() {

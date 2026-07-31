@@ -12,7 +12,6 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecUtil;
 import androidx.media3.exoplayer.video.MediaCodecVideoRenderer;
 import androidx.media3.exoplayer.video.VideoRendererEventListener;
 
-import com.fongmi.android.tv.setting.ExoPerformanceSetting;
 import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
 
 import java.util.ArrayList;
@@ -33,7 +32,9 @@ final class ExoRuntimeAwareVideoRenderer extends MediaCodecVideoRenderer {
             Handler eventHandler,
             VideoRendererEventListener eventListener,
             ExoDecoderRuntimeSession runtimeSession,
-            ExoDecoderRuntimeSession.OutputConfig output) {
+            ExoDecoderRuntimeSession.OutputConfig output,
+            ExoFrameSchedulingExperimentPolicy.Decision
+                    frameSchedulingDecision) {
         super(builder(
                 context,
                 codecAdapterFactory,
@@ -41,7 +42,8 @@ final class ExoRuntimeAwareVideoRenderer extends MediaCodecVideoRenderer {
                 allowedJoiningTimeMs,
                 enableDecoderFallback,
                 eventHandler,
-                eventListener));
+                eventListener,
+                frameSchedulingDecision));
         this.runtimeSession = runtimeSession;
         this.output = output;
     }
@@ -83,7 +85,9 @@ final class ExoRuntimeAwareVideoRenderer extends MediaCodecVideoRenderer {
             long allowedJoiningTimeMs,
             boolean enableDecoderFallback,
             Handler eventHandler,
-            VideoRendererEventListener eventListener) {
+            VideoRendererEventListener eventListener,
+            ExoFrameSchedulingExperimentPolicy.Decision
+                    frameSchedulingDecision) {
         Builder builder = new Builder(context)
                 .setCodecAdapterFactory(codecAdapterFactory)
                 .setMediaCodecSelector(mediaCodecSelector)
@@ -93,11 +97,8 @@ final class ExoRuntimeAwareVideoRenderer extends MediaCodecVideoRenderer {
                 .setEventListener(eventListener)
                 .setMaxDroppedFramesToNotify(
                         DefaultRenderersFactory.MAX_DROPPED_VIDEO_FRAME_COUNT_TO_NOTIFY);
-        if (PlaybackPerformanceSetting.isVideoDurationProgressEnabled()
-                && ExoPerformanceSetting.getCodecQueueMode()
-                != ExoPerformanceSetting.CODEC_QUEUE_SYNC) {
-            builder.setEnableDurationToProgressUs(true);
-        }
+        ExoFrameSchedulingRendererSettings.from(frameSchedulingDecision)
+                .apply(builder);
         if (PlaybackPerformanceSetting.isLateDropInputEnabled()) {
             builder.experimentalSetLateThresholdToDropDecoderInputUs(
                     ExoUtil.ENHANCED_LATE_THRESHOLD_TO_DROP_INPUT_US);

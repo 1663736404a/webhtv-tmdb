@@ -3,6 +3,7 @@ package com.fongmi.android.tv.player.exo;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class ExoFrameTimingMetricsTest {
 
@@ -58,5 +59,73 @@ public class ExoFrameTimingMetricsTest {
         assertEquals(2, snapshot.releaseFrameCount());
         assertEquals(0, snapshot.releaseJitterSampleCount());
         assertEquals(0, snapshot.callbackGapSampleCount());
+    }
+
+    @Test
+    public void recordsSignedTimingAndMagnitudeBuckets() {
+        ExoFrameTimingMetrics metrics = new ExoFrameTimingMetrics();
+        metrics.observeProcessingOffset(-60_000, 2);
+        metrics.observeProcessingOffset(-10_000, 1);
+        metrics.observeProcessingOffset(10_000, 1);
+        metrics.observeProcessingOffset(30_000, 1);
+        metrics.observeProcessingOffset(60_000, 1);
+        metrics.observeProcessingOffset(80_000, 1);
+        metrics.observeProcessingOffset(100_000, 1);
+
+        long now = 1_000_000_000L;
+        metrics.observeFrameRelease(0, now - 30_000_000L, now);
+        metrics.resetReleaseContinuity();
+        metrics.observeFrameRelease(1, now - 10_000_000L, now);
+        metrics.resetReleaseContinuity();
+        metrics.observeFrameRelease(2, now + 10_000_000L, now);
+        metrics.resetReleaseContinuity();
+        metrics.observeFrameRelease(3, now + 30_000_000L, now);
+        metrics.resetReleaseContinuity();
+        metrics.observeFrameRelease(4, now + 60_000_000L, now);
+        metrics.resetReleaseContinuity();
+        metrics.observeFrameRelease(5, now + 80_000_000L, now);
+        metrics.resetReleaseContinuity();
+        metrics.observeFrameRelease(6, now + 100_000_000L, now);
+
+        ExoFrameTimingMetrics.Snapshot snapshot = metrics.snapshot();
+        assertEquals("2/1/1/1/1/1/1",
+                snapshot.processingOffsetBuckets().compact());
+        assertEquals("1/1/1/1/1/1/1",
+                snapshot.releaseLeadBuckets().compact());
+        assertEquals(snapshot.frameCount(),
+                snapshot.processingOffsetBuckets().total());
+        assertEquals(snapshot.releaseFrameCount(),
+                snapshot.releaseLeadBuckets().total());
+    }
+
+    @Test
+    public void stableTelemetryCanSkipExperimentDistributionBuckets() {
+        ExoFrameTimingMetrics metrics = new ExoFrameTimingMetrics();
+
+        metrics.observeProcessingOffset(40_000, 4, false);
+
+        ExoFrameTimingMetrics.Snapshot snapshot = metrics.snapshot();
+        assertEquals(10_000, snapshot.averageOffsetUs());
+        assertEquals(4, snapshot.frameCount());
+        assertEquals(0, snapshot.processingOffsetBuckets().total());
+    }
+
+    @Test
+    public void extremeTimestampsSaturateWithoutNegativeJitterOrCounts() {
+        ExoFrameTimingMetrics metrics = new ExoFrameTimingMetrics();
+        metrics.observeProcessingOffset(Long.MAX_VALUE, 1);
+        metrics.observeProcessingOffset(Long.MAX_VALUE, 1);
+        metrics.observeFrameRelease(
+                Long.MIN_VALUE + 1, Long.MAX_VALUE, 1);
+        metrics.observeFrameRelease(
+                Long.MAX_VALUE, 1, Long.MAX_VALUE);
+
+        ExoFrameTimingMetrics.Snapshot snapshot = metrics.snapshot();
+        assertEquals(2, snapshot.frameCount());
+        assertEquals(2, snapshot.releaseFrameCount());
+        assertTrue(snapshot.averageReleaseJitterUs() >= 0);
+        assertTrue(snapshot.maxLateReleaseUs() >= 0);
+        assertTrue(snapshot.processingOffsetBuckets().total() >= 0);
+        assertTrue(snapshot.releaseLeadBuckets().total() >= 0);
     }
 }

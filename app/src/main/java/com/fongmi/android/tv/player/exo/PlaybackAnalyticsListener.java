@@ -33,6 +33,7 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
     private static volatile long lastBandwidthLogMs;
     private static volatile long lastMediaEstimateLogMs;
     private static volatile boolean loading;
+    private static volatile boolean frameSchedulingExperimentActive;
     private static volatile ForwardBufferTrend.Snapshot lastStableBufferTrend =
             ForwardBufferTrend.Snapshot.unknown();
     private static final long BANDWIDTH_LOG_INTERVAL_MS = 5_000;
@@ -43,6 +44,8 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
     private static final ObservedMediaBitrateEstimator BITRATE_ESTIMATOR = new ObservedMediaBitrateEstimator();
     private static final ObservedVideoFrameRateEstimator FRAME_RATE_ESTIMATOR = new ObservedVideoFrameRateEstimator();
     private static final ExoFrameTimingMetrics FRAME_TIMING_METRICS = new ExoFrameTimingMetrics();
+    private static final ExoFrameSchedulingExperimentMetrics FRAME_SCHEDULING_METRICS =
+            new ExoFrameSchedulingExperimentMetrics();
     private static final ForwardBufferTrend BUFFER_TREND = new ForwardBufferTrend();
     private static final DebugEventLimiter LOADING_LOG_LIMITER = new DebugEventLimiter(1);
 
@@ -51,8 +54,33 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
     }
 
     public static void beginSession(String traceId) {
+        beginSession(
+                traceId,
+                ExoFrameSchedulingExperimentPolicy.stableDecision(
+                        false, false, false),
+                ExoDecoderRuntimeSession.OutputConfig.unknown(),
+                "unknown");
+    }
+
+    public static void beginSession(
+            String traceId,
+            ExoFrameSchedulingExperimentPolicy.Decision schedulingDecision,
+            ExoDecoderRuntimeSession.OutputConfig output,
+            String codecQueueMode) {
         reset();
         playbackTraceId = PlaybackTrace.normalize(traceId);
+        frameSchedulingExperimentActive = FRAME_SCHEDULING_METRICS.begin(
+                playbackTraceId,
+                schedulingDecision,
+                output,
+                codecQueueMode,
+                schedulingDecision == null
+                        ? "" : schedulingDecision.deviceDigest(),
+                safeElapsedRealtime());
+        if (frameSchedulingExperimentActive) {
+            ExoFrameSchedulingPerfettoTrace.begin(
+                    playbackTraceId, schedulingDecision);
+        }
     }
 
     public static String getPlaybackTraceId() {
@@ -97,6 +125,15 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
         return FRAME_TIMING_METRICS.snapshot();
     }
 
+    public static ExoFrameSchedulingExperimentMetrics.Snapshot
+    getFrameSchedulingExperimentSnapshot() {
+        Snapshot current = snapshot;
+        return FRAME_SCHEDULING_METRICS.snapshot(
+                FRAME_TIMING_METRICS.snapshot(),
+                current.droppedFrames(),
+                current.rebufferCount());
+    }
+
     public static DecoderFailureEvidence getDecoderFailureEvidence(
             PlaybackException error) {
         ErrorDetails details = ErrorDetails.from(error);
@@ -131,10 +168,13 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
         lastBandwidthLogMs = 0;
         lastMediaEstimateLogMs = 0;
         loading = false;
+        frameSchedulingExperimentActive = false;
         playbackTraceId = PlaybackTrace.NONE;
         BITRATE_ESTIMATOR.reset();
         FRAME_RATE_ESTIMATOR.reset();
         FRAME_TIMING_METRICS.reset();
+        FRAME_SCHEDULING_METRICS.reset();
+        ExoFrameSchedulingPerfettoTrace.reset();
         BUFFER_TREND.reset();
         lastStableBufferTrend = ForwardBufferTrend.Snapshot.unknown();
         LOADING_LOG_LIMITER.clear();
@@ -160,6 +200,19 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
         } else {
             ExoPerformanceSetting.discardAutoSession(finishedTraceId);
         }
+        ExoFrameSchedulingExperimentMetrics.Snapshot frameScheduling =
+                FRAME_SCHEDULING_METRICS.snapshot(
+                        FRAME_TIMING_METRICS.snapshot(),
+                        finished.droppedFrames(),
+                        finished.rebufferCount());
+        if (frameScheduling.active()) {
+            PlaybackTrace.log(
+                    "exo-frame-ab",
+                    finishedTraceId,
+                    "%s",
+                    frameScheduling.logSummary());
+            ExoFrameSchedulingPerfettoTrace.finish(frameScheduling);
+        }
         reset();
     }
 
@@ -180,6 +233,10 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
         boolean rebufferStarted = previous.rebufferStartMs() <= 0 && next.rebufferStartMs() > 0;
         boolean rebufferEnded = previous.rebufferStartMs() > 0 && next.rebufferStartMs() <= 0;
         snapshot = next;
+        if (rebufferStarted) {
+            FRAME_SCHEDULING_METRICS.observeBoundary(
+                    ExoFrameSchedulingExperimentMetrics.Boundary.REBUFFER);
+        }
         if (rebufferStarted || rebufferEnded) updateAutoRecovery(next, now);
         observeAutoThresholds(
                 eventTime.totalBufferedDurationMs,
@@ -199,6 +256,17 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
         } else {
             traceLog("state=%s position=%d buffered=%d loading=%s", stateName(state), eventTime.currentPlaybackPositionMs, eventTime.totalBufferedDurationMs, loading);
         }
+    }
+
+    @Override
+    public void onPlayWhenReadyChanged(
+            EventTime eventTime,
+            boolean playWhenReady,
+            @Player.PlayWhenReadyChangeReason int reason) {
+        if (playWhenReady) return;
+        FRAME_TIMING_METRICS.resetReleaseContinuity();
+        FRAME_SCHEDULING_METRICS.observeBoundary(
+                ExoFrameSchedulingExperimentMetrics.Boundary.PAUSE);
     }
 
     private static void updateAutoRecovery(Snapshot current, long now) {
@@ -235,15 +303,24 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
     @Override
     public void onVideoDecoderInitialized(EventTime eventTime, String decoderName, long initializedTimestampMs, long initializationDurationMs) {
         snapshot = snapshot.withVideoDecoder(decoderName);
+        FRAME_SCHEDULING_METRICS.observeDecoder(decoderName);
         if (!SpiderDebug.isEnabled()) return;
         traceLog("video decoder=%s init=%dms", decoderName, initializationDurationMs);
     }
 
     @Override
     public void onVideoInputFormatChanged(EventTime eventTime, Format format, @Nullable DecoderReuseEvaluation decoderReuseEvaluation) {
+        Format previousFormat = snapshot.videoFormat();
+        boolean changed = previousFormat != null
+                && !previousFormat.equals(format);
         snapshot = snapshot.withVideoFormat(format);
         FRAME_RATE_ESTIMATOR.reset();
         FRAME_TIMING_METRICS.resetReleaseContinuity();
+        if (changed) {
+            FRAME_SCHEDULING_METRICS.observeBoundary(
+                    ExoFrameSchedulingExperimentMetrics.Boundary.FORMAT_CHANGE);
+        }
+        FRAME_SCHEDULING_METRICS.observeFormat(format);
         BITRATE_ESTIMATOR.updateFormats(snapshot.videoFormat(), snapshot.audioFormat());
         if (!SpiderDebug.isEnabled()) return;
         traceLog("video format mime=%s codecs=%s size=%dx%d fps=%.3f bitrate=%d bitrateSource=%s color=%s", format.sampleMimeType, format.codecs, format.width, format.height, format.frameRate, ExoPlaybackDiagnostics.formatBitrate(format), ExoPlaybackDiagnostics.bitrateSource(format), format.colorInfo);
@@ -274,7 +351,9 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
 
     @Override
     public void onDroppedVideoFrames(EventTime eventTime, int droppedFrames, long elapsedMs) {
-        totalDroppedFrames += droppedFrames;
+        long observed = Math.max(0, droppedFrames);
+        totalDroppedFrames = totalDroppedFrames > Long.MAX_VALUE - observed
+                ? Long.MAX_VALUE : totalDroppedFrames + observed;
         snapshot = snapshot.withDroppedFrames(totalDroppedFrames);
         if (!SpiderDebug.isEnabled()) return;
         traceLog("droppedFrames=%d total=%d elapsed=%dms position=%d", droppedFrames, totalDroppedFrames, elapsedMs, eventTime.currentPlaybackPositionMs);
@@ -282,7 +361,10 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
 
     @Override
     public void onVideoFrameProcessingOffset(EventTime eventTime, long totalProcessingOffsetUs, int frameCount) {
-        FRAME_TIMING_METRICS.observeProcessingOffset(totalProcessingOffsetUs, frameCount);
+        FRAME_TIMING_METRICS.observeProcessingOffset(
+                totalProcessingOffsetUs,
+                frameCount,
+                frameSchedulingExperimentActive);
     }
 
     @Override
@@ -332,6 +414,11 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
         BITRATE_ESTIMATOR.disrupt();
         FRAME_RATE_ESTIMATOR.reset();
         FRAME_TIMING_METRICS.resetReleaseContinuity();
+        if (reason == Player.DISCONTINUITY_REASON_SEEK
+                || reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT) {
+            FRAME_SCHEDULING_METRICS.observeBoundary(
+                    ExoFrameSchedulingExperimentMetrics.Boundary.SEEK);
+        }
         BUFFER_TREND.reset();
         lastStableBufferTrend = ForwardBufferTrend.Snapshot.unknown();
         ExoPlaybackThresholdCoordinator.process().disrupt(
@@ -341,7 +428,18 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
     @Override
     public void onVideoFrameAboutToBeRendered(long presentationTimeUs, long releaseTimeNs, Format format, @Nullable MediaFormat mediaFormat) {
         FRAME_RATE_ESTIMATOR.observe(presentationTimeUs);
-        FRAME_TIMING_METRICS.observeFrameRelease(presentationTimeUs, releaseTimeNs, System.nanoTime());
+        if (frameSchedulingExperimentActive) {
+            FRAME_TIMING_METRICS.observeFrameRelease(
+                    presentationTimeUs, releaseTimeNs, System.nanoTime());
+        }
+    }
+
+    @Override
+    public void onRenderedFirstFrame(
+            EventTime eventTime,
+            Object output,
+            long renderTimeMs) {
+        FRAME_SCHEDULING_METRICS.observeFirstFrame(renderTimeMs);
     }
 
     @Override
@@ -406,6 +504,14 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
 
     private static void traceLog(String format, Object... args) {
         PlaybackTrace.log("playback-metrics", playbackTraceId, format, args);
+    }
+
+    private static long safeElapsedRealtime() {
+        try {
+            return SystemClock.elapsedRealtime();
+        } catch (Throwable ignored) {
+            return 0;
+        }
     }
 
     private static String stateName(int state) {

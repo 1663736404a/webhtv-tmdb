@@ -611,16 +611,22 @@ public class PlayerOsdController {
 
     private String summarizeFrameTiming() {
         com.fongmi.android.tv.player.exo.ExoFrameTimingMetrics.Snapshot timing = PlaybackAnalyticsListener.getFrameTimingSnapshot();
-        if (timing.frameCount() <= 0 && timing.releaseFrameCount() <= 0 && timing.codecErrorCount() <= 0) return "";
-        if (timing.codecErrorCount() > 0) return "解码错误 " + timing.codecErrorCount();
+        com.fongmi.android.tv.player.exo.ExoFrameSchedulingExperimentMetrics.Snapshot experiment = PlaybackAnalyticsListener.getFrameSchedulingExperimentSnapshot();
+        String unit = experiment.experimentApplied()
+                ? "帧调度A/B " + experiment.earlySchedulingThresholdUs() / 1000
+                + "ms / 耗时推进"
+                + (experiment.durationToProgressRequested() ? "开" : "关")
+                : "";
+        if (timing.frameCount() <= 0 && timing.releaseFrameCount() <= 0 && timing.codecErrorCount() <= 0) return unit;
+        if (timing.codecErrorCount() > 0) return join(" / ", unit, "解码错误 " + timing.codecErrorCount());
         if (timing.lateReleaseFrameCount() > 0) {
-            return "释放滞后 " + timing.lateReleaseFrameCount() + " 帧 / 最大延迟 " + bitrateFormat.format(timing.maxLateReleaseUs() / 1000f) + "ms";
+            return join(" / ", unit, "释放滞后 " + timing.lateReleaseFrameCount() + " 帧 / 最大延迟 " + bitrateFormat.format(timing.maxLateReleaseUs() / 1000f) + "ms");
         }
-        if (timing.lateBatchCount() > 0) return "调度滞后 " + timing.lateBatchCount() + " 批";
+        if (timing.lateBatchCount() > 0) return join(" / ", unit, "调度滞后 " + timing.lateBatchCount() + " 批");
         if (timing.releaseJitterSampleCount() > 0 && timing.averageReleaseJitterUs() >= 5_000) {
-            return "释放抖动 " + bitrateFormat.format(timing.averageReleaseJitterUs() / 1000f) + "ms";
+            return join(" / ", unit, "释放抖动 " + bitrateFormat.format(timing.averageReleaseJitterUs() / 1000f) + "ms");
         }
-        return "";
+        return unit;
     }
 
     private String getColor(Format format) {

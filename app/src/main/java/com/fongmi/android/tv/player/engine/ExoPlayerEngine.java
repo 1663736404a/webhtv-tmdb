@@ -20,6 +20,8 @@ import com.fongmi.android.tv.player.PlaybackResourceClassifier;
 import com.fongmi.android.tv.player.exo.ErrorMsgProvider;
 import com.fongmi.android.tv.player.exo.ExoDecoderRuntimeProfiles;
 import com.fongmi.android.tv.player.exo.ExoDecoderRuntimeSession;
+import com.fongmi.android.tv.player.exo.ExoFrameSchedulingPlayerSettings;
+import com.fongmi.android.tv.player.exo.ExoFrameSchedulingSessionLock;
 import com.fongmi.android.tv.player.exo.ExoUtil;
 import com.fongmi.android.tv.player.exo.ExoTunnelingProgressWatchdog;
 import com.fongmi.android.tv.player.exo.ExoTunnelingRuntimeState;
@@ -46,6 +48,7 @@ public class ExoPlayerEngine implements PlayerEngine {
     private final PreCache preCache;
     private final Set<String> attemptedFormats;
     private final ExoDecoderRuntimeSession decoderRuntimeSession;
+    private final ExoFrameSchedulingSessionLock frameSchedulingSessionLock;
     private PlaySpec spec;
     private String activeFormat;
     private ExoPlayer player;
@@ -55,6 +58,9 @@ public class ExoPlayerEngine implements PlayerEngine {
     private boolean tunnelingFallbackAttempted;
     private boolean tunnelingEnabledForSession;
     private boolean decoderRuntimeEnabledForPlayer;
+    private ExoFrameSchedulingPlayerSettings frameSchedulingSettings;
+    private ExoFrameSchedulingPlayerSettings pendingFrameSchedulingSettings;
+    private ExoDecoderRuntimeSession.OutputConfig frameSchedulingOutput;
     private PlaybackResourceClassifier.Classification resourceClassification;
     private long byteSessionSequence = -1;
     private final ExoTunnelingWatchdog tunnelingWatchdog = new ExoTunnelingWatchdog();
@@ -115,9 +121,21 @@ public class ExoPlayerEngine implements PlayerEngine {
         this.decoderRuntimeSession = ExoDecoderRuntimeProfiles.process().newSession();
         this.decoderRuntimeEnabledForPlayer =
                 PlaybackPerformanceSetting.isAuto(PlayerSetting.EXO);
+        this.frameSchedulingSettings =
+                ExoFrameSchedulingPlayerSettings.capture(decode);
+        this.frameSchedulingSessionLock =
+                new ExoFrameSchedulingSessionLock(
+                        frameSchedulingSettings.decision());
+        this.frameSchedulingOutput = ExoDecoderRuntimeProfiles.currentOutput(
+                ExoUtil.isTunnelingEnabled(decode, false));
         MediaSourceFactory.acquireCacheSession();
         try {
-            this.player = ExoUtil.buildPlayer(decode, listener, false, decoderRuntimeSession);
+            this.player = ExoUtil.buildPlayer(
+                    decode,
+                    listener,
+                    false,
+                    decoderRuntimeSession,
+                    frameSchedulingSettings);
         } catch (RuntimeException | Error e) {
             MediaSourceFactory.releaseCacheSession();
             throw e;
@@ -155,6 +173,8 @@ public class ExoPlayerEngine implements PlayerEngine {
 
     @Override
     public Player rebuild(Player.Listener listener) {
+        ExoFrameSchedulingPlayerSettings schedulingSettings =
+                settingsForRebuild();
         preCache.stop("engine-rebuild");
         cancelTunnelingWatchdog();
         cancelTunnelingProgressWatchdog();
@@ -166,16 +186,56 @@ public class ExoPlayerEngine implements PlayerEngine {
         tunnelingEnabledForSession = ExoUtil.isTunnelingEnabled(decode, tunnelingFallbackAttempted);
         decoderRuntimeEnabledForPlayer =
                 PlaybackPerformanceSetting.isAuto(PlayerSetting.EXO);
+        frameSchedulingOutput = ExoDecoderRuntimeProfiles.currentOutput(
+                tunnelingEnabledForSession);
         player = ExoUtil.buildPlayer(
-                decode, listener, tunnelingFallbackAttempted, decoderRuntimeSession);
+                decode,
+                listener,
+                tunnelingFallbackAttempted,
+                decoderRuntimeSession,
+                schedulingSettings);
+        frameSchedulingSettings = schedulingSettings;
+        frameSchedulingSessionLock.onRendererRebuilt(
+                schedulingSettings.decision());
         player.addListener(tunnelingWatchdogListener);
         return player;
+    }
+
+    public boolean prepareFrameSchedulingForNextPlayback() {
+        ExoFrameSchedulingPlayerSettings desired =
+                ExoFrameSchedulingPlayerSettings.capture(decode);
+        if (!frameSchedulingSettings.samePlayerConfiguration(desired)) {
+            pendingFrameSchedulingSettings = desired;
+            return true;
+        }
+        pendingFrameSchedulingSettings = null;
+        frameSchedulingSessionLock.lockForNextPlayback(desired.decision());
+        return false;
+    }
+
+    private ExoFrameSchedulingPlayerSettings settingsForRebuild() {
+        ExoFrameSchedulingPlayerSettings pending =
+                pendingFrameSchedulingSettings;
+        pendingFrameSchedulingSettings = null;
+        if (pending != null) return pending;
+        String specTraceId = spec == null
+                ? PlaybackTrace.NONE
+                : PlaybackTrace.normalize(spec.getPlaybackTraceId());
+        if (spec != null
+                && !PlaybackTrace.NONE.equals(specTraceId)
+                && specTraceId.equals(
+                PlaybackAnalyticsListener.getPlaybackTraceId())) {
+            return frameSchedulingSettings.withDecision(
+                    frameSchedulingSessionLock.sessionDecision());
+        }
+        return ExoFrameSchedulingPlayerSettings.capture(decode);
     }
 
     public boolean disableTunnelingForSession() {
         if (!tunnelingEnabledForSession || tunnelingFallbackAttempted) return false;
         tunnelingFallbackAttempted = true;
         tunnelingEnabledForSession = false;
+        frameSchedulingOutput = ExoDecoderRuntimeProfiles.currentOutput(false);
         cancelTunnelingProgressWatchdog();
         cancelTunnelingWatchdog();
         int failures = ExoTunnelingRuntimeState.recordFailure(ExoUtil.getTunnelingRuntimeKey(decode));
@@ -324,6 +384,7 @@ public class ExoPlayerEngine implements PlayerEngine {
     @Override
     public void start(PlaySpec spec, boolean playWhenReady) {
         finishDecoderRuntimeAttempt();
+        lockCompatibleFrameSchedulingDecision();
         this.spec = spec;
         this.activeFormat = spec.getFormat();
         this.resourceClassification = PlaybackResourceClassifier.classifyRequest(spec.getUrl(), spec.getFormat(), spec.getFormat());
@@ -339,6 +400,7 @@ public class ExoPlayerEngine implements PlayerEngine {
     @Override
     public void start(PlaySpec spec, long position, boolean playWhenReady) {
         finishDecoderRuntimeAttempt();
+        lockCompatibleFrameSchedulingDecision();
         this.spec = spec;
         this.activeFormat = spec.getFormat();
         this.resourceClassification = PlaybackResourceClassifier.classifyRequest(spec.getUrl(), spec.getFormat(), spec.getFormat());
@@ -366,6 +428,15 @@ public class ExoPlayerEngine implements PlayerEngine {
         preCache.stop("engine-restart");
         player.stop();
         startInternal(position, playWhenReady);
+    }
+
+    private void lockCompatibleFrameSchedulingDecision() {
+        ExoFrameSchedulingPlayerSettings desired =
+                ExoFrameSchedulingPlayerSettings.capture(decode);
+        if (frameSchedulingSettings.samePlayerConfiguration(desired)) {
+            frameSchedulingSessionLock.lockForNextPlayback(
+                    desired.decision());
+        }
     }
 
     @Override
@@ -574,7 +645,11 @@ public class ExoPlayerEngine implements PlayerEngine {
         armTunnelingWatchdog();
         finishDecoderRuntimeAttempt();
         PlaybackAnalyticsListener.finishSession(player.getCurrentPosition());
-        PlaybackAnalyticsListener.beginSession(spec.getPlaybackTraceId());
+        PlaybackAnalyticsListener.beginSession(
+                spec.getPlaybackTraceId(),
+                frameSchedulingSessionLock.sessionDecision(),
+                frameSchedulingOutput,
+                frameSchedulingSettings.codecQueueModeLabel());
         if (decoderRuntimeEnabledForPlayer) {
             decoderRuntimeSession.beginAttempt(
                     ExoDecoderRuntimeProfiles.currentOutput(tunnelingEnabledForSession),

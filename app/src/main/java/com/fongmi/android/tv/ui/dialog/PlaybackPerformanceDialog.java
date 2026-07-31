@@ -27,10 +27,12 @@ import com.fongmi.android.tv.App;
 import com.fongmi.android.tv.event.ConfigEvent;
 import com.fongmi.android.tv.player.PlaybackExperimentCoordinator;
 import com.fongmi.android.tv.player.PlaybackExperimentPolicy;
+import com.fongmi.android.tv.player.exo.ExoFrameSchedulingExperimentPolicy;
 import com.fongmi.android.tv.setting.PlaybackPerformanceCatalog;
 import com.fongmi.android.tv.setting.PlaybackPerformanceOption;
 import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
 import com.fongmi.android.tv.setting.PlaybackExperimentSetting;
+import com.fongmi.android.tv.setting.ExoFrameSchedulingExperimentSetting;
 import com.fongmi.android.tv.setting.MpvPerformanceSetting;
 import com.fongmi.android.tv.setting.IjkPerformanceSetting;
 import com.fongmi.android.tv.setting.ExoPerformanceSetting;
@@ -182,6 +184,11 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
         addHelpItem(content,
                 getString(R.string.player_performance_experiment_strategy),
                 getString(R.string.player_performance_experiment_help));
+        addHelpItem(content,
+                getString(R.string
+                        .player_performance_experiment_exo_frame_scheduling),
+                getString(R.string
+                        .player_performance_experiment_exo_frame_help));
         String section = "";
         for (PlaybackPerformanceOption option : options()) {
             if (!section.equals(option.section())) {
@@ -438,6 +445,11 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                 PlaybackExperimentPolicy.Domain.EXO,
                 state.exoEnabled(),
                 state.enabled());
+        addRow(
+                getString(R.string
+                        .player_performance_experiment_exo_frame_scheduling),
+                frameSchedulingExperimentValue(),
+                this::showFrameSchedulingExperimentDialog);
         addExperimentDomainRow(
                 R.string.player_performance_experiment_mpv,
                 PlaybackExperimentPolicy.Domain.MPV,
@@ -454,6 +466,72 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                         ? R.string.player_performance_experiment_rollback_ready
                         : R.string.player_performance_experiment_rollback_done),
                 state.enabled() ? this::confirmExperimentRollback : null);
+    }
+
+    private String frameSchedulingExperimentValue() {
+        ExoFrameSchedulingExperimentPolicy.AssignmentResolution resolution =
+                ExoFrameSchedulingExperimentSetting
+                .getResolution();
+        if (resolution.status()
+                == ExoFrameSchedulingExperimentPolicy.Status.UNASSIGNED) {
+            return getString(R.string
+                    .player_performance_experiment_exo_frame_not_enrolled);
+        }
+        if (resolution.status()
+                != ExoFrameSchedulingExperimentPolicy.Status.CURRENT
+                || resolution.assignment().unit() == null) {
+            return getString(R.string
+                    .player_performance_experiment_exo_frame_invalid);
+        }
+        return frameSchedulingUnitLabel(resolution.assignment().unit());
+    }
+
+    private String frameSchedulingUnitLabel(
+            ExoFrameSchedulingExperimentPolicy.Unit unit) {
+        if (unit == null) {
+            return getString(R.string
+                    .player_performance_experiment_exo_frame_not_enrolled);
+        }
+        return getString(
+                R.string.player_performance_experiment_exo_frame_unit,
+                unit.earlySchedulingThresholdUs() / 1_000L,
+                getString(unit.durationToProgressEnabled()
+                        ? R.string.player_performance_experiment_on
+                        : R.string.player_performance_experiment_off));
+    }
+
+    private void showFrameSchedulingExperimentDialog() {
+        ExoFrameSchedulingExperimentPolicy.Unit[] units =
+                ExoFrameSchedulingExperimentPolicy.Unit.values();
+        String[] labels = new String[units.length + 1];
+        labels[0] = getString(R.string
+                .player_performance_experiment_exo_frame_not_enrolled);
+        for (int index = 0; index < units.length; index++) {
+            labels[index + 1] = frameSchedulingUnitLabel(units[index]);
+        }
+        ExoFrameSchedulingExperimentPolicy.Unit current =
+                ExoFrameSchedulingExperimentSetting.getUnit();
+        int selected = 0;
+        for (int index = 0; index < units.length; index++) {
+            if (units[index] == current) selected = index + 1;
+        }
+        new MaterialAlertDialogBuilder(
+                requireContext(), R.style.ThemeOverlay_WebHTV_LightDialog)
+                .setTitle(R.string
+                        .player_performance_experiment_exo_frame_title)
+                .setSingleChoiceItems(labels, selected, (dialog, which) -> {
+                    ExoFrameSchedulingExperimentPolicy.Unit target =
+                            which <= 0 ? null : units[which - 1];
+                    if (ExoFrameSchedulingExperimentSetting.putUnit(target)) {
+                        PlaybackExperimentCoordinator.process().invalidate(
+                                PlaybackExperimentCoordinator.Change
+                                        .POLICY_CHANGED);
+                        refreshRows();
+                    }
+                    dialog.dismiss();
+                })
+                .setNegativeButton(R.string.dialog_cancel, null)
+                .show();
     }
 
     private void addExperimentDomainRow(

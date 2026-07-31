@@ -116,6 +116,8 @@ public final class PlaybackExperimentPolicy {
                 Risk.HIGH_RISK_EXPERIMENT, 1),
         EXO_DECODER_RUNTIME_REBUILD("exo.decoder-runtime-rebuild", Domain.EXO,
                 Risk.HIGH_RISK_EXPERIMENT, 1),
+        EXO_FRAME_SCHEDULING_AB("exo.frame-scheduling-ab", Domain.EXO,
+                Risk.HIGH_RISK_EXPERIMENT, 1),
         MPV_INITIAL_BASELINE("mpv.initial-baseline", Domain.MPV,
                 Risk.STABLE_BASELINE, 1),
         MPV_CACHE_SHRINK("mpv.cache-shrink", Domain.MPV,

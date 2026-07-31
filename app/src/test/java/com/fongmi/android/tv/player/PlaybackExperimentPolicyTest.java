@@ -37,6 +37,8 @@ public class PlaybackExperimentPolicyTest {
         assertFalse(state.allows(
                 PlaybackExperimentPolicy.Action.EXO_NETWORK_SPEED));
         assertFalse(state.allows(
+                PlaybackExperimentPolicy.Action.EXO_FRAME_SCHEDULING_AB));
+        assertFalse(state.allows(
                 PlaybackExperimentPolicy.Action.MPV_AUTO_PRELOAD));
         assertFalse(state.allows(
                 PlaybackExperimentPolicy.Action.IJK_RUNTIME_KERNEL_FALLBACK));
@@ -66,6 +68,8 @@ public class PlaybackExperimentPolicyTest {
 
         assertTrue(state.allows(
                 PlaybackExperimentPolicy.Action.EXO_AUTO_PRELOAD));
+        assertTrue(state.allows(
+                PlaybackExperimentPolicy.Action.EXO_FRAME_SCHEDULING_AB));
         assertFalse(state.allows(
                 PlaybackExperimentPolicy.Action.MPV_CACHE_EXPANSION));
         assertTrue(state.allows(
