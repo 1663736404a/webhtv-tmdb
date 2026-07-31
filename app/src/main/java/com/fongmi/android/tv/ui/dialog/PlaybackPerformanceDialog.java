@@ -25,13 +25,19 @@ import androidx.fragment.app.FragmentActivity;
 import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.App;
 import com.fongmi.android.tv.event.ConfigEvent;
+import com.fongmi.android.tv.player.PlaybackAutoContext;
 import com.fongmi.android.tv.player.PlaybackExperimentCoordinator;
 import com.fongmi.android.tv.player.PlaybackExperimentPolicy;
+import com.fongmi.android.tv.player.PlaybackProfileAbAcceptancePolicy;
+import com.fongmi.android.tv.player.PlaybackProfileAbCoordinator;
+import com.fongmi.android.tv.player.PlaybackProfileAbIdentity;
+import com.fongmi.android.tv.player.PlaybackProfileAbPolicy;
 import com.fongmi.android.tv.player.exo.ExoFrameSchedulingExperimentPolicy;
 import com.fongmi.android.tv.player.exo.ExoNetworkProtectionPolicy;
 import com.fongmi.android.tv.setting.PlaybackPerformanceCatalog;
 import com.fongmi.android.tv.setting.PlaybackPerformanceOption;
 import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
+import com.fongmi.android.tv.setting.PlaybackProfileAbSetting;
 import com.fongmi.android.tv.setting.PlaybackExperimentSetting;
 import com.fongmi.android.tv.setting.ExoFrameSchedulingExperimentSetting;
 import com.fongmi.android.tv.setting.MpvPerformanceSetting;
@@ -190,6 +196,11 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                         .player_performance_experiment_exo_frame_scheduling),
                 getString(R.string
                         .player_performance_experiment_exo_frame_help));
+        addHelpItem(content,
+                getString(R.string
+                        .player_performance_experiment_profile_ab_collection),
+                getString(R.string
+                        .player_performance_experiment_profile_ab_help));
         String section = "";
         for (PlaybackPerformanceOption option : options()) {
             if (!section.equals(option.section())) {
@@ -462,6 +473,17 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                 state.ijkEnabled(),
                 state.enabled());
         addRow(
+                getString(R.string
+                        .player_performance_experiment_profile_ab_collection),
+                profileAbEnrollmentValue(),
+                profileAbEnrollmentMutable()
+                        ? this::toggleProfileAbEnrollment : null);
+        addRow(
+                getString(R.string
+                        .player_performance_experiment_profile_ab_report),
+                profileAbReportValue(),
+                this::showProfileAbReportDialog);
+        addRow(
                 getString(R.string.player_performance_experiment_rollback),
                 getString(state.enabled()
                         ? R.string.player_performance_experiment_rollback_ready
@@ -533,6 +555,219 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                 })
                 .setNegativeButton(R.string.dialog_cancel, null)
                 .show();
+    }
+
+    private String profileAbEnrollmentValue() {
+        PlaybackProfileAbPolicy.EnrollmentResolution resolution =
+                PlaybackProfileAbSetting.getEnrollmentResolution();
+        if (resolution.status()
+                == PlaybackProfileAbPolicy.EnrollmentStatus.NOT_ENROLLED) {
+            return getString(
+                    R.string.player_performance_experiment_off);
+        }
+        if (!resolution.active()) {
+            return getString(R.string
+                    .player_performance_experiment_profile_ab_invalid);
+        }
+        return getString(profileAbGateOpenForCurrentKernel()
+                ? R.string.player_performance_experiment_on
+                : R.string.player_performance_experiment_standby);
+    }
+
+    private boolean profileAbEnrollmentMutable() {
+        return PlaybackProfileAbSetting.getEnrollmentResolution().status()
+                != PlaybackProfileAbPolicy.EnrollmentStatus.FUTURE_SCHEMA;
+    }
+
+    private boolean profileAbGateOpenForCurrentKernel() {
+        PlaybackAutoContext.Kernel kernel = switch (
+                PlayerSetting.getPlayer()) {
+            case PlayerSetting.MPV -> PlaybackAutoContext.Kernel.MPV;
+            case PlayerSetting.IJK -> PlaybackAutoContext.Kernel.IJK;
+            default -> PlaybackAutoContext.Kernel.EXO;
+        };
+        return PlaybackProfileAbPolicy.gateAllows(
+                PlaybackExperimentSetting.getState(), kernel);
+    }
+
+    private void toggleProfileAbEnrollment() {
+        if (PlaybackProfileAbSetting.isEnrolled()) {
+            if (PlaybackProfileAbSetting.putEnrolled(false)) {
+                PlaybackProfileAbCoordinator.process().invalidateActive(
+                        PlaybackProfileAbCoordinator.InvalidationReason
+                                .ENROLLMENT_CHANGED);
+                refreshRows();
+            }
+            return;
+        }
+        new MaterialAlertDialogBuilder(
+                requireContext(), R.style.ThemeOverlay_WebHTV_LightDialog)
+                .setTitle(R.string
+                        .player_performance_experiment_profile_ab_enable_title)
+                .setMessage(R.string
+                        .player_performance_experiment_profile_ab_enable_message)
+                .setNegativeButton(R.string.dialog_cancel, null)
+                .setPositiveButton(
+                        R.string
+                                .player_performance_experiment_profile_ab_enable_confirm,
+                        (dialog, which) -> {
+                            if (!PlaybackProfileAbSetting.putEnrolled(true)) {
+                                return;
+                            }
+                            PlaybackProfileAbCoordinator.process()
+                                    .invalidateActive(
+                                            PlaybackProfileAbCoordinator
+                                                    .InvalidationReason
+                                                    .ENROLLMENT_CHANGED);
+                            refreshRows();
+                        })
+                .show();
+    }
+
+    private String profileAbReportValue() {
+        PlaybackProfileAbAcceptancePolicy.Report report =
+                PlaybackProfileAbSetting.report(System.currentTimeMillis());
+        return getString(
+                R.string.player_performance_experiment_profile_ab_report_value,
+                report.automaticSamples(),
+                report.recommendedSamples(),
+                profileAbStatusLabel(report.status()));
+    }
+
+    private void showProfileAbReportDialog() {
+        PlaybackProfileAbAcceptancePolicy.Report report =
+                PlaybackProfileAbSetting.report(System.currentTimeMillis());
+        StringBuilder message = new StringBuilder(getString(
+                R.string
+                        .player_performance_experiment_profile_ab_report_summary,
+                profileAbStatusLabel(report.status()),
+                report.automaticSamples(),
+                report.recommendedSamples(),
+                report.totalGroups(),
+                report.evaluableGroups(),
+                report.passedGroups(),
+                report.failedGroups(),
+                report.insufficientGroups()));
+        int shown = 0;
+        for (PlaybackProfileAbAcceptancePolicy.GroupReport group
+                : report.groups()) {
+            if (shown++ >= 20 || group.groupKey() == null) break;
+            PlaybackProfileAbPolicy.GroupKey key = group.groupKey();
+            message.append("\n\n")
+                    .append('#')
+                    .append(PlaybackProfileAbIdentity.shortDigest(
+                            PlaybackProfileAbIdentity.groupDigest(key)))
+                    .append(" · ")
+                    .append(key.kernel().label())
+                    .append(" · ")
+                    .append(key.decodeMode().label())
+                    .append(" · ")
+                    .append(key.protocol().label())
+                    .append(" · ")
+                    .append(key.streamKind().label())
+                    .append(" · ")
+                    .append(key.videoMime().label())
+                    .append(" · ")
+                    .append(key.hdrType().label())
+                    .append(" · ")
+                    .append(key.pathKind().label())
+                    .append('\n')
+                    .append(profileAbStatusLabel(group.status()))
+                    .append(" · A ")
+                    .append(group.automaticSamples())
+                    .append(" / B ")
+                    .append(group.recommendedSamples());
+            appendProfileAbMetricList(
+                    message,
+                    R.string
+                            .player_performance_experiment_profile_ab_failed_metrics,
+                    group.failedMetrics());
+            appendProfileAbMetricList(
+                    message,
+                    R.string
+                            .player_performance_experiment_profile_ab_missing_metrics,
+                    group.missingMetrics());
+        }
+        new MaterialAlertDialogBuilder(
+                requireContext(), R.style.ThemeOverlay_WebHTV_LightDialog)
+                .setTitle(R.string
+                        .player_performance_experiment_profile_ab_report_title)
+                .setMessage(message.toString())
+                .setNegativeButton(R.string.dialog_close, null)
+                .setNeutralButton(
+                        R.string
+                                .player_performance_experiment_profile_ab_clear,
+                        (dialog, which) -> confirmClearProfileAbReport())
+                .show();
+    }
+
+    private void appendProfileAbMetricList(
+            StringBuilder message,
+            int label,
+            java.util.List<PlaybackProfileAbAcceptancePolicy.Metric>
+                    metrics) {
+        if (metrics == null || metrics.isEmpty()) return;
+        message.append('\n').append(getString(label)).append(": ");
+        for (int index = 0; index < metrics.size(); index++) {
+            if (index > 0) message.append(", ");
+            message.append(profileAbMetricLabel(metrics.get(index)));
+        }
+    }
+
+    private void confirmClearProfileAbReport() {
+        new MaterialAlertDialogBuilder(
+                requireContext(), R.style.ThemeOverlay_WebHTV_LightDialog)
+                .setTitle(R.string
+                        .player_performance_experiment_profile_ab_clear_title)
+                .setMessage(R.string
+                        .player_performance_experiment_profile_ab_clear_message)
+                .setNegativeButton(R.string.dialog_cancel, null)
+                .setPositiveButton(
+                        R.string
+                                .player_performance_experiment_profile_ab_clear_confirm,
+                        (dialog, which) -> {
+                            PlaybackProfileAbSetting.clearReport();
+                            refreshRows();
+                        })
+                .show();
+    }
+
+    private String profileAbStatusLabel(
+            PlaybackProfileAbAcceptancePolicy.Status status) {
+        int value = switch (status) {
+            case PASSED -> R.string
+                    .player_performance_experiment_profile_ab_passed;
+            case FAILED -> R.string
+                    .player_performance_experiment_profile_ab_failed;
+            case METRICS_MISSING -> R.string
+                    .player_performance_experiment_profile_ab_metrics_missing;
+            case INSUFFICIENT_SAMPLES -> R.string
+                    .player_performance_experiment_profile_ab_insufficient;
+            case NO_DATA -> R.string
+                    .player_performance_experiment_profile_ab_no_data;
+        };
+        return getString(value);
+    }
+
+    private String profileAbMetricLabel(
+            PlaybackProfileAbAcceptancePolicy.Metric metric) {
+        int value = switch (metric) {
+            case FIRST_FRAME_MS -> R.string
+                    .player_performance_experiment_profile_ab_metric_first_frame;
+            case REBUFFER_RATIO_PPM -> R.string
+                    .player_performance_experiment_profile_ab_metric_rebuffer_ratio;
+            case REBUFFER_COUNT -> R.string
+                    .player_performance_experiment_profile_ab_metric_rebuffer_count;
+            case PEAK_PSS_BYTES -> R.string
+                    .player_performance_experiment_profile_ab_metric_peak_pss;
+            case DROPPED_FRAMES_PER_MINUTE_MILLI -> R.string
+                    .player_performance_experiment_profile_ab_metric_dropped;
+            case LIVE_LAG_MS -> R.string
+                    .player_performance_experiment_profile_ab_metric_live_lag;
+            case ERROR_RATE_PPM -> R.string
+                    .player_performance_experiment_profile_ab_metric_error_rate;
+        };
+        return getString(value);
     }
 
     private void addExperimentDomainRow(

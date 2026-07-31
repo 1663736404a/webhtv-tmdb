@@ -156,6 +156,9 @@ public class SharedPlaybackScenarioMatrixTest {
                 if (action.risk()
                         != PlaybackExperimentPolicy.Risk.HIGH_RISK_EXPERIMENT) {
                     assertTrue(action.id(), state.allows(action));
+                } else if (action.domain()
+                        == PlaybackExperimentPolicy.Domain.SHARED) {
+                    assertTrue(action.id(), state.allows(action));
                 } else {
                     assertEquals(action.id(), action.domain() == enabled,
                             state.allows(action));

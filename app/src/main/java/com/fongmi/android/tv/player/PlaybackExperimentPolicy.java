@@ -104,6 +104,8 @@ public final class PlaybackExperimentPolicy {
                 Risk.SAFETY_PROTECTION, 1),
         MEMORY_PRESSURE_SHRINK("shared.memory-pressure-shrink", Domain.SHARED,
                 Risk.SAFETY_PROTECTION, 1),
+        SHARED_PROFILE_AB_VALIDATION("shared.profile-ab-validation",
+                Domain.SHARED, Risk.HIGH_RISK_EXPERIMENT, 1),
         EXO_INITIAL_BASELINE("exo.initial-baseline", Domain.EXO,
                 Risk.STABLE_BASELINE, 1),
         EXO_AUTO_PRELOAD("exo.auto-preload", Domain.EXO,

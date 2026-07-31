@@ -66,6 +66,14 @@ public class BackupPreferenceFilterTest {
                 "playback_experiment_exo_frame_device", everything));
         assertFalse(Backup.include(
                 "playback_experiment_exo_frame_unit", everything));
+        assertFalse(Backup.include(
+                "playback_experiment_profile_ab_schema", everything));
+        assertFalse(Backup.include(
+                "playback_experiment_profile_ab_device", everything));
+        assertFalse(Backup.include(
+                "playback_experiment_profile_ab_enabled", everything));
+        assertFalse(Backup.include(
+                "playback_experiment_profile_ab_samples_v1", everything));
     }
 
     @Test
