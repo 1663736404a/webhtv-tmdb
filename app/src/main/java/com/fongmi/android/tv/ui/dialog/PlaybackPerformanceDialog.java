@@ -26,6 +26,7 @@ import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.App;
 import com.fongmi.android.tv.event.ConfigEvent;
 import com.fongmi.android.tv.player.PlaybackAutoContext;
+import com.fongmi.android.tv.player.PlaybackCompatibilityRetentionPolicy;
 import com.fongmi.android.tv.player.PlaybackExperimentCoordinator;
 import com.fongmi.android.tv.player.PlaybackExperimentPolicy;
 import com.fongmi.android.tv.player.PlaybackLightweightAssessmentPolicy;
@@ -207,6 +208,11 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                         .player_performance_lightweight_assessment_collection),
                 getString(R.string
                         .player_performance_lightweight_assessment_help));
+        addHelpItem(content,
+                getString(R.string
+                        .player_performance_compatibility_assessment),
+                getString(R.string
+                        .player_performance_compatibility_assessment_help));
         if (!PlaybackPerformanceSetting.isRecommendedMerged()) {
             addHelpItem(content,
                     getString(R.string
@@ -546,6 +552,11 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                         .player_performance_lightweight_assessment_report),
                 lightweightAssessmentReportValue(),
                 this::showLightweightAssessmentReportDialog);
+        addRow(
+                getString(R.string
+                        .player_performance_compatibility_assessment),
+                compatibilityAssessmentValue(),
+                this::showCompatibilityAssessmentDialog);
         addRow(
                 getString(R.string.player_performance_experiment_rollback),
                 getString(state.enabled()
@@ -1002,6 +1013,101 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                             refreshRows();
                         })
                 .show();
+    }
+
+    private String compatibilityAssessmentValue() {
+        PlaybackCompatibilityRetentionPolicy.Assessment assessment =
+                PlaybackCompatibilityRetentionPolicy.current();
+        return getString(
+                R.string.player_performance_compatibility_assessment_value,
+                compatibilityAssessmentStatusLabel(assessment.status()),
+                assessment.reliableRequirements(),
+                assessment.totalRequirements());
+    }
+
+    private void showCompatibilityAssessmentDialog() {
+        PlaybackCompatibilityRetentionPolicy.Assessment assessment =
+                PlaybackCompatibilityRetentionPolicy.current();
+        StringBuilder message = new StringBuilder(getString(
+                R.string
+                        .player_performance_compatibility_assessment_summary,
+                compatibilityAssessmentStatusLabel(assessment.status()),
+                assessment.reliableRequirements(),
+                assessment.totalRequirements(),
+                assessment.limitedRequirements(),
+                assessment.unverifiedRequirements(),
+                assessment.unobservableRequirements(),
+                assessment.missingRequirements()));
+        if (!assessment.blockers().isEmpty()) {
+            message.append("\n\n")
+                    .append(getString(R.string
+                            .player_performance_compatibility_assessment_blockers));
+            for (PlaybackCompatibilityRetentionPolicy.Finding finding
+                    : assessment.blockers()) {
+                message.append("\n• ")
+                        .append(compatibilityRequirementLabel(
+                                finding.requirement()))
+                        .append(" · ")
+                        .append(compatibilityCoverageLabel(
+                                finding.coverage()));
+            }
+        }
+        new MaterialAlertDialogBuilder(
+                requireContext(), R.style.ThemeOverlay_WebHTV_LightDialog)
+                .setTitle(R.string
+                        .player_performance_compatibility_assessment_title)
+                .setMessage(message.toString())
+                .setNegativeButton(R.string.dialog_close, null)
+                .show();
+    }
+
+    private String compatibilityAssessmentStatusLabel(
+            PlaybackCompatibilityRetentionPolicy.Status status) {
+        return getString(status
+                == PlaybackCompatibilityRetentionPolicy.Status.REVIEW_ELIGIBLE
+                ? R.string
+                .player_performance_compatibility_assessment_review
+                : R.string
+                .player_performance_compatibility_assessment_retain);
+    }
+
+    private String compatibilityRequirementLabel(
+            PlaybackCompatibilityRetentionPolicy.Requirement requirement) {
+        if (requirement == null) return getString(R.string
+                .player_performance_compatibility_area_device_evidence);
+        String area = getString(switch (requirement.area()) {
+            case CODEC_FAILURE -> R.string
+                    .player_performance_compatibility_area_codec;
+            case HARDWARE_MISREPORT -> R.string
+                    .player_performance_compatibility_area_hardware_misreport;
+            case OUTPUT_MODE -> R.string
+                    .player_performance_compatibility_area_output;
+            case PROTOCOL_RANGE -> R.string
+                    .player_performance_compatibility_area_protocol;
+            case VISUAL_CORRECTNESS -> R.string
+                    .player_performance_compatibility_area_visual;
+            case LONG_TERM_DEVICE_EVIDENCE -> R.string
+                    .player_performance_compatibility_area_device_evidence;
+        });
+        return requirement.kernelScoped()
+                ? requirement.kernel().label() + " · " + area : area;
+    }
+
+    private String compatibilityCoverageLabel(
+            PlaybackCompatibilityRetentionPolicy.Coverage coverage) {
+        int value = switch (coverage) {
+            case RELIABLE -> R.string
+                    .player_performance_compatibility_coverage_reliable;
+            case LIMITED -> R.string
+                    .player_performance_compatibility_coverage_limited;
+            case UNVERIFIED -> R.string
+                    .player_performance_compatibility_coverage_unverified;
+            case UNOBSERVABLE -> R.string
+                    .player_performance_compatibility_coverage_unobservable;
+            case MISSING -> R.string
+                    .player_performance_compatibility_coverage_missing;
+        };
+        return getString(value);
     }
 
     private String profileAbStatusLabel(
