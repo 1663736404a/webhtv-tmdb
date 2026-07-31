@@ -28,6 +28,7 @@ import com.fongmi.android.tv.event.ConfigEvent;
 import com.fongmi.android.tv.player.PlaybackExperimentCoordinator;
 import com.fongmi.android.tv.player.PlaybackExperimentPolicy;
 import com.fongmi.android.tv.player.exo.ExoFrameSchedulingExperimentPolicy;
+import com.fongmi.android.tv.player.exo.ExoNetworkProtectionPolicy;
 import com.fongmi.android.tv.setting.PlaybackPerformanceCatalog;
 import com.fongmi.android.tv.setting.PlaybackPerformanceOption;
 import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
@@ -827,11 +828,33 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                 refresh();
             };
             case PlaybackPerformanceCatalog.EXO_NETWORK_PROTECTION -> () -> {
-                ExoPerformanceSetting.putNetworkProtectionMode(ExoPerformanceSetting.nextNetworkProtectionMode());
-                refresh();
+                toggleSingleRateNetworkRescue();
             };
             default -> null;
         };
+    }
+
+    private void toggleSingleRateNetworkRescue() {
+        if (ExoPerformanceSetting.isNetworkProtectionEnabled()) {
+            ExoPerformanceSetting.putNetworkProtectionMode(
+                    ExoNetworkProtectionPolicy.MODE_OFF);
+            refresh();
+            return;
+        }
+        new MaterialAlertDialogBuilder(
+                requireContext(), R.style.ThemeOverlay_WebHTV_LightDialog)
+                .setTitle(R.string.player_performance_exo_rescue_enable_title)
+                .setMessage(R.string.player_performance_exo_rescue_enable_message)
+                .setNegativeButton(R.string.dialog_cancel, null)
+                .setPositiveButton(
+                        R.string.player_performance_exo_rescue_enable_confirm,
+                        (dialog, which) -> {
+                            ExoPerformanceSetting.putNetworkProtectionMode(
+                                    ExoNetworkProtectionPolicy
+                                            .MODE_SINGLE_RATE_RESCUE);
+                            refresh();
+                        })
+                .show();
     }
 
     private void toggle(java.util.function.BooleanSupplier getter, java.util.function.Consumer<Boolean> setter) {

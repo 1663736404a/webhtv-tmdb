@@ -67,4 +67,18 @@ public class BackupPreferenceFilterTest {
         assertFalse(Backup.include(
                 "playback_experiment_exo_frame_unit", everything));
     }
+
+    @Test
+    public void singleRateRescueRequiresConsentAgainAfterRestore() {
+        SyncOptions everything = new SyncOptions()
+                .config(true)
+                .spider(true)
+                .webHome(true)
+                .settings(true);
+
+        assertFalse(Backup.include(
+                "perf_exo_network_protection_mode", everything));
+        assertFalse(Backup.include(
+                "perf_exo_single_rate_rescue_enabled_v1", everything));
+    }
 }

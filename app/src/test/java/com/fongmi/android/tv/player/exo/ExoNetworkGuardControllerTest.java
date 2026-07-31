@@ -36,7 +36,7 @@ public class ExoNetworkGuardControllerTest {
     }
 
     @Test
-    public void deepProtectionCalculatesBestTargetWithoutJumpingToFloor() {
+    public void severeDeficitUsesStrictLightFloorWithoutJumpingToIt() {
         ExoNetworkGuardController controller = new ExoNetworkGuardController();
         evaluate(controller, 0, 26_000, true, -66, -66, -66, 10_000, 0, 1.00f);
 
@@ -44,14 +44,14 @@ public class ExoNetworkGuardControllerTest {
 
         assertTrue(decision.changed());
         assertEquals(0.934f, decision.supportedSpeed(), 0.0001f);
-        assertEquals(0.931f, decision.calculatedTargetSpeed(), 0.0001f);
-        assertEquals(0.994f, decision.targetSpeed(), 0.0001f);
-        assertEquals(ExoNetworkGuardController.ProtectionTier.DEEP, decision.tier());
-        assertTrue(decision.targetSpeed() > ExoNetworkProtectionPolicy.AUTO_MIN_SPEED);
+        assertEquals(0.970f, decision.calculatedTargetSpeed(), 0.0001f);
+        assertEquals(0.997f, decision.targetSpeed(), 0.0001f);
+        assertEquals(ExoNetworkGuardController.ProtectionTier.LIGHT, decision.tier());
+        assertTrue(decision.targetSpeed() > ExoNetworkProtectionPolicy.RESCUE_MIN_SPEED);
     }
 
     @Test
-    public void deepProtectionConvergesNearSustainableRateInsteadOfWalkingToFloor() {
+    public void deficitConvergesAtStrictRescueFloor() {
         ExoNetworkGuardController controller = new ExoNetworkGuardController();
         float capacity = 0.934f;
         float current = 1.00f;
@@ -62,9 +62,8 @@ public class ExoNetworkGuardControllerTest {
             if (decision.changed()) current = decision.targetSpeed();
         }
 
-        assertTrue(current >= 0.93f);
-        assertTrue(current <= 0.95f);
-        assertTrue(current > ExoNetworkProtectionPolicy.AUTO_MIN_SPEED);
+        assertTrue(current >= 0.97f);
+        assertTrue(current < 0.98f);
     }
 
     @Test
@@ -76,8 +75,8 @@ public class ExoNetworkGuardControllerTest {
 
         ExoNetworkGuardController.Decision first = evaluateForCapacity(controller, 3_000, 24_000, 13_000, current, capacity);
         assertTrue(first.changed());
-        assertEquals(0.990f, first.targetSpeed(), 0.0001f);
-        assertEquals(0.850f, first.calculatedTargetSpeed(), 0.0001f);
+        assertEquals(0.994f, first.targetSpeed(), 0.0001f);
+        assertEquals(0.970f, first.calculatedTargetSpeed(), 0.0001f);
         current = first.targetSpeed();
 
         for (int i = 1; i < 40; i++) {
@@ -85,8 +84,8 @@ public class ExoNetworkGuardControllerTest {
             if (decision.changed()) current = decision.targetSpeed();
         }
 
-        assertTrue(current >= 0.85f);
-        assertTrue(current <= 0.86f);
+        assertTrue(current >= 0.97f);
+        assertTrue(current < 0.98f);
     }
 
     @Test
@@ -98,10 +97,10 @@ public class ExoNetworkGuardControllerTest {
 
         assertTrue(decision.changed());
         assertTrue(decision.targetSpeed() < 1.00f);
-        assertTrue(decision.targetSpeed() >= 0.85f);
-        assertEquals(0.85f, decision.calculatedTargetSpeed(), 0.0001f);
+        assertTrue(decision.targetSpeed() >= 0.97f);
+        assertEquals(0.97f, decision.calculatedTargetSpeed(), 0.0001f);
         assertEquals(ExoNetworkGuardController.State.PROTECT, decision.state());
-        assertEquals(ExoNetworkGuardController.ProtectionTier.DEEP, decision.tier());
+        assertEquals(ExoNetworkGuardController.ProtectionTier.LIGHT, decision.tier());
         assertTrue(decision.rampFeasible());
     }
 
@@ -133,26 +132,26 @@ public class ExoNetworkGuardControllerTest {
     @Test
     public void recoveredCapacityReturnsGraduallyToUnitSpeed() {
         ExoNetworkGuardController controller = new ExoNetworkGuardController();
-        controller.disrupt(0.93f);
-        assertFalse(evaluate(controller, 0, 17_000, true, 70, 70, 70, 15_000, 0, 0.93f).changed());
+        controller.disrupt(0.97f);
+        assertFalse(evaluate(controller, 0, 17_000, true, 70, 70, 70, 15_000, 0, 0.97f).changed());
 
-        ExoNetworkGuardController.Decision decision = evaluate(controller, 8_000, 18_000, true, 70, 70, 70, 23_000, 0, 0.93f);
+        ExoNetworkGuardController.Decision decision = evaluate(controller, 8_000, 18_000, true, 70, 70, 70, 23_000, 0, 0.97f);
 
         assertTrue(decision.changed());
-        assertEquals(0.932f, decision.targetSpeed(), 0.0001f);
+        assertEquals(0.972f, decision.targetSpeed(), 0.0001f);
         assertEquals(ExoNetworkGuardController.State.RECOVERY, decision.state());
     }
 
     @Test
     public void fullBufferRecoversWithoutTreatingLoaderIdleAsNetworkFailure() {
         ExoNetworkGuardController controller = new ExoNetworkGuardController();
-        controller.disrupt(0.93f);
-        assertFalse(evaluate(controller, 0, 21_000, false, 0, 0, 0, 0, 0, 0.93f).changed());
+        controller.disrupt(0.97f);
+        assertFalse(evaluate(controller, 0, 21_000, false, 0, 0, 0, 0, 0, 0.97f).changed());
 
-        ExoNetworkGuardController.Decision decision = evaluate(controller, 12_000, 21_000, false, 0, 0, 0, 0, 0, 0.93f);
+        ExoNetworkGuardController.Decision decision = evaluate(controller, 12_000, 21_000, false, 0, 0, 0, 0, 0, 0.97f);
 
         assertTrue(decision.changed());
-        assertEquals(0.932f, decision.targetSpeed(), 0.0001f);
+        assertEquals(0.972f, decision.targetSpeed(), 0.0001f);
     }
 
     @Test
@@ -193,7 +192,7 @@ public class ExoNetworkGuardControllerTest {
     @Test
     public void ineligibleSessionRestoresNormalSpeed() {
         ExoNetworkGuardController controller = new ExoNetworkGuardController();
-        ExoNetworkGuardController.Input input = new ExoNetworkGuardController.Input(0, false, true, true, true, 10_000, true, -20, 15_000, 0, 0.93f, 0.85f);
+        ExoNetworkGuardController.Input input = new ExoNetworkGuardController.Input(0, false, true, true, true, 10_000, true, -20, 15_000, 0, 0.97f, 0.97f);
 
         ExoNetworkGuardController.Decision decision = controller.evaluate(input);
 
@@ -216,6 +215,6 @@ public class ExoNetworkGuardControllerTest {
                                                                 long slope, long fastSlope, long slowSlope, long windowMs, int rebufferCount, float currentSpeed,
                                                                 boolean networkKnown, float networkSupported) {
         return controller.evaluate(new ExoNetworkGuardController.Input(nowMs, true, true, true, loading, bufferedMs, windowMs > 0,
-                slope, fastSlope, slowSlope, windowMs, rebufferCount, currentSpeed, 0.85f, 20_000, networkKnown, networkSupported));
+                slope, fastSlope, slowSlope, windowMs, rebufferCount, currentSpeed, 0.97f, 20_000, networkKnown, networkSupported));
     }
 }

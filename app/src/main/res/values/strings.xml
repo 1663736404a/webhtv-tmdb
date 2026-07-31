@@ -839,8 +839,13 @@
     <string name="player_performance_experiment_rollback_ready">Stops experimental actions</string>
     <string name="player_performance_experiment_rollback_done">Already stable</string>
     <string name="player_performance_experiment_enable_title">Enable playback experiments?</string>
-    <string name="player_performance_experiment_enable_message">This enables gated preload, reload, rebuild, temporary speed, quality and kernel fallback actions for the selected engines, plus an explicitly enrolled EXO frame scheduling unit. Safety protections remain enabled in either mode.</string>
+    <string name="player_performance_experiment_enable_message">This enables gated preload, reload, rebuild, quality and kernel fallback actions for the selected engines, plus an explicitly enrolled EXO frame scheduling unit. Temporary VOD speed rescue still requires separate consent. Safety protections remain enabled in either mode.</string>
     <string name="player_performance_experiment_enable_confirm">Enable experiments</string>
+    <string name="player_performance_exo_rescue_enable_title">Allow single-rate network rescue?</string>
+    <string name="player_performance_exo_rescue_enable_message">This is off by default. When EXO can confirm that a VOD item has only one video rate, it may temporarily use 0.97–1.00x to reduce network demand. The current item becomes slightly longer while rescue is active. Each activation is capped at 60 seconds, each item at two activations, with at least 60 seconds between them. Multi-rate media uses Media3 ABR; unknown media stays disabled. Seek, pause, item changes, manual speed, experiment rollback and exit restore 1.00x immediately. Playback experiments and the EXO domain must also be enabled.</string>
+    <string name="player_performance_exo_rescue_enable_confirm">Allow rescue</string>
+    <string name="exo_single_rate_rescue_started">Single-rate network rescue started at %1$.3fx. The item will be slightly longer while active (maximum 60 seconds).</string>
+    <string name="exo_single_rate_rescue_time_limit">Single-rate network rescue reached its 60-second limit and restored 1.00x.</string>
     <string name="player_performance_experiment_rollback_title">Return to stable strategy?</string>
     <string name="player_performance_experiment_rollback_message">New experimental actions will stop, queued work will be invalidated, active experimental preload will be cancelled and temporary playback speed will be restored. The next EXO playback returns to the 50 ms frame scheduling baseline without interrupting the current playback. User parameters and learned profiles will not be cleared.</string>
     <string name="player_performance_experiment_rollback_confirm">Return to stable</string>
