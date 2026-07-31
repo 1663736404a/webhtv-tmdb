@@ -15,9 +15,11 @@ fi
 
 unset CC CXX
 meson setup "$build" --cross-file "$prefix_dir/crossfile.txt" \
-	-Dtest=disabled -Dcompare=disabled -Dprofile=disabled \
-	-Dfontconfig=enabled -Dlibunibreak=enabled \
-	-Drequire-system-font-provider=true
+	-Ddoc=disabled -Ddoc-txt=disabled -Ddoc-man=disabled \
+	-Ddoc-pdf=disabled -Ddoc-html=disabled -Dnls=disabled \
+	-Dtests=disabled -Dtools=disabled -Dcache-build=disabled \
+	-Diconv=disabled -Dxml-backend=expat -Dfontations=disabled \
+	-Dadditional-fonts-dirs=no
 
 ninja -C "$build" -j"$cores"
 DESTDIR="$prefix_dir" ninja -C "$build" install

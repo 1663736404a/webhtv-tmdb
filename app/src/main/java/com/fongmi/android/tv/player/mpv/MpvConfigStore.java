@@ -924,7 +924,7 @@ public final class MpvConfigStore {
                 + "embeddedfonts=yes\n"
                 + "sub-fix-timing=yes\n"
                 + "sub-use-margins=yes\n"
-                + "sub-font-provider=none\n"
+                + "sub-font-provider=fontconfig\n"
                 + "volume-max=100\n";
     }
 

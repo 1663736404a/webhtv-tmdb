@@ -17,6 +17,8 @@ public class MpvConfigStoreTest {
 
         assertTrue(config.contains("sub-ass-override=scale\n"));
         assertFalse(config.contains("sub-ass-override=yes\n"));
+        assertTrue(config.contains("sub-font-provider=fontconfig\n"));
+        assertFalse(config.contains("sub-font-provider=none\n"));
     }
 
     @Test

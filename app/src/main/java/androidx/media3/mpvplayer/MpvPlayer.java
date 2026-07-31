@@ -57,7 +57,6 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -1173,17 +1172,15 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         setOption("demuxer-max-back-bytes", String.valueOf(config.demuxerMaxBackBytes()));
         setOption("demuxer-readahead-secs", String.valueOf(config.demuxerReadaheadSeconds()));
         setOption("demuxer-hysteresis-secs", String.valueOf(config.demuxerHysteresisSeconds()));
-        // These options are required for reliable text subtitle rendering on Android.
-        // This libmpv build includes libass but not fontconfig, so let libass index the
-        // Android system font directory directly instead of selecting an unavailable
-        // fontconfig provider. Keep this in native initialization because user configs
-        // may replace the bundled defaults.
+        // Keep these in native initialization because user configs may replace the
+        // bundled defaults. Fontconfig indexes readable Android system font directories
+        // and lets libass fall back per glyph without bundling a font in the APK.
         setOption("sub-ass", "yes");
         setOption("sub-ass-override", MpvSubtitleStylePolicy.ASS_OVERRIDE);
         setOption("embeddedfonts", "yes");
         setOption("sub-fix-timing", "yes");
         setOption("sub-use-margins", "yes");
-        setOption("sub-font-provider", "none");
+        setOption("sub-font-provider", "fontconfig");
         setOption("msg-level", config.logLevel());
         for (Map.Entry<String, String> entry : config.extraOptions().entrySet()) setOption(entry.getKey(), entry.getValue());
     }
@@ -3830,38 +3827,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
 
     private void copySupportAssets() throws IOException {
         copyAsset("cacert.pem", config.caFile());
-        copyFallbackSubtitleFont(new File(config.configDir(), "subfont.ttf"));
-        writeFontsConf(new File(config.configDir(), "fonts.conf"));
-    }
-
-    private void copyFallbackSubtitleFont(File outFile) throws IOException {
-        if (outFile.isFile() && outFile.length() > 0) return;
-        String[] candidates = {
-                "/system/fonts/NotoSansCJK-Regular.ttc",
-                "/system/fonts/NotoSansSC-Regular.otf",
-                "/system/fonts/DroidSansFallback.ttf",
-                "/system/fonts/DroidSansFallbackBBK.ttf",
-                "/product/fonts/NotoSansCJK-Regular.ttc",
-                "/system/fonts/Roboto-Regular.ttf"
-        };
-        for (String path : candidates) {
-            File source = new File(path);
-            if (!source.isFile() || source.length() == 0) continue;
-            copyFile(source, outFile);
-            SpiderDebug.log("mpv", "subtitle fallback font copied source=%s size=%d", path, outFile.length());
-            return;
-        }
-        SpiderDebug.log("mpv", "subtitle fallback font unavailable");
-    }
-
-    private void copyFile(File source, File outFile) throws IOException {
-        File parent = outFile.getParentFile();
-        if (parent != null && !parent.exists() && !parent.mkdirs()) throw new IOException("Unable to create " + parent);
-        try (InputStream in = new FileInputStream(source); OutputStream out = new FileOutputStream(outFile)) {
-            byte[] buffer = new byte[64 * 1024];
-            int read;
-            while ((read = in.read(buffer)) != -1) out.write(buffer, 0, read);
-        }
+        MpvFontConfig.write(config.configDir(), config.cacheDir());
     }
 
     private void copyAsset(String name, File outFile) throws IOException {
@@ -3876,21 +3842,6 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
                 int read;
                 while ((read = in.read(buffer)) != -1) out.write(buffer, 0, read);
             }
-        }
-    }
-
-    private void writeFontsConf(File file) {
-        String text = "<fontconfig>\n"
-                + "<dir>/system/fonts/</dir>\n"
-                + "<dir>/product/fonts/</dir>\n"
-                + "<cachedir>" + config.cacheDir().getAbsolutePath() + "</cachedir>\n"
-                + "<alias><family>serif</family><prefer><family>Noto Serif</family></prefer></alias>\n"
-                + "<alias><family>sans-serif</family><prefer><family>Roboto</family><family>Noto Sans</family></prefer></alias>\n"
-                + "<alias><family>monospace</family><prefer><family>Droid Sans Mono</family></prefer></alias>\n"
-                + "</fontconfig>\n";
-        try (OutputStream out = new FileOutputStream(file)) {
-            out.write(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        } catch (IOException ignored) {
         }
     }
 

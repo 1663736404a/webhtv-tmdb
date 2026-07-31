@@ -219,7 +219,7 @@ scripts/build_mpv_native.sh --abi all --install
 # 按需执行：scripts/build_mpv_player_jni.sh
 ```
 
-脚本读取 `third_party/mpv-native-lock.json`，自动下载固定 commit、应用 MPV 光盘控制和AImageReader暂态补丁、构建依赖、修改 ELF 依赖名、strip 并校验。当前 lock 与两套已提交 assets 一致，可复现正式 native 组合；普通 Gradle 和 GitHub Actions 不会调用该脚本，直接复用仓库已提交的 `.so`。Android Release Action 会在 Gradle 打包前运行 `scripts/verify_mpv_native_assets.sh --require-elf`，检查两套 assets 的文件集合、ABI、版本字符串、HTTP/2、光盘补丁、AImageReader暂态补丁标记、`SONAME` 和 `DT_NEEDED`，但不会现场重编 MPV。完整排查记录见本地 `plans/MPV原生依赖升级与Android崩溃排查记录.md`。
+脚本读取 `third_party/mpv-native-lock.json`，自动下载固定 commit、应用 MPV 光盘控制和AImageReader暂态补丁、构建依赖、修改 ELF 依赖名、strip 并校验。当前 lock 与两套已提交 assets 一致，可复现正式 native 组合；libass 的 fontconfig/Expat 字体回退栈静态链接进 `libmpv.so`，不会向 APK 内置中文字体或增加独立 `.so`。普通 Gradle 和 GitHub Actions 不会调用该脚本，直接复用仓库已提交的 `.so`。Android Release Action 会在 Gradle 打包前运行 `scripts/verify_mpv_native_assets.sh --require-elf`，检查两套 assets 的文件集合、ABI、版本字符串、HTTP/2、fontconfig 字体提供器、光盘补丁、AImageReader暂态补丁标记、`SONAME` 和 `DT_NEEDED`，但不会现场重编 MPV。完整排查记录见本地 `plans/MPV原生依赖升级与Android崩溃排查记录.md`。
 
 只校验当前仓库已经提交的 MPV native assets：
 
