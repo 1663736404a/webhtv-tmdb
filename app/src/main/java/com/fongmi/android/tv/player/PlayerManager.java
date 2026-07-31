@@ -96,6 +96,7 @@ import com.fongmi.android.tv.setting.DanmakuSetting;
 import com.fongmi.android.tv.setting.ExoPerformanceSetting;
 import com.fongmi.android.tv.setting.MpvPerformanceSetting;
 import com.fongmi.android.tv.setting.PlaybackExperimentSetting;
+import com.fongmi.android.tv.setting.PlaybackLightweightAssessmentSetting;
 import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
 import com.fongmi.android.tv.setting.PlaybackProfileAbSetting;
 import com.fongmi.android.tv.setting.PlayerSetting;
@@ -153,6 +154,8 @@ public class PlayerManager implements ParseCallback {
     private final PlaybackAutoContextStore playbackAutoContextStore;
     private final PlaybackTelemetryCoordinator playbackTelemetryCoordinator;
     private final PlaybackProfileAbCoordinator playbackProfileAbCoordinator;
+    private final PlaybackProfileAbCoordinator
+            playbackLightweightAssessmentCoordinator;
     private final PlaybackMediaFactsCoordinator playbackMediaFactsCoordinator;
     private final ExoNetworkGuardController networkProtectionController;
     private final ExoNetworkRescueLimiter networkProtectionLimiter;
@@ -267,6 +270,8 @@ public class PlayerManager implements ParseCallback {
         this.playbackAutoContextStore = PlaybackAutoContextStore.process();
         this.playbackTelemetryCoordinator = PlaybackTelemetryCoordinator.process();
         this.playbackProfileAbCoordinator = PlaybackProfileAbCoordinator.process();
+        this.playbackLightweightAssessmentCoordinator =
+                PlaybackLightweightAssessmentSetting.coordinator();
         this.playbackMediaFactsCoordinator = new PlaybackMediaFactsCoordinator(playbackAutoContextStore);
         this.networkProtectionController = new ExoNetworkGuardController();
         this.networkProtectionLimiter = new ExoNetworkRescueLimiter();
@@ -360,8 +365,7 @@ public class PlayerManager implements ParseCallback {
     private void onPlaybackExperimentPolicyChanged(
             PlaybackExperimentCoordinator.Update update) {
         if (update == null) return;
-        playbackProfileAbCoordinator.invalidate(
-                playbackAutoSession,
+        invalidatePlaybackProfileAssessments(
                 PlaybackProfileAbCoordinator.InvalidationReason
                         .GENERATION_CHANGED);
         PlaybackExperimentPolicy.State policy =
@@ -881,8 +885,7 @@ public class PlayerManager implements ParseCallback {
     public String setSpeed(float speed) {
         if (!player.isCommandAvailable(Player.COMMAND_SET_SPEED_AND_PITCH)) return getSpeedText();
         if (Math.abs(speed - userPlaybackSpeed) >= 0.001f) {
-            playbackProfileAbCoordinator.invalidate(
-                    playbackAutoSession,
+            invalidatePlaybackProfileAssessments(
                     PlaybackProfileAbCoordinator.InvalidationReason.USER_SPEED);
         }
         userPlaybackSpeed = speed;
@@ -899,8 +902,7 @@ public class PlayerManager implements ParseCallback {
         }
         float current = player.getPlaybackParameters().speed;
         if (Math.abs(speed - userPlaybackSpeed) >= 0.001f) {
-            playbackProfileAbCoordinator.invalidate(
-                    playbackAutoSession,
+            invalidatePlaybackProfileAssessments(
                     PlaybackProfileAbCoordinator.InvalidationReason
                             .SPEED_RESCUE_CONFOUND);
         }
@@ -1237,8 +1239,7 @@ public class PlayerManager implements ParseCallback {
     }
 
     public void pause() {
-        playbackProfileAbCoordinator.invalidate(
-                playbackAutoSession,
+        invalidatePlaybackProfileAssessments(
                 PlaybackProfileAbCoordinator.InvalidationReason.PAUSED);
         player.pause();
         stopNativeAudioSession();
@@ -1267,8 +1268,7 @@ public class PlayerManager implements ParseCallback {
 
     public void seekTo(long time) {
         long now = SystemClock.elapsedRealtime();
-        playbackProfileAbCoordinator.invalidate(
-                playbackAutoSession,
+        invalidatePlaybackProfileAssessments(
                 PlaybackProfileAbCoordinator.InvalidationReason.USER_SEEK);
         rtspLiveLagController.onUserSeek(playbackAutoSession, now);
         ijkRealtimeRecoveryController.onUserSeek(playbackAutoSession, now);
@@ -5719,6 +5719,22 @@ public class PlayerManager implements ParseCallback {
                         playbackExperimentCoordinator.generation(),
                         Math.abs(userPlaybackSpeed - 1f) < 0.001f),
                 nowElapsedMs);
+        PlaybackProfileAbPolicy.EnrollmentResolution lightweightEnrollment =
+                PlaybackLightweightAssessmentSetting
+                        .getEnrollmentResolution();
+        PlaybackProfileAbPolicy.Arm lightweightArm =
+                currentPlaybackLightweightAssessmentArm();
+        playbackLightweightAssessmentCoordinator.beginSession(
+                playbackAutoSession,
+                new PlaybackProfileAbCoordinator.StartConfig(
+                        lightweightEnrollment.active()
+                                && playbackProfileAbGateOpen()
+                                && lightweightArm != null,
+                        lightweightArm,
+                        lightweightEnrollment.enrollment().deviceDigest(),
+                        playbackExperimentCoordinator.generation(),
+                        Math.abs(userPlaybackSpeed - 1f) < 0.001f),
+                nowElapsedMs);
     }
 
     private void observePlaybackProfileAb(
@@ -5759,6 +5775,19 @@ public class PlayerManager implements ParseCallback {
                         frameSchedulingExperimentActive,
                         false),
                 nowElapsedMs);
+        playbackLightweightAssessmentCoordinator.observe(
+                playbackAutoSession,
+                new PlaybackProfileAbCoordinator.RuntimeInput(
+                        PlaybackLightweightAssessmentSetting.isEnrolled()
+                                && playbackProfileAbGateOpen(),
+                        currentPlaybackLightweightAssessmentArm(),
+                        playbackExperimentCoordinator.generation(),
+                        playbackAutoContextStore.snapshot(),
+                        observation,
+                        playbackIntended,
+                        frameSchedulingExperimentActive,
+                        false),
+                nowElapsedMs);
     }
 
     private void finishPlaybackProfileAbSession(
@@ -5774,11 +5803,35 @@ public class PlayerManager implements ParseCallback {
                         reason),
                 nowElapsedMs,
                 System.currentTimeMillis());
+        playbackLightweightAssessmentCoordinator.endSession(
+                playbackAutoSession,
+                new PlaybackProfileAbCoordinator.EndConfig(
+                        PlaybackLightweightAssessmentSetting.isEnrolled()
+                                && playbackProfileAbGateOpen(),
+                        currentPlaybackLightweightAssessmentArm(),
+                        playbackExperimentCoordinator.generation(),
+                        reason),
+                nowElapsedMs,
+                System.currentTimeMillis());
     }
 
     private PlaybackProfileAbPolicy.Arm currentPlaybackProfileAbArm() {
         return PlaybackProfileAbPolicy.armForProfile(
                 PlaybackPerformanceSetting.getProfile(playerType));
+    }
+
+    private PlaybackProfileAbPolicy.Arm
+    currentPlaybackLightweightAssessmentArm() {
+        return PlaybackLightweightAssessmentPolicy.armForProfile(
+                PlaybackPerformanceSetting.getProfile(playerType));
+    }
+
+    private void invalidatePlaybackProfileAssessments(
+            PlaybackProfileAbCoordinator.InvalidationReason reason) {
+        playbackProfileAbCoordinator.invalidate(
+                playbackAutoSession, reason);
+        playbackLightweightAssessmentCoordinator.invalidate(
+                playbackAutoSession, reason);
     }
 
     private boolean playbackProfileAbGateOpen() {
@@ -6819,8 +6872,7 @@ public class PlayerManager implements ParseCallback {
             if (!isPlaying) discardLiveDanmakuPending();
             if (isPlaying) scheduleNetworkProtection(0);
             else if (player.getPlaybackState() == Player.STATE_READY && !player.getPlayWhenReady()) {
-                playbackProfileAbCoordinator.invalidate(
-                        playbackAutoSession,
+                invalidatePlaybackProfileAssessments(
                         PlaybackProfileAbCoordinator.InvalidationReason.PAUSED);
                 resetNetworkProtectionSession("paused");
             } else if (player.getPlaybackState() != Player.STATE_BUFFERING) {

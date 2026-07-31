@@ -28,6 +28,7 @@ import com.fongmi.android.tv.event.ConfigEvent;
 import com.fongmi.android.tv.player.PlaybackAutoContext;
 import com.fongmi.android.tv.player.PlaybackExperimentCoordinator;
 import com.fongmi.android.tv.player.PlaybackExperimentPolicy;
+import com.fongmi.android.tv.player.PlaybackLightweightAssessmentPolicy;
 import com.fongmi.android.tv.player.PlaybackProfileAbAcceptancePolicy;
 import com.fongmi.android.tv.player.PlaybackProfileAbCoordinator;
 import com.fongmi.android.tv.player.PlaybackProfileAbIdentity;
@@ -40,6 +41,7 @@ import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
 import com.fongmi.android.tv.setting.PlaybackProfileMergePolicy;
 import com.fongmi.android.tv.setting.PlaybackProfileAbSetting;
 import com.fongmi.android.tv.setting.PlaybackExperimentSetting;
+import com.fongmi.android.tv.setting.PlaybackLightweightAssessmentSetting;
 import com.fongmi.android.tv.setting.ExoFrameSchedulingExperimentSetting;
 import com.fongmi.android.tv.setting.MpvPerformanceSetting;
 import com.fongmi.android.tv.setting.IjkPerformanceSetting;
@@ -200,6 +202,11 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
         addHelpItem(content,
                 getString(R.string.player_performance_profile_merge),
                 getString(R.string.player_performance_profile_merge_help));
+        addHelpItem(content,
+                getString(R.string
+                        .player_performance_lightweight_assessment_collection),
+                getString(R.string
+                        .player_performance_lightweight_assessment_help));
         if (!PlaybackPerformanceSetting.isRecommendedMerged()) {
             addHelpItem(content,
                     getString(R.string
@@ -529,6 +536,17 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                 profileAbReportValue(),
                 this::showProfileAbReportDialog);
         addRow(
+                getString(R.string
+                        .player_performance_lightweight_assessment_collection),
+                lightweightAssessmentEnrollmentValue(),
+                lightweightAssessmentEnrollmentMutable()
+                        ? this::toggleLightweightAssessmentEnrollment : null);
+        addRow(
+                getString(R.string
+                        .player_performance_lightweight_assessment_report),
+                lightweightAssessmentReportValue(),
+                this::showLightweightAssessmentReportDialog);
+        addRow(
                 getString(R.string.player_performance_experiment_rollback),
                 getString(state.enabled()
                         ? R.string.player_performance_experiment_rollback_ready
@@ -646,6 +664,11 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                                             PlaybackProfileAbCoordinator
                                                     .InvalidationReason
                                                     .PROFILE_CHANGED);
+                            PlaybackLightweightAssessmentSetting.coordinator()
+                                    .invalidateActive(
+                                            PlaybackProfileAbCoordinator
+                                                    .InvalidationReason
+                                                    .PROFILE_CHANGED);
                             refresh();
                         })
                 .show();
@@ -725,6 +748,23 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                 report.passedGroups(),
                 report.failedGroups(),
                 report.insufficientGroups()));
+        appendProfileComparisonGroups(message, report);
+        new MaterialAlertDialogBuilder(
+                requireContext(), R.style.ThemeOverlay_WebHTV_LightDialog)
+                .setTitle(R.string
+                        .player_performance_experiment_profile_ab_report_title)
+                .setMessage(message.toString())
+                .setNegativeButton(R.string.dialog_close, null)
+                .setNeutralButton(
+                        R.string
+                                .player_performance_experiment_profile_ab_clear,
+                        (dialog, which) -> confirmClearProfileAbReport())
+                .show();
+    }
+
+    private void appendProfileComparisonGroups(
+            StringBuilder message,
+            PlaybackProfileAbAcceptancePolicy.Report report) {
         int shown = 0;
         for (PlaybackProfileAbAcceptancePolicy.GroupReport group
                 : report.groups()) {
@@ -765,17 +805,6 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                             .player_performance_experiment_profile_ab_missing_metrics,
                     group.missingMetrics());
         }
-        new MaterialAlertDialogBuilder(
-                requireContext(), R.style.ThemeOverlay_WebHTV_LightDialog)
-                .setTitle(R.string
-                        .player_performance_experiment_profile_ab_report_title)
-                .setMessage(message.toString())
-                .setNegativeButton(R.string.dialog_close, null)
-                .setNeutralButton(
-                        R.string
-                                .player_performance_experiment_profile_ab_clear,
-                        (dialog, which) -> confirmClearProfileAbReport())
-                .show();
     }
 
     private void appendProfileAbMetricList(
@@ -804,6 +833,172 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                                 .player_performance_experiment_profile_ab_clear_confirm,
                         (dialog, which) -> {
                             PlaybackProfileAbSetting.clearReport();
+                            refreshRows();
+                        })
+                .show();
+    }
+
+    private String lightweightAssessmentEnrollmentValue() {
+        PlaybackProfileAbPolicy.EnrollmentResolution resolution =
+                PlaybackLightweightAssessmentSetting
+                        .getEnrollmentResolution();
+        if (resolution.status()
+                == PlaybackProfileAbPolicy.EnrollmentStatus.NOT_ENROLLED) {
+            return getString(R.string.player_performance_experiment_off);
+        }
+        if (!resolution.active()) {
+            return getString(R.string
+                    .player_performance_experiment_profile_ab_invalid);
+        }
+        return getString(profileAbGateOpenForCurrentKernel()
+                ? R.string.player_performance_experiment_on
+                : R.string.player_performance_experiment_standby);
+    }
+
+    private boolean lightweightAssessmentEnrollmentMutable() {
+        return PlaybackLightweightAssessmentSetting
+                .getEnrollmentResolution().status()
+                != PlaybackProfileAbPolicy.EnrollmentStatus.FUTURE_SCHEMA;
+    }
+
+    private void toggleLightweightAssessmentEnrollment() {
+        if (PlaybackLightweightAssessmentSetting.isEnrolled()) {
+            if (PlaybackLightweightAssessmentSetting.putEnrolled(false)) {
+                PlaybackLightweightAssessmentSetting.coordinator()
+                        .invalidateActive(
+                                PlaybackProfileAbCoordinator
+                                        .InvalidationReason
+                                        .ENROLLMENT_CHANGED);
+                refreshRows();
+            }
+            return;
+        }
+        new MaterialAlertDialogBuilder(
+                requireContext(), R.style.ThemeOverlay_WebHTV_LightDialog)
+                .setTitle(R.string
+                        .player_performance_lightweight_assessment_enable_title)
+                .setMessage(R.string
+                        .player_performance_lightweight_assessment_enable_message)
+                .setNegativeButton(R.string.dialog_cancel, null)
+                .setPositiveButton(
+                        R.string
+                                .player_performance_lightweight_assessment_enable_confirm,
+                        (dialog, which) -> {
+                            if (!PlaybackLightweightAssessmentSetting
+                                    .putEnrolled(true)) return;
+                            PlaybackLightweightAssessmentSetting.coordinator()
+                                    .invalidateActive(
+                                            PlaybackProfileAbCoordinator
+                                                    .InvalidationReason
+                                                    .ENROLLMENT_CHANGED);
+                            refreshRows();
+                        })
+                .show();
+    }
+
+    private String lightweightAssessmentReportValue() {
+        PlaybackLightweightAssessmentPolicy.Report report =
+                PlaybackLightweightAssessmentSetting.report(
+                        System.currentTimeMillis());
+        PlaybackProfileAbAcceptancePolicy.Report comparison =
+                report.comparison();
+        return getString(
+                R.string.player_performance_lightweight_assessment_report_value,
+                comparison.automaticSamples(),
+                comparison.comparisonSamples(),
+                lightweightAssessmentStatusLabel(report.status()));
+    }
+
+    private void showLightweightAssessmentReportDialog() {
+        PlaybackLightweightAssessmentPolicy.Report report =
+                PlaybackLightweightAssessmentSetting.report(
+                        System.currentTimeMillis());
+        PlaybackProfileAbAcceptancePolicy.Report comparison =
+                report.comparison();
+        StringBuilder message = new StringBuilder(getString(
+                R.string
+                        .player_performance_lightweight_assessment_report_summary,
+                lightweightAssessmentStatusLabel(report.status()),
+                comparison.automaticSamples(),
+                comparison.comparisonSamples(),
+                comparison.totalGroups(),
+                comparison.evaluableGroups(),
+                comparison.passedGroups(),
+                comparison.failedGroups(),
+                comparison.insufficientGroups(),
+                report.covered().size(),
+                PlaybackLightweightAssessmentPolicy.CoverageCell
+                        .values().length));
+        appendProfileComparisonGroups(message, comparison);
+        if (!report.missingCoverage().isEmpty()) {
+            message.append("\n\n")
+                    .append(getString(R.string
+                            .player_performance_lightweight_assessment_missing_coverage))
+                    .append(": ");
+            for (int index = 0;
+                 index < report.missingCoverage().size(); index++) {
+                if (index > 0) message.append(", ");
+                message.append(lightweightCoverageLabel(
+                        report.missingCoverage().get(index)));
+            }
+        }
+        new MaterialAlertDialogBuilder(
+                requireContext(), R.style.ThemeOverlay_WebHTV_LightDialog)
+                .setTitle(R.string
+                        .player_performance_lightweight_assessment_report_title)
+                .setMessage(message.toString())
+                .setNegativeButton(R.string.dialog_close, null)
+                .setNeutralButton(
+                        R.string
+                                .player_performance_lightweight_assessment_clear,
+                        (dialog, which) ->
+                                confirmClearLightweightAssessmentReport())
+                .show();
+    }
+
+    private String lightweightAssessmentStatusLabel(
+            PlaybackLightweightAssessmentPolicy.Status status) {
+        int value = switch (status) {
+            case PASSED -> R.string
+                    .player_performance_experiment_profile_ab_passed;
+            case FAILED -> R.string
+                    .player_performance_experiment_profile_ab_failed;
+            case COVERAGE_MISSING -> R.string
+                    .player_performance_lightweight_assessment_coverage_missing;
+            case METRICS_MISSING -> R.string
+                    .player_performance_experiment_profile_ab_metrics_missing;
+            case INSUFFICIENT_SAMPLES -> R.string
+                    .player_performance_experiment_profile_ab_insufficient;
+            case NO_DATA -> R.string
+                    .player_performance_experiment_profile_ab_no_data;
+        };
+        return getString(value);
+    }
+
+    private String lightweightCoverageLabel(
+            PlaybackLightweightAssessmentPolicy.CoverageCell cell) {
+        int kind = cell.kind()
+                == PlaybackLightweightAssessmentPolicy.CoverageKind.SOFTWARE
+                ? R.string
+                .player_performance_lightweight_assessment_coverage_software
+                : R.string
+                .player_performance_lightweight_assessment_coverage_low_ram_hardware;
+        return cell.kernel().label() + " " + getString(kind);
+    }
+
+    private void confirmClearLightweightAssessmentReport() {
+        new MaterialAlertDialogBuilder(
+                requireContext(), R.style.ThemeOverlay_WebHTV_LightDialog)
+                .setTitle(R.string
+                        .player_performance_lightweight_assessment_clear_title)
+                .setMessage(R.string
+                        .player_performance_lightweight_assessment_clear_message)
+                .setNegativeButton(R.string.dialog_cancel, null)
+                .setPositiveButton(
+                        R.string
+                                .player_performance_lightweight_assessment_clear_confirm,
+                        (dialog, which) -> {
+                            PlaybackLightweightAssessmentSetting.clearReport();
                             refreshRows();
                         })
                 .show();

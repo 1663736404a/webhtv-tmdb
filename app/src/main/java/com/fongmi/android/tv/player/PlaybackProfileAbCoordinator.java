@@ -2,11 +2,12 @@ package com.fongmi.android.tv.player;
 
 import com.fongmi.android.tv.setting.PlaybackProfileAbSetting;
 
-/** Session-isolated collector that commits one bounded V-05A sample at end. */
+/** Session-isolated collector that commits one bounded comparison sample. */
 public final class PlaybackProfileAbCoordinator {
 
     private final PlaybackProfileAbStore store;
     private final LogSink logSink;
+    private final GroupResolver groupResolver;
 
     private PlaybackAutoContext.SessionToken session =
             PlaybackAutoContext.SessionToken.none();
@@ -32,9 +33,18 @@ public final class PlaybackProfileAbCoordinator {
     public PlaybackProfileAbCoordinator(
             PlaybackProfileAbStore store,
             LogSink logSink) {
+        this(store, logSink, PlaybackProfileAbPolicy::resolveGroup);
+    }
+
+    public PlaybackProfileAbCoordinator(
+            PlaybackProfileAbStore store,
+            LogSink logSink,
+            GroupResolver groupResolver) {
         this.store = store == null
                 ? new PlaybackProfileAbStore(null) : store;
         this.logSink = logSink == null ? entry -> { } : logSink;
+        this.groupResolver = groupResolver == null
+                ? PlaybackProfileAbPolicy::resolveGroup : groupResolver;
     }
 
     public static PlaybackProfileAbCoordinator process() {
@@ -106,7 +116,7 @@ public final class PlaybackProfileAbCoordinator {
             return false;
         }
         PlaybackProfileAbPolicy.GroupResolution group =
-                PlaybackProfileAbPolicy.resolveGroup(
+                groupResolver.resolve(
                         context, deviceDigest, now);
         if (!group.ready()) {
             if (groupKey != null) {
@@ -445,6 +455,14 @@ public final class PlaybackProfileAbCoordinator {
     @FunctionalInterface
     public interface LogSink {
         void log(LogEntry entry);
+    }
+
+    @FunctionalInterface
+    public interface GroupResolver {
+        PlaybackProfileAbPolicy.GroupResolution resolve(
+                PlaybackAutoContext context,
+                String deviceDigest,
+                long elapsedRealtimeMs);
     }
 
     private static final class Holder {

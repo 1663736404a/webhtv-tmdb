@@ -6,7 +6,7 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 
-/** Conservative per-group P50/P95 acceptance policy for V-05A reports. */
+/** Conservative per-group P50/P95 profile-comparison acceptance policy. */
 public final class PlaybackProfileAbAcceptancePolicy {
 
     public static final int MIN_SAMPLES_PER_ARM = 20;
@@ -16,11 +16,23 @@ public final class PlaybackProfileAbAcceptancePolicy {
     }
 
     public static Report evaluate(PlaybackProfileAbStore.Snapshot snapshot) {
+        return evaluate(
+                snapshot, PlaybackProfileAbPolicy.Arm.RECOMMENDED);
+    }
+
+    public static Report evaluate(
+            PlaybackProfileAbStore.Snapshot snapshot,
+            PlaybackProfileAbPolicy.Arm comparisonArm) {
+        PlaybackProfileAbPolicy.Arm comparison = comparisonArm == null
+                || comparisonArm == PlaybackProfileAbPolicy.Arm.AUTO
+                ? PlaybackProfileAbPolicy.Arm.RECOMMENDED
+                : comparisonArm;
         PlaybackProfileAbStore.Snapshot safe = snapshot == null
                 ? new PlaybackProfileAbStore.Snapshot(List.of()) : snapshot;
         if (safe.groups().isEmpty()) {
             return new Report(
                     Status.NO_DATA,
+                    comparison,
                     0,
                     0,
                     0,
@@ -36,7 +48,7 @@ public final class PlaybackProfileAbAcceptancePolicy {
         int insufficient = 0;
         int missing = 0;
         for (PlaybackProfileAbStore.GroupSamples group : safe.groups()) {
-            GroupReport report = evaluateGroup(group);
+            GroupReport report = evaluateGroup(group, comparison);
             groups.add(report);
             switch (report.status()) {
                 case PASSED -> passed++;
@@ -55,8 +67,9 @@ public final class PlaybackProfileAbAcceptancePolicy {
                 : Status.PASSED;
         return new Report(
                 status,
+                comparison,
                 safe.automaticSampleCount(),
-                safe.recommendedSampleCount(),
+                safe.sampleCount(comparison),
                 groups.size(),
                 passed + failed,
                 passed,
@@ -66,7 +79,8 @@ public final class PlaybackProfileAbAcceptancePolicy {
     }
 
     private static GroupReport evaluateGroup(
-            PlaybackProfileAbStore.GroupSamples group) {
+            PlaybackProfileAbStore.GroupSamples group,
+            PlaybackProfileAbPolicy.Arm comparisonArm) {
         if (group == null || group.groupKey() == null
                 || !group.groupKey().valid()) {
             return new GroupReport(
@@ -78,7 +92,7 @@ public final class PlaybackProfileAbAcceptancePolicy {
         }
         List<PlaybackProfileAbStore.Sample> automatic = group.automatic();
         List<PlaybackProfileAbStore.Sample> recommended =
-                group.recommended();
+                group.samples(comparisonArm);
         if (automatic.size() < MIN_SAMPLES_PER_ARM
                 || recommended.size() < MIN_SAMPLES_PER_ARM) {
             return new GroupReport(
@@ -358,10 +372,15 @@ public final class PlaybackProfileAbAcceptancePolicy {
             }
             return List.copyOf(missing);
         }
+
+        public int comparisonSamples() {
+            return recommendedSamples;
+        }
     }
 
     public record Report(
             Status status,
+            PlaybackProfileAbPolicy.Arm comparisonArm,
             int automaticSamples,
             int recommendedSamples,
             int totalGroups,
@@ -373,14 +392,26 @@ public final class PlaybackProfileAbAcceptancePolicy {
 
         public Report {
             status = status == null ? Status.NO_DATA : status;
+            comparisonArm = comparisonArm == null
+                    || comparisonArm == PlaybackProfileAbPolicy.Arm.AUTO
+                    ? PlaybackProfileAbPolicy.Arm.RECOMMENDED
+                    : comparisonArm;
             groups = groups == null ? List.of() : List.copyOf(groups);
         }
 
         public boolean mergeEligible() {
+            return comparisonEligible();
+        }
+
+        public boolean comparisonEligible() {
             return status == Status.PASSED
                     && evaluableGroups > 0
                     && failedGroups == 0
                     && insufficientGroups == 0;
+        }
+
+        public int comparisonSamples() {
+            return recommendedSamples;
         }
     }
 }

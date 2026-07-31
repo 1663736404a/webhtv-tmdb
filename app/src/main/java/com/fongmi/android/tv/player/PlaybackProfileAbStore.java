@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
-/** Bounded, versioned and expiring local sample store for V-05A. */
+/** Bounded, versioned and expiring local profile-comparison sample store. */
 public final class PlaybackProfileAbStore {
 
     static final int STORE_VERSION = 1;
@@ -88,10 +88,14 @@ public final class PlaybackProfileAbStore {
             List<Sample> recommended = new ArrayList<>(entry.getValue()
                     .getOrDefault(PlaybackProfileAbPolicy.Arm.RECOMMENDED,
                             List.of()));
+            List<Sample> lightweight = new ArrayList<>(entry.getValue()
+                    .getOrDefault(PlaybackProfileAbPolicy.Arm.LIGHTWEIGHT,
+                            List.of()));
             result.add(new GroupSamples(
                     entry.getKey(),
                     List.copyOf(automatic),
-                    List.copyOf(recommended)));
+                    List.copyOf(recommended),
+                    List.copyOf(lightweight)));
         }
         result.sort(Comparator.comparing(
                 group -> PlaybackProfileAbIdentity.groupDigest(
@@ -424,13 +428,32 @@ public final class PlaybackProfileAbStore {
     public record GroupSamples(
             PlaybackProfileAbPolicy.GroupKey groupKey,
             List<Sample> automatic,
-            List<Sample> recommended) {
+            List<Sample> recommended,
+            List<Sample> lightweight) {
+
+        public GroupSamples(
+                PlaybackProfileAbPolicy.GroupKey groupKey,
+                List<Sample> automatic,
+                List<Sample> recommended) {
+            this(groupKey, automatic, recommended, List.of());
+        }
 
         public GroupSamples {
             automatic = automatic == null
                     ? List.of() : List.copyOf(automatic);
             recommended = recommended == null
                     ? List.of() : List.copyOf(recommended);
+            lightweight = lightweight == null
+                    ? List.of() : List.copyOf(lightweight);
+        }
+
+        public List<Sample> samples(PlaybackProfileAbPolicy.Arm arm) {
+            if (arm == null) return List.of();
+            return switch (arm) {
+                case AUTO -> automatic;
+                case RECOMMENDED -> recommended;
+                case LIGHTWEIGHT -> lightweight;
+            };
         }
     }
 
@@ -441,17 +464,21 @@ public final class PlaybackProfileAbStore {
         }
 
         public int automaticSampleCount() {
-            int count = 0;
-            for (GroupSamples group : groups) {
-                count += group.automatic().size();
-            }
-            return count;
+            return sampleCount(PlaybackProfileAbPolicy.Arm.AUTO);
         }
 
         public int recommendedSampleCount() {
+            return sampleCount(PlaybackProfileAbPolicy.Arm.RECOMMENDED);
+        }
+
+        public int lightweightSampleCount() {
+            return sampleCount(PlaybackProfileAbPolicy.Arm.LIGHTWEIGHT);
+        }
+
+        public int sampleCount(PlaybackProfileAbPolicy.Arm arm) {
             int count = 0;
             for (GroupSamples group : groups) {
-                count += group.recommended().size();
+                count += group.samples(arm).size();
             }
             return count;
         }

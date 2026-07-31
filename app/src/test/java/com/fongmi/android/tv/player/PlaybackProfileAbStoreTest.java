@@ -18,13 +18,18 @@ public class PlaybackProfileAbStoreTest {
 
         assertTrue(store.record(sample(
                 key, PlaybackProfileAbPolicy.Arm.AUTO, NOW), NOW));
+        assertTrue(store.record(sample(
+                key, PlaybackProfileAbPolicy.Arm.LIGHTWEIGHT, NOW + 1),
+                NOW + 1));
         PlaybackProfileAbStore restored =
                 new PlaybackProfileAbStore(backend);
-        PlaybackProfileAbStore.Snapshot snapshot = restored.snapshot(NOW);
+        PlaybackProfileAbStore.Snapshot snapshot =
+                restored.snapshot(NOW + 1);
 
         assertEquals(1, snapshot.groups().size());
         assertEquals(1, snapshot.automaticSampleCount());
         assertEquals(0, snapshot.recommendedSampleCount());
+        assertEquals(1, snapshot.lightweightSampleCount());
         assertFalse(backend.raw.contains("decoder-secret"));
         assertFalse(backend.raw.contains("fingerprint"));
         assertFalse(backend.raw.contains("http"));

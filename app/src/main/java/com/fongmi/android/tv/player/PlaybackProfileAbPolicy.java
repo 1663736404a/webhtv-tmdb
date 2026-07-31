@@ -217,7 +217,8 @@ public final class PlaybackProfileAbPolicy {
 
     public enum Arm {
         AUTO("auto"),
-        RECOMMENDED("recommended");
+        RECOMMENDED("recommended"),
+        LIGHTWEIGHT("lightweight");
 
         private final String label;
 
@@ -251,6 +252,8 @@ public final class PlaybackProfileAbPolicy {
         VIDEO_MIME_UNKNOWN,
         HDR_UNKNOWN,
         PATH_UNKNOWN,
+        MEMORY_CLASS_UNKNOWN,
+        NOT_LIGHTWEIGHT_SCENARIO,
         INVALID_GROUP
     }
 

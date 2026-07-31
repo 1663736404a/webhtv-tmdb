@@ -253,6 +253,41 @@ public class PlaybackProfileAbCoordinatorTest {
         assertEquals(0, store.snapshot(30_000).automaticSampleCount());
     }
 
+    @Test
+    public void customGroupResolverCanConservativelyRejectAComparison() {
+        PlaybackProfileAbStore store =
+                new PlaybackProfileAbStore(new MemoryBackend());
+        PlaybackProfileAbCoordinator coordinator =
+                new PlaybackProfileAbCoordinator(
+                        store,
+                        null,
+                        (context, device, now) ->
+                                PlaybackProfileAbPolicy.GroupResolution
+                                        .invalid(
+                                                PlaybackProfileAbPolicy
+                                                        .GroupReason
+                                                        .NOT_LIGHTWEIGHT_SCENARIO));
+        PlaybackAutoContext.SessionToken session = token("restricted", 13);
+
+        assertTrue(coordinator.beginSession(session, start(13), 0));
+        assertTrue(coordinator.observe(
+                session,
+                runtime(context(session), observation(
+                        PlaybackAutoContext.PlaybackPhase.READY, 500), 13),
+                1_000));
+        assertTrue(coordinator.observe(
+                session,
+                runtime(context(session), observation(
+                        PlaybackAutoContext.PlaybackPhase.READY, 500), 13),
+                31_500));
+        assertFalse(coordinator.endSession(
+                session,
+                end(13, PlaybackProfileAbPolicy.Arm.AUTO),
+                31_500,
+                40_000));
+        assertEquals(0, store.snapshot(40_000).automaticSampleCount());
+    }
+
     private static PlaybackProfileAbCoordinator.StartConfig start(
             long generation) {
         return new PlaybackProfileAbCoordinator.StartConfig(

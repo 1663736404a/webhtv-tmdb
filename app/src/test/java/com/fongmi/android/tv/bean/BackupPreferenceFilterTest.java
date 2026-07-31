@@ -82,6 +82,18 @@ public class BackupPreferenceFilterTest {
         assertFalse(Backup.include(
                 "playback_performance_profile_merge_migrated_mask",
                 everything));
+        assertFalse(Backup.include(
+                "playback_experiment_lightweight_assessment_schema",
+                everything));
+        assertFalse(Backup.include(
+                "playback_experiment_lightweight_assessment_device",
+                everything));
+        assertFalse(Backup.include(
+                "playback_experiment_lightweight_assessment_enabled",
+                everything));
+        assertFalse(Backup.include(
+                "playback_experiment_lightweight_assessment_samples_v1",
+                everything));
     }
 
     @Test
