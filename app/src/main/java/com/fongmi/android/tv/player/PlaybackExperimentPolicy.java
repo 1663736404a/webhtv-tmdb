@@ -142,8 +142,6 @@ public final class PlaybackExperimentPolicy {
                 Risk.AUTOMATIC_OPTIMIZATION, 1),
         MPV_HLS_RUNTIME_RELOAD("mpv.hls-runtime-reload", Domain.MPV,
                 Risk.AUTOMATIC_OPTIMIZATION, 1),
-        MPV_AUTO_OUTPUT_REBUILD("mpv.auto-output-rebuild", Domain.MPV,
-                Risk.AUTOMATIC_OPTIMIZATION, 1),
         IJK_INITIAL_BASELINE("ijk.initial-baseline", Domain.IJK,
                 Risk.STABLE_BASELINE, 1),
         IJK_BUFFER_SAFETY_RELOAD("ijk.buffer-safety-reload", Domain.IJK,

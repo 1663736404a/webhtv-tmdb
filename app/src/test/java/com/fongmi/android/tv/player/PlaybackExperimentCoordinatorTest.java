@@ -33,7 +33,7 @@ public class PlaybackExperimentCoordinatorTest {
         PlaybackExperimentCoordinator coordinator =
                 new PlaybackExperimentCoordinator();
         PlaybackExperimentCoordinator.Token token = coordinator.capture(
-                PlaybackExperimentPolicy.Action.MPV_AUTO_OUTPUT_REBUILD);
+                PlaybackExperimentPolicy.Action.MPV_AUTO_PRELOAD);
 
         coordinator.invalidate(
                 PlaybackExperimentCoordinator.Change.ROLLBACK);

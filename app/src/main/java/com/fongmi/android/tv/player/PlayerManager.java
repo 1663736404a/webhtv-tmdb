@@ -4433,8 +4433,6 @@ public class PlayerManager implements ParseCallback {
         mpvExplicitSubtitlePreference = hasRequestedSubtitle(Track.find(getKey()));
         if (!(engine instanceof MpvPlayerEngine mpv)) return;
         if (MpvPerformanceSetting.getOutputMode() == MpvPerformanceSetting.OUTPUT_AUTO
-                && experimentAllowed(
-                PlaybackExperimentPolicy.Action.MPV_AUTO_OUTPUT_REBUILD)
                 && mpv.isSurfaceDirect()) {
             if (SpiderDebug.isEnabled()) SpiderDebug.log("mpv-output", "preserve direct output for new item reason=auto-sticky");
             return;
@@ -4462,23 +4460,12 @@ public class PlayerManager implements ParseCallback {
     private void scheduleMpvAutoOutputEvaluation() {
         if (!isMpv()
                 || MpvPerformanceSetting.getOutputMode()
-                != MpvPerformanceSetting.OUTPUT_AUTO
-                || !experimentAllowed(
-                PlaybackExperimentPolicy.Action.MPV_AUTO_OUTPUT_REBUILD)) return;
+                != MpvPerformanceSetting.OUTPUT_AUTO) return;
         if (mpvAutoOutputEvaluated || mpvAutoOutputEvaluationScheduled) return;
         mpvAutoOutputEvaluationScheduled = true;
         int seq = ++mpvOutputEvaluationSeq;
-        PlaybackExperimentCoordinator.Token experimentToken =
-                playbackExperimentCoordinator.capture(
-                        PlaybackExperimentPolicy.Action.MPV_AUTO_OUTPUT_REBUILD);
         App.post(() -> {
             if (seq != mpvOutputEvaluationSeq) return;
-            if (!playbackExperimentCoordinator.isCurrent(experimentToken)
-                    || !experimentAllowed(
-                    PlaybackExperimentPolicy.Action.MPV_AUTO_OUTPUT_REBUILD)) {
-                mpvAutoOutputEvaluationScheduled = false;
-                return;
-            }
             mpvAutoOutputEvaluationScheduled = false;
             if (mpvHlsManagedReload) {
                 scheduleMpvAutoOutputEvaluation();
@@ -4496,10 +4483,6 @@ public class PlayerManager implements ParseCallback {
 
     private boolean evaluateMpvAutoOutput() {
         if (!isMpv() || mpvAutoOutputEvaluated || engine == null) return true;
-        if (!experimentAllowed(
-                PlaybackExperimentPolicy.Action.MPV_AUTO_OUTPUT_REBUILD)) {
-            return true;
-        }
         if (mpvHlsManagedReload) return false;
         Tracks tracks = engine.getCurrentTracks();
         boolean tracksReady = tracks != null && !tracks.isEmpty();
@@ -4587,8 +4570,6 @@ public class PlayerManager implements ParseCallback {
         if (!isMpv()
                 || MpvPerformanceSetting.getOutputMode()
                 != MpvPerformanceSetting.OUTPUT_AUTO
-                || !experimentAllowed(
-                PlaybackExperimentPolicy.Action.MPV_AUTO_OUTPUT_REBUILD)
                 || mpvAutoOutputEvaluated) return;
         if (SpiderDebug.isEnabled()) SpiderDebug.log("mpv-output", "auto size probe size=%dx%d attempts=%d", width, height, mpvAutoOutputProbeAttempts);
         mpvAutoOutputEvaluationScheduled = false;

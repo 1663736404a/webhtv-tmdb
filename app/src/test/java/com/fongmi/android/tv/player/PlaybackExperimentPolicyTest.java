@@ -208,4 +208,12 @@ public class PlaybackExperimentPolicyTest {
     public void registryHasUniqueVersionedActionIds() {
         assertTrue(PlaybackExperimentPolicy.registryIsValid());
     }
+
+    @Test
+    public void mpvAutomaticOutputIsNotRegisteredAsAnExperimentAction() {
+        for (PlaybackExperimentPolicy.Action action
+                : PlaybackExperimentPolicy.Action.values()) {
+            assertFalse("mpv.auto-output-rebuild".equals(action.id()));
+        }
+    }
 }
