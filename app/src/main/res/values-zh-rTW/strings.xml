@@ -813,7 +813,6 @@
     <string name="player_performance_advanced_show">已隱藏 %1$d 項 · 點擊展開</string>
     <string name="player_performance_advanced_hide">已展開 %1$d 項 · 點擊收起</string>
     <string name="player_performance_experiment_section">實驗與回退</string>
-    <string name="player_performance_experiment_advanced_section">實驗高級項</string>
     <string name="player_performance_experiment_scope">%1$s 實驗範圍</string>
     <string name="player_performance_experiment_strategy">策略</string>
     <string name="player_performance_experiment_stable">穩定策略 v1</string>

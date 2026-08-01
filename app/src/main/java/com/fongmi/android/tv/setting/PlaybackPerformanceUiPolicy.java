@@ -73,10 +73,6 @@ public final class PlaybackPerformanceUiPolicy {
         return kernel == PlayerSetting.EXO;
     }
 
-    public static int advancedExperimentControlCount(int kernel) {
-        return showsExoFrameScheduling(kernel) ? 2 : 1;
-    }
-
     public static ExperimentStatus experimentStatus(
             PlaybackExperimentPolicy.State state,
             int kernel) {

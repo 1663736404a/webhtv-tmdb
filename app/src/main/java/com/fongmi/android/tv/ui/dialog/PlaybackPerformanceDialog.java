@@ -113,6 +113,12 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
         title.setGravity(Gravity.CENTER_VERTICAL);
         titleBar.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
 
+        MaterialButton reset = actionButton(R.string.dialog_reset, view -> reset());
+        reset.setTextSize(13);
+        LinearLayout.LayoutParams resetParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(36));
+        resetParams.leftMargin = dp(8);
+        titleBar.addView(reset, resetParams);
+
         MaterialButton help = actionButton(R.string.player_performance_help, view -> showHelpDialog());
         help.setTextSize(13);
         help.setContentDescription(getString(R.string.player_performance_help_title));
@@ -360,6 +366,11 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
         if (callback != null) callback.run();
     }
 
+    private void reset() {
+        PlaybackPerformanceSetting.applyAuto();
+        refresh();
+    }
+
     private TabLayout createProfileTabs() {
         TabLayout tabs = new TabLayout(requireContext());
         tabs.setBackgroundColor(Color.TRANSPARENT);
@@ -472,16 +483,12 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                 getString(showAdvancedParameters
                                 ? R.string.player_performance_advanced_hide
                                 : R.string.player_performance_advanced_show,
-                        split.advanced().size()
-                                + PlaybackPerformanceUiPolicy
-                                        .advancedExperimentControlCount(
-                                                PlayerSetting.getPlayer())),
+                        split.advanced().size()),
                 () -> {
                     showAdvancedParameters = !showAdvancedParameters;
                     refreshRows();
                 });
         if (!showAdvancedParameters) return;
-        addAdvancedExperimentRows();
         String section = "";
         for (PlaybackPerformanceOption option : split.advanced()) {
             if (!section.equals(option.section())) {
@@ -500,13 +507,6 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                 getString(R.string.player_performance_experiment_strategy),
                 experimentStrategyValue(state),
                 this::toggleExperimentStrategy);
-    }
-
-    private void addAdvancedExperimentRows() {
-        PlaybackExperimentPolicy.State state =
-                PlaybackExperimentSetting.getState();
-        addHeader(getString(R.string
-                .player_performance_experiment_advanced_section));
         PlaybackExperimentPolicy.Domain currentDomain = currentExperimentDomain();
         addExperimentDomainRow(
                 currentExperimentScopeLabel(),

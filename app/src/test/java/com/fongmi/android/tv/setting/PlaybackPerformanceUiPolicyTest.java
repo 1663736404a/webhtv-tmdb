@@ -98,12 +98,6 @@ public class PlaybackPerformanceUiPolicyTest {
                 .showsExoFrameScheduling(PlayerSetting.MPV));
         assertFalse(PlaybackPerformanceUiPolicy
                 .showsExoFrameScheduling(PlayerSetting.IJK));
-        assertEquals(2, PlaybackPerformanceUiPolicy
-                .advancedExperimentControlCount(PlayerSetting.EXO));
-        assertEquals(1, PlaybackPerformanceUiPolicy
-                .advancedExperimentControlCount(PlayerSetting.MPV));
-        assertEquals(1, PlaybackPerformanceUiPolicy
-                .advancedExperimentControlCount(PlayerSetting.IJK));
 
         PlaybackExperimentPolicy.State stable =
                 PlaybackExperimentPolicy.State.stable();

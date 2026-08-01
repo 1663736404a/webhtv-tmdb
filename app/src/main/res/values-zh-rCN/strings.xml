@@ -829,7 +829,6 @@
     <string name="player_performance_advanced_show">已隐藏 %1$d 项 · 点击展开</string>
     <string name="player_performance_advanced_hide">已展开 %1$d 项 · 点击收起</string>
     <string name="player_performance_experiment_section">实验与回退</string>
-    <string name="player_performance_experiment_advanced_section">实验高级项</string>
     <string name="player_performance_experiment_scope">%1$s 实验范围</string>
     <string name="player_performance_experiment_strategy">策略</string>
     <string name="player_performance_experiment_stable">稳定策略 v1</string>

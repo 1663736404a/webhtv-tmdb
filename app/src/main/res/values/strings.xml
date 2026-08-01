@@ -831,7 +831,6 @@
     <string name="player_performance_advanced_show">%1$d items hidden · Show</string>
     <string name="player_performance_advanced_hide">%1$d items shown · Hide</string>
     <string name="player_performance_experiment_section">Experiments and rollback</string>
-    <string name="player_performance_experiment_advanced_section">Advanced experiment controls</string>
     <string name="player_performance_experiment_scope">%1$s experiment scope</string>
     <string name="player_performance_experiment_strategy">Strategy</string>
     <string name="player_performance_experiment_stable">Stable v1</string>
