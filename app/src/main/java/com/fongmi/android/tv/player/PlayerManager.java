@@ -380,65 +380,17 @@ public class PlayerManager implements ParseCallback {
                         .GENERATION_CHANGED);
         PlaybackExperimentPolicy.State policy =
                 PlaybackExperimentSetting.getState();
-        boolean exoEnabled = policy.domainEnabled(
-                PlaybackExperimentPolicy.Domain.EXO);
-        boolean mpvEnabled = policy.domainEnabled(
-                PlaybackExperimentPolicy.Domain.MPV);
-        boolean ijkEnabled = policy.domainEnabled(
-                PlaybackExperimentPolicy.Domain.IJK);
-
-        if (!exoEnabled) {
-            if (isExo()) resetNetworkProtectionSession("experiment-disabled");
-            rtspLiveLagController.reset();
-            if (engine instanceof ExoPlayerEngine exo) {
-                exo.stopAutomaticPreload("experiment-disabled");
-            }
-        } else if (isExo()) {
-            scheduleNetworkProtection(0);
-        }
-
-        resetMpvOutputEvaluationState();
-        if (!mpvEnabled) {
-            mpvPreloadController.disrupt(playbackAutoSession);
-            if (engine instanceof MpvPlayerEngine mpv) {
-                mpv.stopAutomaticHlsPreload();
-            }
-        } else if (isMpv()) {
-            scheduleMpvAutoOutputEvaluation();
-        }
-
-        if (!ijkEnabled) {
-            if (hasPendingIjkExperimentalReload()) {
-                completeIjkBufferManagedReload(
-                        false,
-                        update.change()
-                                == PlaybackExperimentCoordinator.Change.ROLLBACK
-                                ? "experiment-rollback"
-                                : "experiment-disabled",
-                        SystemClock.elapsedRealtime(),
-                        false);
-            }
-            ijkRuntimeProfileController.cancel(playbackAutoSession);
-        }
-
         PlaybackTrace.log(
                 "playback-experiment",
                 playbackTrace.current(),
-                "generation=%d change=%s strategy=%s exo=%s mpv=%s ijk=%s action=cancel-experimental-work",
+                "generation=%d change=%s strategy=%s frameAb=%s profileAb=%s action=invalidate-internal-experiments",
                 update.generation(),
                 update.change(),
                 policy.strategyId(),
-                exoEnabled,
-                mpvEnabled,
-                ijkEnabled);
-    }
-
-    private boolean hasPendingIjkExperimentalReload() {
-        if (pendingIjkRealtimeRecoveryDecision != null
-                || pendingIjkDecodePressureDecision != null) return true;
-        return pendingIjkBufferDecision != null
-                && pendingIjkBufferDecision.reason()
-                != IjkBufferController.Reason.SAFETY_RELOAD;
+                policy.allows(PlaybackExperimentPolicy.Action
+                        .EXO_FRAME_SCHEDULING_AB),
+                policy.allows(PlaybackExperimentPolicy.Action
+                        .SHARED_PROFILE_AB_VALIDATION));
     }
 
     private void onPlaybackTimeout() {

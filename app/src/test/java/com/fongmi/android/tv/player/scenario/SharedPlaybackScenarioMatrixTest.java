@@ -85,7 +85,7 @@ public class SharedPlaybackScenarioMatrixTest {
     }
 
     @Test
-    public void stableStrategyRejectsEveryHighRiskActionButKeepsProtection() {
+    public void automaticOptimizationsStayOnWhileInternalExperimentsStayOff() {
         PlaybackExperimentPolicy.State stable = PlaybackExperimentPolicy.State.stable();
 
         for (PlaybackScenarioMatrix.Scenario scenario : PlaybackScenarioMatrix.all()) {
@@ -94,7 +94,7 @@ public class SharedPlaybackScenarioMatrixTest {
             for (PlaybackExperimentPolicy.Action action
                     : PlaybackExperimentPolicy.Action.values()) {
                 if (action.risk()
-                        == PlaybackExperimentPolicy.Risk.HIGH_RISK_EXPERIMENT) {
+                        == PlaybackExperimentPolicy.Risk.INTERNAL_EXPERIMENT) {
                     assertFalse(scenario.id() + ":" + action.id(), stable.allows(action));
                 } else {
                     assertTrue(scenario.id() + ":" + action.id(), stable.allows(action));
@@ -106,11 +106,17 @@ public class SharedPlaybackScenarioMatrixTest {
     @Test
     public void experimentalDomainsRemainIsolatedAcrossTheMatrix() {
         assertOnlyDomainEnabled(PlaybackExperimentPolicy.Domain.EXO,
-                new PlaybackExperimentPolicy.State(1, true, true, false, false));
+                new PlaybackExperimentPolicy.State(
+                        PlaybackExperimentPolicy.CURRENT_SCHEMA_VERSION,
+                        true, true, false, false));
         assertOnlyDomainEnabled(PlaybackExperimentPolicy.Domain.MPV,
-                new PlaybackExperimentPolicy.State(1, true, false, true, false));
+                new PlaybackExperimentPolicy.State(
+                        PlaybackExperimentPolicy.CURRENT_SCHEMA_VERSION,
+                        true, false, true, false));
         assertOnlyDomainEnabled(PlaybackExperimentPolicy.Domain.IJK,
-                new PlaybackExperimentPolicy.State(1, true, false, false, true));
+                new PlaybackExperimentPolicy.State(
+                        PlaybackExperimentPolicy.CURRENT_SCHEMA_VERSION,
+                        true, false, false, true));
     }
 
     @Test
@@ -131,7 +137,7 @@ public class SharedPlaybackScenarioMatrixTest {
     }
 
     @Test
-    public void codecFalsePositiveCannotTriggerRuntimeRebuildWithoutExoExperiment() {
+    public void codecFailureCanUseBoundedRuntimeRecoveryWithoutUserOptIn() {
         PlaybackScenarioMatrix.Scenario scenario = PlaybackScenarioMatrix.get(
                 PlaybackScenarioMatrix.Id.CODEC_FALSE_POSITIVE_DASH);
         PlaybackAutoContext context = scenario.context(PlaybackAutoContext.Kernel.EXO);
@@ -141,9 +147,7 @@ public class SharedPlaybackScenarioMatrixTest {
         assertEquals(PlaybackAutoContext.HdrType.DOLBY_VISION,
                 context.media().videoTrack().hdrType().value());
         assertTrue(scenario.codecFailure());
-        assertFalse(PlaybackExperimentPolicy.State.stable().allows(action));
-        assertTrue(new PlaybackExperimentPolicy.State(1, true, true, false, false)
-                .allows(action));
+        assertTrue(PlaybackExperimentPolicy.State.stable().allows(action));
     }
 
     private static void assertOnlyDomainEnabled(
@@ -154,7 +158,7 @@ public class SharedPlaybackScenarioMatrixTest {
             for (PlaybackExperimentPolicy.Action action
                     : PlaybackExperimentPolicy.Action.values()) {
                 if (action.risk()
-                        != PlaybackExperimentPolicy.Risk.HIGH_RISK_EXPERIMENT) {
+                        != PlaybackExperimentPolicy.Risk.INTERNAL_EXPERIMENT) {
                     assertTrue(action.id(), state.allows(action));
                 } else if (action.domain()
                         == PlaybackExperimentPolicy.Domain.SHARED) {

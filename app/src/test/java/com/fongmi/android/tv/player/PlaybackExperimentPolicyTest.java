@@ -24,7 +24,7 @@ public class PlaybackExperimentPolicyTest {
     }
 
     @Test
-    public void currentStablePolicyKeepsSafetyAndTelemetryEnabled() {
+    public void stablePolicyKeepsSafetyAndProductionAutomationEnabled() {
         PlaybackExperimentPolicy.State state =
                 PlaybackExperimentPolicy.State.stable();
 
@@ -34,39 +34,45 @@ public class PlaybackExperimentPolicyTest {
                 PlaybackExperimentPolicy.Action.MEMORY_PRESSURE_SHRINK));
         assertTrue(state.allows(
                 PlaybackExperimentPolicy.Action.READ_ONLY_TELEMETRY));
-        assertFalse(state.allows(
+        assertTrue(state.allows(
                 PlaybackExperimentPolicy.Action.EXO_NETWORK_SPEED));
         assertFalse(state.allows(
                 PlaybackExperimentPolicy.Action.EXO_FRAME_SCHEDULING_AB));
         assertFalse(state.allows(
                 PlaybackExperimentPolicy.Action.SHARED_PROFILE_AB_VALIDATION));
-        assertFalse(state.allows(
+        assertTrue(state.allows(
                 PlaybackExperimentPolicy.Action.MPV_AUTO_PRELOAD));
-        assertFalse(state.allows(
+        assertTrue(state.allows(
                 PlaybackExperimentPolicy.Action.IJK_RUNTIME_KERNEL_FALLBACK));
+        assertEquals("playback-auto-production-v2",
+                PlaybackExperimentPolicy.STABLE_STRATEGY_ID);
         assertEquals(PlaybackExperimentPolicy.STABLE_STRATEGY_ID,
                 state.strategyId());
     }
 
     @Test
-    public void globalSwitchOverridesAllDomainSwitches() {
+    public void automaticOptimizationsIgnoreLegacyExperimentSwitches() {
         PlaybackExperimentPolicy.State state =
-                new PlaybackExperimentPolicy.State(1, false,
-                        true, true, true);
+                new PlaybackExperimentPolicy.State(
+                        PlaybackExperimentPolicy.CURRENT_SCHEMA_VERSION,
+                        false, false, false, false);
 
-        assertFalse(state.allows(
+        assertTrue(state.allows(
                 PlaybackExperimentPolicy.Action.EXO_AUTO_PRELOAD));
-        assertFalse(state.allows(
+        assertTrue(state.allows(
                 PlaybackExperimentPolicy.Action.MPV_HLS_RUNTIME_RELOAD));
-        assertFalse(state.allows(
+        assertTrue(state.allows(
                 PlaybackExperimentPolicy.Action.IJK_DECODE_REBUILD));
+        assertFalse(state.allows(
+                PlaybackExperimentPolicy.Action.EXO_FRAME_SCHEDULING_AB));
     }
 
     @Test
-    public void domainsAreIsolatedUnderExperimentalStrategy() {
+    public void domainsOnlyGateInternalExperiments() {
         PlaybackExperimentPolicy.State state =
-                new PlaybackExperimentPolicy.State(1, true,
-                        true, false, true);
+                new PlaybackExperimentPolicy.State(
+                        PlaybackExperimentPolicy.CURRENT_SCHEMA_VERSION,
+                        true, true, false, true);
 
         assertTrue(state.allows(
                 PlaybackExperimentPolicy.Action.EXO_AUTO_PRELOAD));
@@ -74,10 +80,14 @@ public class PlaybackExperimentPolicyTest {
                 PlaybackExperimentPolicy.Action.EXO_FRAME_SCHEDULING_AB));
         assertTrue(state.allows(
                 PlaybackExperimentPolicy.Action.SHARED_PROFILE_AB_VALIDATION));
-        assertFalse(state.allows(
+        assertTrue(state.allows(
                 PlaybackExperimentPolicy.Action.MPV_CACHE_EXPANSION));
         assertTrue(state.allows(
                 PlaybackExperimentPolicy.Action.IJK_BUFFER_RELOAD));
+        assertFalse(state.domainEnabled(
+                PlaybackExperimentPolicy.Domain.MPV));
+        assertEquals("playback-internal-experiment-v2",
+                PlaybackExperimentPolicy.EXPERIMENT_STRATEGY_ID);
         assertEquals(PlaybackExperimentPolicy.EXPERIMENT_STRATEGY_ID,
                 state.strategyId());
     }
@@ -87,7 +97,8 @@ public class PlaybackExperimentPolicyTest {
         PlaybackExperimentPolicy.Resolution result =
                 PlaybackExperimentPolicy.resolve(
                         new PlaybackExperimentPolicy.RawState(
-                                1, true, true, "bad", true));
+                                PlaybackExperimentPolicy.CURRENT_SCHEMA_VERSION,
+                                true, true, "bad", true));
 
         assertEquals(PlaybackExperimentPolicy.Status.CORRUPT,
                 result.status());
@@ -134,12 +145,14 @@ public class PlaybackExperimentPolicyTest {
                 result.status());
         assertFalse(result.writeBack());
         assertTrue(result.failClosed());
-        assertFalse(result.state().allows(
+        assertTrue(result.state().allows(
                 PlaybackExperimentPolicy.Action.EXO_VIDEO_CONSTRAINT));
+        assertFalse(result.state().allows(
+                PlaybackExperimentPolicy.Action.EXO_FRAME_SCHEDULING_AB));
     }
 
     @Test
-    public void schemaZeroMigratesOnlyExperimentState() {
+    public void schemaZeroMigrationDisablesLegacyExperimentOptIn() {
         PlaybackExperimentPolicy.Resolution result =
                 PlaybackExperimentPolicy.resolve(
                         new PlaybackExperimentPolicy.RawState(
@@ -148,10 +161,33 @@ public class PlaybackExperimentPolicyTest {
         assertEquals(PlaybackExperimentPolicy.Status.MIGRATED,
                 result.status());
         assertTrue(result.writeBack());
-        assertTrue(result.state().enabled());
+        assertFalse(result.state().enabled());
         assertTrue(result.state().exoEnabled());
         assertTrue(result.state().mpvEnabled());
         assertTrue(result.state().ijkEnabled());
+        assertTrue(result.state().allows(
+                PlaybackExperimentPolicy.Action.EXO_AUTO_PRELOAD));
+        assertFalse(result.state().allows(
+                PlaybackExperimentPolicy.Action.EXO_FRAME_SCHEDULING_AB));
+    }
+
+    @Test
+    public void schemaOneMigrationDisablesPreviouslyEnabledInternalExperiments() {
+        PlaybackExperimentPolicy.Resolution result =
+                PlaybackExperimentPolicy.resolve(
+                        new PlaybackExperimentPolicy.RawState(
+                                1, true, true, true, true));
+
+        assertEquals(PlaybackExperimentPolicy.Status.MIGRATED,
+                result.status());
+        assertTrue(result.writeBack());
+        assertFalse(result.state().enabled());
+        assertEquals(PlaybackExperimentPolicy.CURRENT_SCHEMA_VERSION,
+                result.state().schemaVersion());
+        assertTrue(result.state().allows(
+                PlaybackExperimentPolicy.Action.MPV_HLS_RUNTIME_RELOAD));
+        assertFalse(result.state().allows(
+                PlaybackExperimentPolicy.Action.SHARED_PROFILE_AB_VALIDATION));
     }
 
     @Test

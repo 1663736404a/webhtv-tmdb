@@ -79,10 +79,11 @@ public class PlaybackProfileAbPolicyTest {
     }
 
     @Test
-    public void globalAndCurrentKernelDomainMustBothAllowCollection() {
+    public void internalExperimentAndCurrentKernelDomainMustBothAllowCollection() {
         PlaybackExperimentPolicy.State exoOnly =
                 new PlaybackExperimentPolicy.State(
-                        1, true, true, false, false);
+                        PlaybackExperimentPolicy.CURRENT_SCHEMA_VERSION,
+                        true, true, false, false);
         PlaybackExperimentPolicy.State stable =
                 PlaybackExperimentPolicy.State.stable();
 

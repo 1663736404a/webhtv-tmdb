@@ -7,7 +7,7 @@ import com.github.catvod.utils.Prefers;
 
 import java.util.Map;
 
-/** Device-local persistence wrapper for the versioned playback experiment policy. */
+/** Device-local persistence for internal experiments; production automation is always admitted. */
 public final class PlaybackExperimentSetting {
 
     public static final String KEY_SCHEMA = "playback_experiment_schema";

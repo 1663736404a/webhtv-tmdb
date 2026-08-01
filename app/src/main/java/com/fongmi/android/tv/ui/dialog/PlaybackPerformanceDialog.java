@@ -25,17 +25,12 @@ import androidx.fragment.app.FragmentActivity;
 import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.App;
 import com.fongmi.android.tv.event.ConfigEvent;
-import com.fongmi.android.tv.player.PlaybackExperimentCoordinator;
-import com.fongmi.android.tv.player.PlaybackExperimentPolicy;
-import com.fongmi.android.tv.player.exo.ExoFrameSchedulingExperimentPolicy;
 import com.fongmi.android.tv.player.exo.ExoNetworkProtectionPolicy;
 import com.fongmi.android.tv.setting.PlaybackPerformanceCatalog;
 import com.fongmi.android.tv.setting.PlaybackPerformanceOption;
 import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
 import com.fongmi.android.tv.setting.PlaybackPerformanceUiPolicy;
 import com.fongmi.android.tv.setting.PlaybackProfileMergePolicy;
-import com.fongmi.android.tv.setting.PlaybackExperimentSetting;
-import com.fongmi.android.tv.setting.ExoFrameSchedulingExperimentSetting;
 import com.fongmi.android.tv.setting.MpvPerformanceSetting;
 import com.fongmi.android.tv.setting.IjkPerformanceSetting;
 import com.fongmi.android.tv.setting.ExoPerformanceSetting;
@@ -187,21 +182,6 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
         PlaybackPerformanceUiPolicy.Split split = optionSplit();
         addHelpIntro(content, getString(
                 R.string.player_performance_help_intro, playerName()));
-        addHelpSection(content, getString(R.string.player_performance_experiment_section));
-        addHelpItem(content,
-                getString(R.string.player_performance_experiment_strategy),
-                getString(R.string.player_performance_experiment_help));
-        addHelpItem(content, currentExperimentScopeLabel(),
-                getString(R.string.player_performance_experiment_domain_help,
-                        playerName()));
-        if (PlaybackPerformanceUiPolicy.showsExoFrameScheduling(
-                PlayerSetting.getPlayer())) {
-            addHelpItem(content,
-                    getString(R.string
-                            .player_performance_experiment_exo_frame_scheduling),
-                    getString(R.string
-                            .player_performance_experiment_exo_frame_help));
-        }
         if (split.profile() != null) {
             addHelpSection(content,
                     getString(R.string.player_performance_common_section));
@@ -471,7 +451,6 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
     private void refreshRows() {
         if (list == null) return;
         list.removeAllViews();
-        addExperimentRows();
         PlaybackPerformanceUiPolicy.Split split = optionSplit();
         addHeader(getString(R.string.player_performance_common_section));
         for (PlaybackPerformanceOption option : split.common()) {
@@ -486,173 +465,6 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
             }
             addRow(option.title(), optionValue(option.id()), optionAction(option.id()));
         }
-    }
-
-    private void addExperimentRows() {
-        PlaybackExperimentPolicy.State state =
-                PlaybackExperimentSetting.getState();
-        addHeader(getString(R.string.player_performance_experiment_section));
-        addRow(
-                getString(R.string.player_performance_experiment_strategy),
-                experimentStrategyValue(state),
-                this::toggleExperimentStrategy);
-        PlaybackExperimentPolicy.Domain currentDomain = currentExperimentDomain();
-        addExperimentDomainRow(
-                currentExperimentScopeLabel(),
-                currentDomain,
-                PlaybackPerformanceUiPolicy.domainSelected(
-                        state, currentDomain),
-                state.enabled());
-        if (PlaybackPerformanceUiPolicy.showsExoFrameScheduling(
-                PlayerSetting.getPlayer())) {
-            addRow(
-                    getString(R.string
-                            .player_performance_experiment_exo_frame_scheduling),
-                    frameSchedulingExperimentValue(),
-                    this::showFrameSchedulingExperimentDialog);
-        }
-    }
-
-    private String experimentStrategyValue(
-            PlaybackExperimentPolicy.State state) {
-        int value = switch (PlaybackPerformanceUiPolicy.experimentStatus(
-                state, PlayerSetting.getPlayer())) {
-            case ACTIVE -> R.string.player_performance_experiment_enabled;
-            case STANDBY -> R.string.player_performance_experiment_standby;
-            case STABLE -> R.string.player_performance_experiment_stable;
-        };
-        return getString(value);
-    }
-
-    private String frameSchedulingExperimentValue() {
-        ExoFrameSchedulingExperimentPolicy.AssignmentResolution resolution =
-                ExoFrameSchedulingExperimentSetting
-                .getResolution();
-        if (resolution.status()
-                == ExoFrameSchedulingExperimentPolicy.Status.UNASSIGNED) {
-            return getString(R.string
-                    .player_performance_experiment_exo_frame_not_enrolled);
-        }
-        if (resolution.status()
-                != ExoFrameSchedulingExperimentPolicy.Status.CURRENT
-                || resolution.assignment().unit() == null) {
-            return getString(R.string
-                    .player_performance_experiment_exo_frame_invalid);
-        }
-        return frameSchedulingUnitLabel(resolution.assignment().unit());
-    }
-
-    private String frameSchedulingUnitLabel(
-            ExoFrameSchedulingExperimentPolicy.Unit unit) {
-        if (unit == null) {
-            return getString(R.string
-                    .player_performance_experiment_exo_frame_not_enrolled);
-        }
-        return getString(
-                R.string.player_performance_experiment_exo_frame_unit,
-                unit.earlySchedulingThresholdUs() / 1_000L,
-                getString(unit.durationToProgressEnabled()
-                        ? R.string.player_performance_experiment_on
-                        : R.string.player_performance_experiment_off));
-    }
-
-    private void showFrameSchedulingExperimentDialog() {
-        ExoFrameSchedulingExperimentPolicy.Unit[] units =
-                ExoFrameSchedulingExperimentPolicy.Unit.values();
-        String[] labels = new String[units.length + 1];
-        labels[0] = getString(R.string
-                .player_performance_experiment_exo_frame_not_enrolled);
-        for (int index = 0; index < units.length; index++) {
-            labels[index + 1] = frameSchedulingUnitLabel(units[index]);
-        }
-        ExoFrameSchedulingExperimentPolicy.Unit current =
-                ExoFrameSchedulingExperimentSetting.getUnit();
-        int selected = 0;
-        for (int index = 0; index < units.length; index++) {
-            if (units[index] == current) selected = index + 1;
-        }
-        showModal(PlaybackPerformanceModal.choices(
-                requireContext(),
-                getString(R.string
-                        .player_performance_experiment_exo_frame_title),
-                labels,
-                selected,
-                which -> {
-                    ExoFrameSchedulingExperimentPolicy.Unit target =
-                            which <= 0 ? null : units[which - 1];
-                    if (ExoFrameSchedulingExperimentSetting.putUnit(target)) {
-                        PlaybackExperimentCoordinator.process().invalidate(
-                                PlaybackExperimentCoordinator.Change
-                                        .POLICY_CHANGED);
-                        refreshRows();
-                    }
-                }));
-    }
-
-    private void addExperimentDomainRow(
-            String label,
-            PlaybackExperimentPolicy.Domain domain,
-            boolean selected,
-            boolean globalEnabled) {
-        int value = !selected
-                ? R.string.player_performance_experiment_off
-                : globalEnabled
-                ? R.string.player_performance_experiment_on
-                : R.string.player_performance_experiment_standby;
-        addRow(label, getString(value), () -> {
-            PlaybackExperimentSetting.putDomainEnabled(domain, !selected);
-            notifyExperimentPolicyChanged(
-                    PlaybackExperimentCoordinator.Change.POLICY_CHANGED);
-        });
-    }
-
-    private void toggleExperimentStrategy() {
-        PlaybackExperimentPolicy.State state =
-                PlaybackExperimentSetting.getState();
-        PlaybackExperimentPolicy.Domain currentDomain =
-                currentExperimentDomain();
-        if (state.enabled()
-                && !PlaybackPerformanceUiPolicy.domainSelected(
-                        state, currentDomain)) {
-            PlaybackExperimentSetting.putDomainEnabled(currentDomain, true);
-            notifyExperimentPolicyChanged(
-                    PlaybackExperimentCoordinator.Change.POLICY_CHANGED);
-            return;
-        }
-        if (state.enabled()) {
-            confirmExperimentRollback();
-            return;
-        }
-        showConfirmDialog(
-                R.string.player_performance_experiment_enable_title,
-                R.string.player_performance_experiment_enable_message,
-                R.string.player_performance_experiment_enable_confirm,
-                () -> {
-                    PlaybackExperimentSetting.putDomainEnabled(
-                            currentDomain, true);
-                    PlaybackExperimentSetting.putEnabled(true);
-                    notifyExperimentPolicyChanged(
-                            PlaybackExperimentCoordinator.Change.POLICY_CHANGED);
-                });
-    }
-
-    private void confirmExperimentRollback() {
-        showConfirmDialog(
-                R.string.player_performance_experiment_rollback_title,
-                R.string.player_performance_experiment_rollback_message,
-                R.string.player_performance_experiment_rollback_confirm,
-                () -> {
-                    PlaybackExperimentSetting.rollbackToStable();
-                    notifyExperimentPolicyChanged(
-                            PlaybackExperimentCoordinator.Change.ROLLBACK);
-                });
-    }
-
-    private void notifyExperimentPolicyChanged(
-            PlaybackExperimentCoordinator.Change change) {
-        PlaybackExperimentCoordinator.process().invalidate(change);
-        refreshRows();
-        if (callback != null) callback.run();
     }
 
     private void showConfirmDialog(
@@ -677,17 +489,6 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
             if (modalDialog == dialog) modalDialog = null;
         });
         dialog.show();
-    }
-
-    private PlaybackExperimentPolicy.Domain currentExperimentDomain() {
-        return PlaybackPerformanceUiPolicy.experimentDomain(
-                PlayerSetting.getPlayer());
-    }
-
-    private String currentExperimentScopeLabel() {
-        return getString(
-                R.string.player_performance_experiment_scope,
-                playerName());
     }
 
     private String playerName() {

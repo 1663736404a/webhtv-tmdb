@@ -3,12 +3,13 @@ package com.fongmi.android.tv.player;
 import java.util.HashSet;
 import java.util.Set;
 
-/** Pure, versioned admission policy for playback experiments. */
+/** Pure, versioned admission policy for automatic optimizations and internal experiments. */
 public final class PlaybackExperimentPolicy {
 
-    public static final int CURRENT_SCHEMA_VERSION = 1;
-    public static final String STABLE_STRATEGY_ID = "playback-stable-v1";
-    public static final String EXPERIMENT_STRATEGY_ID = "playback-experiment-v1";
+    public static final int CURRENT_SCHEMA_VERSION = 2;
+    public static final String STABLE_STRATEGY_ID = "playback-auto-production-v2";
+    public static final String EXPERIMENT_STRATEGY_ID =
+            "playback-internal-experiment-v2";
 
     private PlaybackExperimentPolicy() {
     }
@@ -31,12 +32,17 @@ public final class PlaybackExperimentPolicy {
             if (enabled == null) {
                 return stable(Status.CORRUPT, true);
             }
-            return new Resolution(
-                    new State(CURRENT_SCHEMA_VERSION, enabled,
-                            true, true, true),
-                    Status.MIGRATED,
-                    true,
-                    true);
+            return migratedStable();
+        }
+        if (version == 1) {
+            Boolean enabled = bool(raw.enabled());
+            Boolean exo = bool(raw.exoEnabled());
+            Boolean mpv = bool(raw.mpvEnabled());
+            Boolean ijk = bool(raw.ijkEnabled());
+            if (enabled == null || exo == null || mpv == null || ijk == null) {
+                return stable(Status.CORRUPT, true);
+            }
+            return migratedStable();
         }
         Boolean enabled = bool(raw.enabled());
         Boolean exo = bool(raw.exoEnabled());
@@ -69,6 +75,11 @@ public final class PlaybackExperimentPolicy {
         return new Resolution(State.stable(), status, writeBack, false);
     }
 
+    private static Resolution migratedStable() {
+        return new Resolution(
+                State.stable(), Status.MIGRATED, true, true);
+    }
+
     private static Integer integer(Object value) {
         if (!(value instanceof Byte
                 || value instanceof Short
@@ -94,7 +105,8 @@ public final class PlaybackExperimentPolicy {
     public enum Risk {
         SAFETY_PROTECTION,
         STABLE_BASELINE,
-        HIGH_RISK_EXPERIMENT
+        AUTOMATIC_OPTIMIZATION,
+        INTERNAL_EXPERIMENT
     }
 
     public enum Action {
@@ -105,45 +117,45 @@ public final class PlaybackExperimentPolicy {
         MEMORY_PRESSURE_SHRINK("shared.memory-pressure-shrink", Domain.SHARED,
                 Risk.SAFETY_PROTECTION, 1),
         SHARED_PROFILE_AB_VALIDATION("shared.profile-ab-validation",
-                Domain.SHARED, Risk.HIGH_RISK_EXPERIMENT, 1),
+                Domain.SHARED, Risk.INTERNAL_EXPERIMENT, 1),
         EXO_INITIAL_BASELINE("exo.initial-baseline", Domain.EXO,
                 Risk.STABLE_BASELINE, 1),
         EXO_AUTO_PRELOAD("exo.auto-preload", Domain.EXO,
-                Risk.HIGH_RISK_EXPERIMENT, 1),
+                Risk.AUTOMATIC_OPTIMIZATION, 1),
         EXO_NETWORK_SPEED("exo.network-speed", Domain.EXO,
-                Risk.HIGH_RISK_EXPERIMENT, 1),
+                Risk.AUTOMATIC_OPTIMIZATION, 1),
         EXO_RTSP_RECOVERY("exo.rtsp-recovery", Domain.EXO,
-                Risk.HIGH_RISK_EXPERIMENT, 1),
+                Risk.AUTOMATIC_OPTIMIZATION, 1),
         EXO_VIDEO_CONSTRAINT("exo.video-constraint", Domain.EXO,
-                Risk.HIGH_RISK_EXPERIMENT, 1),
+                Risk.AUTOMATIC_OPTIMIZATION, 1),
         EXO_DECODER_RUNTIME_REBUILD("exo.decoder-runtime-rebuild", Domain.EXO,
-                Risk.HIGH_RISK_EXPERIMENT, 1),
+                Risk.AUTOMATIC_OPTIMIZATION, 1),
         EXO_FRAME_SCHEDULING_AB("exo.frame-scheduling-ab", Domain.EXO,
-                Risk.HIGH_RISK_EXPERIMENT, 1),
+                Risk.INTERNAL_EXPERIMENT, 1),
         MPV_INITIAL_BASELINE("mpv.initial-baseline", Domain.MPV,
                 Risk.STABLE_BASELINE, 1),
         MPV_CACHE_SHRINK("mpv.cache-shrink", Domain.MPV,
                 Risk.SAFETY_PROTECTION, 1),
         MPV_CACHE_EXPANSION("mpv.cache-expansion", Domain.MPV,
-                Risk.HIGH_RISK_EXPERIMENT, 1),
+                Risk.AUTOMATIC_OPTIMIZATION, 1),
         MPV_AUTO_PRELOAD("mpv.auto-preload", Domain.MPV,
-                Risk.HIGH_RISK_EXPERIMENT, 1),
+                Risk.AUTOMATIC_OPTIMIZATION, 1),
         MPV_HLS_RUNTIME_RELOAD("mpv.hls-runtime-reload", Domain.MPV,
-                Risk.HIGH_RISK_EXPERIMENT, 1),
+                Risk.AUTOMATIC_OPTIMIZATION, 1),
         MPV_AUTO_OUTPUT_REBUILD("mpv.auto-output-rebuild", Domain.MPV,
-                Risk.HIGH_RISK_EXPERIMENT, 1),
+                Risk.AUTOMATIC_OPTIMIZATION, 1),
         IJK_INITIAL_BASELINE("ijk.initial-baseline", Domain.IJK,
                 Risk.STABLE_BASELINE, 1),
         IJK_BUFFER_SAFETY_RELOAD("ijk.buffer-safety-reload", Domain.IJK,
                 Risk.SAFETY_PROTECTION, 1),
         IJK_BUFFER_RELOAD("ijk.buffer-reload", Domain.IJK,
-                Risk.HIGH_RISK_EXPERIMENT, 1),
+                Risk.AUTOMATIC_OPTIMIZATION, 1),
         IJK_REALTIME_REBUILD("ijk.realtime-rebuild", Domain.IJK,
-                Risk.HIGH_RISK_EXPERIMENT, 1),
+                Risk.AUTOMATIC_OPTIMIZATION, 1),
         IJK_DECODE_REBUILD("ijk.decode-rebuild", Domain.IJK,
-                Risk.HIGH_RISK_EXPERIMENT, 1),
+                Risk.AUTOMATIC_OPTIMIZATION, 1),
         IJK_RUNTIME_KERNEL_FALLBACK("ijk.runtime-kernel-fallback", Domain.IJK,
-                Risk.HIGH_RISK_EXPERIMENT, 1);
+                Risk.AUTOMATIC_OPTIMIZATION, 1);
 
         private final String id;
         private final Domain domain;
@@ -211,7 +223,7 @@ public final class PlaybackExperimentPolicy {
 
         public boolean allows(Action action) {
             if (action == null) return false;
-            if (action.risk() != Risk.HIGH_RISK_EXPERIMENT) return true;
+            if (action.risk() != Risk.INTERNAL_EXPERIMENT) return true;
             if (!enabled) return false;
             return switch (action.domain()) {
                 case EXO -> exoEnabled;

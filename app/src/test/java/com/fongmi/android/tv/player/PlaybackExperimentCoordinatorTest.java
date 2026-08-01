@@ -16,7 +16,7 @@ public class PlaybackExperimentCoordinatorTest {
         PlaybackExperimentCoordinator coordinator =
                 new PlaybackExperimentCoordinator();
         PlaybackExperimentCoordinator.Token token = coordinator.capture(
-                PlaybackExperimentPolicy.Action.MPV_AUTO_OUTPUT_REBUILD);
+                PlaybackExperimentPolicy.Action.EXO_FRAME_SCHEDULING_AB);
 
         assertTrue(coordinator.isCurrent(token));
         PlaybackExperimentCoordinator.Update update = coordinator.invalidate(
@@ -26,6 +26,19 @@ public class PlaybackExperimentCoordinatorTest {
         assertEquals(PlaybackExperimentCoordinator.Change.ROLLBACK,
                 update.change());
         assertEquals(update.generation(), coordinator.generation());
+    }
+
+    @Test
+    public void internalExperimentInvalidationDoesNotCancelProductionAutomation() {
+        PlaybackExperimentCoordinator coordinator =
+                new PlaybackExperimentCoordinator();
+        PlaybackExperimentCoordinator.Token token = coordinator.capture(
+                PlaybackExperimentPolicy.Action.MPV_AUTO_OUTPUT_REBUILD);
+
+        coordinator.invalidate(
+                PlaybackExperimentCoordinator.Change.ROLLBACK);
+
+        assertTrue(coordinator.isCurrent(token));
     }
 
     @Test

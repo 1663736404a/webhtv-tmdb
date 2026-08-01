@@ -1,7 +1,5 @@
 package com.fongmi.android.tv.setting;
 
-import com.fongmi.android.tv.player.PlaybackExperimentPolicy;
-
 import org.junit.Test;
 
 import java.util.HashSet;
@@ -79,40 +77,6 @@ public class PlaybackPerformanceUiPolicyTest {
                 assertTrue(option.description().length() >= 40);
             }
         }
-    }
-
-    @Test
-    public void experimentDomainAndExoSpecificVisibilityFollowKernel() {
-        assertEquals(PlaybackExperimentPolicy.Domain.EXO,
-                PlaybackPerformanceUiPolicy.experimentDomain(
-                        PlayerSetting.EXO));
-        assertEquals(PlaybackExperimentPolicy.Domain.MPV,
-                PlaybackPerformanceUiPolicy.experimentDomain(
-                        PlayerSetting.MPV));
-        assertEquals(PlaybackExperimentPolicy.Domain.IJK,
-                PlaybackPerformanceUiPolicy.experimentDomain(
-                        PlayerSetting.IJK));
-        assertTrue(PlaybackPerformanceUiPolicy
-                .showsExoFrameScheduling(PlayerSetting.EXO));
-        assertFalse(PlaybackPerformanceUiPolicy
-                .showsExoFrameScheduling(PlayerSetting.MPV));
-        assertFalse(PlaybackPerformanceUiPolicy
-                .showsExoFrameScheduling(PlayerSetting.IJK));
-
-        PlaybackExperimentPolicy.State stable =
-                PlaybackExperimentPolicy.State.stable();
-        PlaybackExperimentPolicy.State exoActive =
-                new PlaybackExperimentPolicy.State(1, true,
-                        true, false, false);
-        assertEquals(PlaybackPerformanceUiPolicy.ExperimentStatus.STABLE,
-                PlaybackPerformanceUiPolicy.experimentStatus(
-                        stable, PlayerSetting.EXO));
-        assertEquals(PlaybackPerformanceUiPolicy.ExperimentStatus.ACTIVE,
-                PlaybackPerformanceUiPolicy.experimentStatus(
-                        exoActive, PlayerSetting.EXO));
-        assertEquals(PlaybackPerformanceUiPolicy.ExperimentStatus.STANDBY,
-                PlaybackPerformanceUiPolicy.experimentStatus(
-                        exoActive, PlayerSetting.MPV));
     }
 
     private static Set<String> ids(

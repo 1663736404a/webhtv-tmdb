@@ -4,7 +4,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
-/** Process-local generation and listener hub for invalidating experimental work. */
+/** Process-local generation and listener hub for invalidating internal experiment work. */
 public final class PlaybackExperimentCoordinator {
 
     private static final PlaybackExperimentCoordinator INSTANCE =
@@ -29,7 +29,9 @@ public final class PlaybackExperimentCoordinator {
     public boolean isCurrent(Token token) {
         return token != null
                 && token.action() != null
-                && token.generation() == generation();
+                && (token.action().risk()
+                        != PlaybackExperimentPolicy.Risk.INTERNAL_EXPERIMENT
+                        || token.generation() == generation());
     }
 
     public Update invalidate(Change change) {

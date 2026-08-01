@@ -1,12 +1,10 @@
 package com.fongmi.android.tv.setting;
 
-import com.fongmi.android.tv.player.PlaybackExperimentPolicy;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
-/** Pure presentation policy for progressive disclosure in playback settings. */
+/** Pure presentation policy for playback settings. */
 public final class PlaybackPerformanceUiPolicy {
 
     private static final Set<String> EXO_COMMON = Set.of(
@@ -60,52 +58,12 @@ public final class PlaybackPerformanceUiPolicy {
         return new Split(profile, common, advanced);
     }
 
-    public static PlaybackExperimentPolicy.Domain experimentDomain(
-            int kernel) {
-        return switch (kernel) {
-            case PlayerSetting.MPV -> PlaybackExperimentPolicy.Domain.MPV;
-            case PlayerSetting.IJK -> PlaybackExperimentPolicy.Domain.IJK;
-            default -> PlaybackExperimentPolicy.Domain.EXO;
-        };
-    }
-
-    public static boolean showsExoFrameScheduling(int kernel) {
-        return kernel == PlayerSetting.EXO;
-    }
-
-    public static ExperimentStatus experimentStatus(
-            PlaybackExperimentPolicy.State state,
-            int kernel) {
-        if (state == null || !state.enabled()) return ExperimentStatus.STABLE;
-        return domainSelected(state, experimentDomain(kernel))
-                ? ExperimentStatus.ACTIVE
-                : ExperimentStatus.STANDBY;
-    }
-
-    public static boolean domainSelected(
-            PlaybackExperimentPolicy.State state,
-            PlaybackExperimentPolicy.Domain domain) {
-        if (state == null || domain == null) return false;
-        return switch (domain) {
-            case EXO -> state.exoEnabled();
-            case MPV -> state.mpvEnabled();
-            case IJK -> state.ijkEnabled();
-            case SHARED -> true;
-        };
-    }
-
     private static Set<String> commonIds(int kernel) {
         return switch (kernel) {
             case PlayerSetting.MPV -> MPV_COMMON;
             case PlayerSetting.IJK -> IJK_COMMON;
             default -> EXO_COMMON;
         };
-    }
-
-    public enum ExperimentStatus {
-        STABLE,
-        STANDBY,
-        ACTIVE
     }
 
     public record Split(
