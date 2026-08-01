@@ -286,6 +286,7 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
     private boolean playHealthRecorded;
     private boolean playerKernelSwitchRefreshing;
     private boolean decodeSwitchRefreshing;
+    private int deferredFullscreenOrientation = Configuration.ORIENTATION_UNDEFINED;
     private int mEpisodeSpanCount;
     private int mStatusBarInset;
     private int mEpisodeBottomInset;
@@ -555,6 +556,7 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         setPlayerKernel();
         setDecode();
         setLut();
+        applyDeferredFullscreenOrientation();
         checkLand();
         if (consumePendingPlaybackResult()) return;
         checkId();
@@ -3876,6 +3878,10 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
 
     private void enterFullscreen() {
         if (isFullscreen()) return;
+        if (service() == null) {
+            SpiderDebug.log("video-flow", "fullscreen enter deferred reason=player-not-ready");
+            return;
+        }
         logVideoFrame("enterFullscreen before");
         setFullscreen(true);
         if (isLand() && !player().isPortrait()) setTransition();
@@ -3892,6 +3898,10 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
 
     private void exitFullscreen() {
         if (!isFullscreen()) return;
+        if (service() == null) {
+            SpiderDebug.log("video-flow", "fullscreen exit deferred reason=player-not-ready");
+            return;
+        }
         logVideoFrame("exitFullscreen before");
         setFullscreen(false);
         if (isLand() && !player().isPortrait()) setTransition();
@@ -6239,9 +6249,30 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
             recreate();
             return;
         }
-        if (isAutoRotate() && isPort() && newConfig.orientation == Configuration.ORIENTATION_PORTRAIT && !isRotate() && !isLock()) exitFullscreen();
-        if (isAutoRotate() && isPort() && newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE) enterFullscreen();
+        syncFullscreenForOrientation(newConfig.orientation);
         if (isFullscreen()) Util.hideSystemUI(this);
+    }
+
+    private void syncFullscreenForOrientation(int orientation) {
+        if (!isAutoRotate() || !isPort()) {
+            deferredFullscreenOrientation = Configuration.ORIENTATION_UNDEFINED;
+            return;
+        }
+        if (service() == null) {
+            deferredFullscreenOrientation = orientation;
+            SpiderDebug.log("video-flow", "fullscreen orientation deferred orientation=%d reason=player-not-ready", orientation);
+            return;
+        }
+        deferredFullscreenOrientation = Configuration.ORIENTATION_UNDEFINED;
+        if (orientation == Configuration.ORIENTATION_PORTRAIT && !isRotate() && !isLock()) exitFullscreen();
+        if (orientation == Configuration.ORIENTATION_LANDSCAPE) enterFullscreen();
+    }
+
+    private void applyDeferredFullscreenOrientation() {
+        int orientation = deferredFullscreenOrientation;
+        if (orientation == Configuration.ORIENTATION_UNDEFINED) return;
+        SpiderDebug.log("video-flow", "fullscreen orientation resume orientation=%d", orientation);
+        syncFullscreenForOrientation(orientation);
     }
 
     private boolean shouldRecreateAudioStageForOrientation(Configuration config) {

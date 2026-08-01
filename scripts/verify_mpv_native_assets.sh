@@ -178,6 +178,8 @@ verify_abi() {
   contains_string "$directory/libmpv.so" "WebHTV stream_cb controls enabled"
   contains_string "$directory/libmpv.so" "Using Vulkan AHardwareBuffer GPU conversion"
   contains_string "$directory/libmpv.so" "AImageReader has no buffer yet"
+  contains_string "$directory/libmpv.so" "Using declared Matroska segment end for seek metadata."
+  contains_string "$directory/libmvformat.so" "WebHTV proxy range offset accepted"
   contains_string "$directory/libmpv.so" "No usable fontconfig configuration file found, using fallback."
   if [ -n "$CURL_VERSION" ]; then
     contains_string "$directory/libmpv.so" "libcurl/$CURL_VERSION"

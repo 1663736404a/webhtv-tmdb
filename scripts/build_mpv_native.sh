@@ -6,6 +6,8 @@ LOCK_FILE="$ROOT/third_party/mpv-native-lock.json"
 OVERRIDE_DIR="$ROOT/third_party/mpv-native-overrides"
 MPV_DISC_PATCH="$ROOT/third_party/patches/mpv-stream-cb-disc-controls.patch"
 MPV_AIMAGE_PATCH="$ROOT/third_party/patches/mpv-aimagereader-transient-buffer.patch"
+MPV_MATROSKA_PATCH="$ROOT/third_party/patches/mpv-matroska-segment-end.patch"
+FFMPEG_PROXY_RANGE_PATCH="$ROOT/third_party/patches/ffmpeg-webhtv-proxy-range.patch"
 WORK_DIR="${MPV_NATIVE_WORK_DIR:-$ROOT/build/mpv-native}"
 ABI="arm64-v8a"
 JOBS="${MPV_NATIVE_JOBS:-}"
@@ -326,6 +328,9 @@ prepare_sources() {
     -r "$deps/mbedtls/scripts/basic.requirements.txt"
   checkout_repo dav1d "$DAV1D_REPO" "$DAV1D_COMMIT" "$deps/dav1d"
   checkout_repo FFmpeg "$FFMPEG_REPO" "$FFMPEG_COMMIT" "$deps/ffmpeg"
+  [ -f "$FFMPEG_PROXY_RANGE_PATCH" ] || die "missing FFmpeg proxy range patch: $FFMPEG_PROXY_RANGE_PATCH"
+  git -C "$deps/ffmpeg" apply --check "$FFMPEG_PROXY_RANGE_PATCH"
+  git -C "$deps/ffmpeg" apply "$FFMPEG_PROXY_RANGE_PATCH"
   checkout_repo Expat "$EXPAT_REPO" "$EXPAT_COMMIT" "$deps/expat"
   checkout_repo FreeType "$FREETYPE2_REPO" "$FREETYPE2_COMMIT" "$deps/freetype2"
   checkout_repo fontconfig "$FONTCONFIG_REPO" "$FONTCONFIG_COMMIT" "$deps/fontconfig"
@@ -367,6 +372,9 @@ prepare_sources() {
   [ -f "$MPV_AIMAGE_PATCH" ] || die "missing MPV AImageReader transient buffer patch: $MPV_AIMAGE_PATCH"
   git -C "$deps/mpv" apply --check --unidiff-zero "$MPV_AIMAGE_PATCH"
   git -C "$deps/mpv" apply --unidiff-zero "$MPV_AIMAGE_PATCH"
+  [ -f "$MPV_MATROSKA_PATCH" ] || die "missing MPV Matroska segment patch: $MPV_MATROSKA_PATCH"
+  git -C "$deps/mpv" apply --check "$MPV_MATROSKA_PATCH"
+  git -C "$deps/mpv" apply "$MPV_MATROSKA_PATCH"
   mkdir -p "$deps/shaderc"
   printf '%s\n' "shaderc is supplied by Android NDK $NDK_VERSION" >"$deps/shaderc/README.webhtv"
 }
@@ -433,13 +441,16 @@ verify_directory() {
   for name in libmvcodec.so libmvdevice.so libmvfilter.so libmvformat.so libmvutil.so libmwresample.so libmwscale.so libvulkan.so; do
     printf '%s\n' "$dynamic" | grep -Fq "Shared library: [$name]" || die "libmpv.so does not depend on $name"
   done
-  local version_strings
+  local version_strings format_strings
   version_strings="$(strings "$directory/libmpv.so")"
+  format_strings="$(strings "$directory/libmvformat.so")"
   grep -Fq "mpv v$MPV_VERSION" <<<"$version_strings" || die "unexpected MPV version in $directory/libmpv.so"
   grep -Fq "v$LIBPLACEBO_VERSION" <<<"$version_strings" || die "unexpected libplacebo version in $directory/libmpv.so"
   grep -Fq "WebHTV stream_cb controls enabled" <<<"$version_strings" || die "MPV stream_cb disc controls patch missing from $directory/libmpv.so"
   grep -Fq "Using Vulkan AHardwareBuffer GPU conversion" <<<"$version_strings" || die "MPV Vulkan MediaCodec interop missing from $directory/libmpv.so"
   grep -Fq "AImageReader has no buffer yet" <<<"$version_strings" || die "MPV AImageReader transient buffer patch missing from $directory/libmpv.so"
+  grep -Fq "Using declared Matroska segment end for seek metadata." <<<"$version_strings" || die "MPV Matroska segment seek patch missing from $directory/libmpv.so"
+  grep -Fq "WebHTV proxy range offset accepted" <<<"$format_strings" || die "FFmpeg proxy range patch missing from $directory/libmvformat.so"
   grep -Fq "No usable fontconfig configuration file found, using fallback." <<<"$version_strings" || die "libass fontconfig provider missing from $directory/libmpv.so"
   if [ "$ENABLE_LIBCURL" -eq 1 ]; then
     grep -Fq "libcurl/$CURL_VERSION" <<<"$version_strings" || die "libcurl $CURL_VERSION missing from $directory/libmpv.so"
