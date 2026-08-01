@@ -70,8 +70,20 @@ public final class PlaybackPerformanceCatalog {
     }
 
     public static List<PlaybackPerformanceOption> forKernel(int kernel) {
+        return forKernel(
+                kernel,
+                PlaybackPerformanceSetting.isRecommendedMerged());
+    }
+
+    static List<PlaybackPerformanceOption> forKernel(
+            int kernel,
+            boolean recommendedMerged) {
         List<PlaybackPerformanceOption> options = new ArrayList<>();
-        options.add(option(PROFILE, BASIC, "性能配置", profileDescription(kernel)));
+        options.add(option(
+                PROFILE,
+                BASIC,
+                "性能配置",
+                profileDescription(kernel, recommendedMerged)));
         if (kernel == PlayerSetting.EXO) addExo(options);
         else if (kernel == PlayerSetting.MPV) addMpv(options);
         else addIjk(options);
@@ -160,8 +172,10 @@ public final class PlaybackPerformanceCatalog {
         options.add(option(PRELOAD_TIME, PRELOAD_SECTION, "预载时间", "怎么选：自动档通常每次10～30秒；外部 loopback 始终最多1线程，只有前台缓冲和系统状态持续安全才保留40秒范围。网络有短时波动可适当提高，流量或磁盘受限则降低；范围越长下载和连接占用越多。"));
     }
 
-    private static String profileDescription(int kernel) {
-        if (PlaybackPerformanceSetting.isRecommendedMerged()) {
+    private static String profileDescription(
+            int kernel,
+            boolean recommendedMerged) {
+        if (recommendedMerged) {
             return switch (kernel) {
                 case PlayerSetting.MPV -> "首选“自动”：电视4K硬解且不需要MPV字幕/LUT/shader/滤镜时自动用低开销电视直出；HLS按可信吞吐保守起步，持续网络风险时逐档重载降码率。“兼容”改用GPU完整＋mediacodec-copy，适合零拷贝异常但4K可能更卡；“轻量”限制HLS至8Mbps并降低缓存，适合低内存/低性能设备。旧均衡档已合并到自动，可在“实验与回退”中恢复。手动改任一项后显示“自定义”。";
                 case PlayerSetting.IJK -> "首选“自动”：按协议采用稳定的点播/直播基线并根据运行反馈有界调整。“兼容”提高水位、探测和画面队列，起播/恢复更慢但更稳；“轻量”降到4MB、快速探测和积极丢帧，省内存但更容易卡顿和损失画面。旧均衡档已合并到自动，可在“实验与回退”中恢复。手动改任一项后显示“自定义”。";
