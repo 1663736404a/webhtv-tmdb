@@ -86,6 +86,22 @@ public class ExoDecoderRuntimeSessionTest {
     }
 
     @Test
+    public void resourceReclaimDoesNotPolluteDecoderRuntimeProfiles() {
+        FakeProfiles profiles = new FakeProfiles();
+        ExoDecoderRuntimeSession session = session(profiles);
+
+        assertFalse(session.recordFatalFailure(
+                evidence("decoder", format(3840, 2160)),
+                PlaybackException.ERROR_CODE_DECODING_RESOURCES_RECLAIMED,
+                ELAPSED + 1,
+                EPOCH));
+        assertFalse(session.prepareRuntimeFallback());
+        assertEquals(0, session.runtimeFallbackCount());
+        assertEquals(0, profiles.failureKeys.size());
+        assertEquals(0, profiles.fallbackResults.size());
+    }
+
+    @Test
     public void firstFrameIsRecordedOnceWithoutMarkingStable() {
         FakeProfiles profiles = new FakeProfiles();
         ExoDecoderRuntimeSession session = session(profiles);

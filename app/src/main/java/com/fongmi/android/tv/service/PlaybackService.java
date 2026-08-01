@@ -316,6 +316,7 @@ public class PlaybackService extends MediaLibraryService implements MediaLibrary
     }
 
     public void setPlaybackForeground(boolean foreground) {
+        if (player != null) player.setPlaybackForeground(foreground);
         if (desktopLyrics != null) desktopLyrics.setForeground(foreground);
     }
 

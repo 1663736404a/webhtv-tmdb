@@ -44,6 +44,7 @@ import com.fongmi.android.tv.player.engine.MpvPlayerEngine;
 import com.fongmi.android.tv.player.engine.PlaySpec;
 import com.fongmi.android.tv.player.engine.PlayerCacheState;
 import com.fongmi.android.tv.player.engine.PlayerEngine;
+import com.fongmi.android.tv.player.exo.ExoDecoderResourceRecoveryLimiter;
 import com.fongmi.android.tv.player.exo.ExoNetworkGuardBufferPolicy;
 import com.fongmi.android.tv.player.exo.ExoNetworkGuardController;
 import com.fongmi.android.tv.player.exo.ExoNetworkGuardEligibility;
@@ -131,6 +132,7 @@ public class PlayerManager implements ParseCallback {
     private static final long HARD_DECODE_SWITCH_RETRY_DELAY_MS = 1200;
     private static final long EXO_TUNNELING_RETRY_DELAY_MS = 250;
     private static final long EXO_DECODER_RUNTIME_RETRY_DELAY_MS = 1200;
+    private static final long EXO_DECODER_RESOURCE_RECOVERY_DELAY_MS = 500;
     private static final long MPV_AUTO_OUTPUT_PROBE_INTERVAL_MS = 250;
     private static final int LOCAL_PROXY_MAX_RETRY = 2;
     private static final int MPV_AUTO_OUTPUT_PROBE_MAX_ATTEMPTS = 20;
@@ -157,6 +159,8 @@ public class PlayerManager implements ParseCallback {
     private final PlaybackProfileAbCoordinator
             playbackLightweightAssessmentCoordinator;
     private final PlaybackMediaFactsCoordinator playbackMediaFactsCoordinator;
+    private final ExoDecoderResourceRecoveryLimiter
+            exoDecoderResourceRecoveryLimiter;
     private final ExoNetworkGuardController networkProtectionController;
     private final ExoNetworkRescueLimiter networkProtectionLimiter;
     private final ExoRtspLiveLagController rtspLiveLagController;
@@ -195,6 +199,7 @@ public class PlayerManager implements ParseCallback {
     private IjkBufferController.Decision pendingIjkBufferDecision;
     private IjkDecodePressureController.Decision pendingIjkDecodePressureDecision;
     private IjkRealtimeRecoveryPolicy.Decision pendingIjkRealtimeRecoveryDecision;
+    private ExoDecoderResourceRecovery pendingExoDecoderResourceRecovery;
     private PlaybackAutoContext.SessionToken playbackAutoSession = PlaybackAutoContext.SessionToken.none();
     private long playbackTrackSequence;
     private long danmakuLoadStartedAtMs;
@@ -235,6 +240,8 @@ public class PlayerManager implements ParseCallback {
     private boolean ijkRuntimeTemporaryFallback;
     private boolean ijkRuntimeManualOverride;
     private boolean pendingIjkRuntimeFallbackReparse;
+    private boolean playbackForeground;
+    private boolean exoDecoderResourceRecoveryInProgress;
     private int playerType;
     private int retry;
     private int localProxyRetry;
@@ -273,6 +280,8 @@ public class PlayerManager implements ParseCallback {
         this.playbackLightweightAssessmentCoordinator =
                 PlaybackLightweightAssessmentSetting.coordinator();
         this.playbackMediaFactsCoordinator = new PlaybackMediaFactsCoordinator(playbackAutoContextStore);
+        this.exoDecoderResourceRecoveryLimiter =
+                new ExoDecoderResourceRecoveryLimiter();
         this.networkProtectionController = new ExoNetworkGuardController();
         this.networkProtectionLimiter = new ExoNetworkRescueLimiter();
         this.rtspLiveLagController = new ExoRtspLiveLagController();
@@ -319,6 +328,7 @@ public class PlayerManager implements ParseCallback {
         lutApplySeq++;
         resetNetworkProtectionSession("release");
         networkProtectionLimiter.reset();
+        clearExoDecoderResourceRecovery(true);
         player.removeListener(listener);
         App.removeCallbacks(runnable);
         App.removeCallbacks(networkProtectionRunnable);
@@ -878,6 +888,14 @@ public class PlayerManager implements ParseCallback {
         }
     }
 
+    public void setPlaybackForeground(boolean foreground) {
+        playbackForeground = foreground;
+        if (!foreground || pendingExoDecoderResourceRecovery == null) return;
+        ExoDecoderResourceRecovery recovery = pendingExoDecoderResourceRecovery;
+        pendingExoDecoderResourceRecovery = null;
+        scheduleExoDecoderResourceRecovery(recovery, "foreground");
+    }
+
     public void sendDanmaku(String text) {
         if (danmakuController != null) danmakuController.sendNow(text);
     }
@@ -1311,6 +1329,7 @@ public class PlayerManager implements ParseCallback {
     public void clear() {
         prepareSeq++;
         lutApplySeq++;
+        clearExoDecoderResourceRecovery(true);
         resetNetworkProtectionSession("clear");
         resetMpvOutputRuntime();
         spec = null;
@@ -5666,6 +5685,7 @@ public class PlayerManager implements ParseCallback {
             endPlaybackTelemetrySession("replace-" + reason);
         }
         playbackBufferingTracker.reset();
+        clearExoDecoderResourceRecovery(true);
         lastIjkTimelinePublicationKey = null;
         playbackTrace.begin();
         long now = SystemClock.elapsedRealtime();
@@ -7021,6 +7041,7 @@ public class PlayerManager implements ParseCallback {
         public void onPlayerError(@NonNull PlaybackException e) {
             App.removeCallbacks(runnable);
             App.removeCallbacks(networkProtectionRunnable);
+            if (handleExoDecoderResourcesReclaimed(e)) return;
             completeIjkBufferManagedReload(
                     false, "playback-error",
                     SystemClock.elapsedRealtime(), true);
@@ -7074,6 +7095,16 @@ public class PlayerManager implements ParseCallback {
             boolean dynamic) {
     }
 
+    private record ExoDecoderResourceRecovery(
+            PlaySpec target,
+            long positionMs,
+            float speed,
+            boolean repeat,
+            boolean playWhenReady,
+            long textOffsetMs,
+            long audioOffsetMs) {
+    }
+
     private PlaybackRoute.Resolution getEffectivePlaybackRoute() {
         PlaybackRoute.Resolution route = engine == null ? null : engine.getEffectivePlaybackRoute();
         if (route != null && route.route() != PlaybackRoute.OTHER) return route;
@@ -7095,6 +7126,161 @@ public class PlayerManager implements ParseCallback {
             case DRM -> ResUtil.getString(R.string.error_play_stage_drm);
             case UNKNOWN -> ResUtil.getString(R.string.error_play_stage_unknown);
         };
+    }
+
+    private boolean handleExoDecoderResourcesReclaimed(
+            PlaybackException error) {
+        if (error.errorCode
+                != PlaybackException.ERROR_CODE_DECODING_RESOURCES_RECLAIMED) {
+            return false;
+        }
+        if (pendingExoDecoderResourceRecovery != null
+                || exoDecoderResourceRecoveryInProgress) {
+            PlaybackTrace.log(
+                    "exo-decoder-resource",
+                    playbackTrace.current(),
+                    "action=suppress-duplicate pending=%s inProgress=%s",
+                    pendingExoDecoderResourceRecovery != null,
+                    exoDecoderResourceRecoveryInProgress);
+            return true;
+        }
+        ExoDecoderResourceRecovery recovery =
+                captureExoDecoderResourceRecovery();
+        ExoDecoderResourceRecoveryLimiter.Action action =
+                exoDecoderResourceRecoveryLimiter.request(
+                        error.errorCode,
+                        engine instanceof ExoPlayerEngine,
+                        engine != null && player != null,
+                        recovery != null,
+                        playbackForeground);
+        if (action
+                == ExoDecoderResourceRecoveryLimiter.Action.DEFER_UNTIL_FOREGROUND) {
+            hardDecodeSwitchRetryArmed = false;
+            pendingExoDecoderResourceRecovery = recovery;
+            App.removeCallbacks(playbackTelemetryRunnable);
+            resetNetworkProtectionSession("exo-resource-reclaimed-deferred");
+            PlaybackTrace.log(
+                    "exo-decoder-resource",
+                    playbackTrace.current(),
+                    "action=defer position=%d play=%s",
+                    recovery.positionMs(),
+                    recovery.playWhenReady());
+            return true;
+        }
+        if (action
+                != ExoDecoderResourceRecoveryLimiter.Action.RECOVER_NOW) {
+            PlaybackTrace.log(
+                    "exo-decoder-resource",
+                    playbackTrace.current(),
+                    "action=pass-through reason=%s",
+                    action);
+            return false;
+        }
+        hardDecodeSwitchRetryArmed = false;
+        scheduleExoDecoderResourceRecovery(recovery, "foreground-error");
+        return true;
+    }
+
+    @Nullable
+    private ExoDecoderResourceRecovery captureExoDecoderResourceRecovery() {
+        if (!(engine instanceof ExoPlayerEngine)
+                || player == null
+                || spec == null
+                || spec.getUrl() == null) {
+            return null;
+        }
+        return new ExoDecoderResourceRecovery(
+                spec,
+                Math.max(0, getPosition()),
+                getSpeed(),
+                isRepeatOne(),
+                player.getPlayWhenReady(),
+                getTextOffsetMs(),
+                getAudioOffsetMs());
+    }
+
+    private void scheduleExoDecoderResourceRecovery(
+            ExoDecoderResourceRecovery recovery,
+            String reason) {
+        if (recovery == null) return;
+        if (!playbackForeground) {
+            pendingExoDecoderResourceRecovery = recovery;
+            PlaybackTrace.log(
+                    "exo-decoder-resource",
+                    playbackTrace.current(),
+                    "action=defer-before-rebuild reason=%s",
+                    reason);
+            return;
+        }
+        if (!(engine instanceof ExoPlayerEngine exo)
+                || player == null
+                || spec != recovery.target()) {
+            return;
+        }
+        exoDecoderResourceRecoveryInProgress = true;
+        int seq = ++prepareSeq;
+        App.removeCallbacks(runnable);
+        App.removeCallbacks(networkProtectionRunnable);
+        App.removeCallbacks(playbackTelemetryRunnable);
+        resetNetworkProtectionSession("exo-resource-reclaimed");
+        rebuildPlayer(true);
+        this.playWhenReady = recovery.playWhenReady();
+        initTrack = false;
+        PlaybackTrace.log(
+                "exo-decoder-resource",
+                playbackTrace.current(),
+                "action=rebuild delay=%d position=%d play=%s reason=%s",
+                EXO_DECODER_RESOURCE_RECOVERY_DELAY_MS,
+                recovery.positionMs(),
+                recovery.playWhenReady(),
+                reason);
+        App.post(() -> {
+            if (seq != prepareSeq
+                    || spec != recovery.target()
+                    || engine != exo
+                    || player == null) {
+                exoDecoderResourceRecoveryInProgress = false;
+                return;
+            }
+            if (!playbackForeground) {
+                pendingExoDecoderResourceRecovery = recovery;
+                exoDecoderResourceRecoveryInProgress = false;
+                PlaybackTrace.log(
+                        "exo-decoder-resource",
+                        playbackTrace.current(),
+                        "action=defer-before-prepare");
+                return;
+            }
+            try {
+                setDanmakus(recovery.target().getDanmakus());
+                waitingLutBeforePlay = false;
+                applySubtitleStyle();
+                engine.start(
+                        recovery.target().checkUa(),
+                        recovery.positionMs(),
+                        recovery.playWhenReady());
+                setSpeed(recovery.speed());
+                setRepeatOne(recovery.repeat());
+                setTextOffsetMs(recovery.textOffsetMs());
+                setAudioOffsetMs(recovery.audioOffsetMs());
+                App.post(runnable, Constant.TIMEOUT_PLAY);
+                callback.onPrepare();
+                PlaybackTrace.log(
+                        "exo-decoder-resource",
+                        playbackTrace.current(),
+                        "action=prepare position=%d play=%s",
+                        recovery.positionMs(),
+                        recovery.playWhenReady());
+            } finally {
+                exoDecoderResourceRecoveryInProgress = false;
+            }
+        }, EXO_DECODER_RESOURCE_RECOVERY_DELAY_MS);
+    }
+
+    private void clearExoDecoderResourceRecovery(boolean resetBudget) {
+        pendingExoDecoderResourceRecovery = null;
+        exoDecoderResourceRecoveryInProgress = false;
+        if (resetBudget) exoDecoderResourceRecoveryLimiter.reset();
     }
 
     private boolean retryHardDecodeSwitch(PlaybackException e) {
