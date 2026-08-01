@@ -831,6 +831,8 @@
     <string name="player_performance_advanced_show">%1$d items hidden · Show</string>
     <string name="player_performance_advanced_hide">%1$d items shown · Hide</string>
     <string name="player_performance_experiment_section">Experiments and rollback</string>
+    <string name="player_performance_experiment_advanced_section">Advanced experiment controls</string>
+    <string name="player_performance_experiment_scope">%1$s experiment scope</string>
     <string name="player_performance_experiment_strategy">Strategy</string>
     <string name="player_performance_experiment_stable">Stable v1</string>
     <string name="player_performance_experiment_enabled">Experimental v1</string>
@@ -840,9 +842,6 @@
     <string name="player_performance_experiment_on">Enabled</string>
     <string name="player_performance_experiment_off">Disabled</string>
     <string name="player_performance_experiment_standby">Standby</string>
-    <string name="player_performance_experiment_rollback">Return to stable strategy</string>
-    <string name="player_performance_experiment_rollback_ready">Stops experimental actions</string>
-    <string name="player_performance_experiment_rollback_done">Already stable</string>
     <string name="player_performance_experiment_enable_title">Enable playback experiments?</string>
     <string name="player_performance_experiment_enable_message">This enables gated preload, reload, rebuild, quality and kernel fallback actions for the selected engines, plus an explicitly enrolled EXO frame scheduling unit. Temporary VOD speed rescue still requires separate consent. Safety protections remain enabled in either mode.</string>
     <string name="player_performance_experiment_enable_confirm">Enable experiments</string>
@@ -855,16 +854,7 @@
     <string name="player_performance_experiment_rollback_message">New experimental actions will stop, queued work will be invalidated, active experimental preload will be cancelled and temporary playback speed will be restored. The next EXO playback returns to the 50 ms frame scheduling baseline without interrupting the current playback. User parameters and learned profiles will not be cleared.</string>
     <string name="player_performance_experiment_rollback_confirm">Return to stable</string>
     <string name="player_performance_experiment_help">Stable mode is the default. Memory and disk safety protections and read-only telemetry always remain active. Experimental mode only gates actions that may actively preload, reload, rebuild, change temporary speed or quality, or switch kernels. EXO, MPV and IJK can be isolated, and one-tap rollback does not erase manual playback parameters.</string>
-    <string name="player_performance_experiment_domain_help">%1$s authorization controls active preload, reload, rebuild or rollback actions only for this engine. Its state is preserved when you switch engines; use Manage all engine experiments to adjust the other engines.</string>
-    <string name="player_performance_all_kernel_experiments">Manage all engine experiments</string>
-    <string name="player_performance_all_kernel_active">%1$d/%2$d engines enabled</string>
-    <string name="player_performance_all_kernel_standby">%1$d/%2$d engines standing by</string>
-    <string name="player_performance_all_kernel_experiments_title">Engine experiment authorization</string>
-    <string name="player_performance_all_kernel_experiments_help">Authorization is stored on this device. Select an engine to toggle it. Experimental actions run only when both the global experiment strategy and that engine’s authorization are enabled.</string>
-    <string name="player_performance_evaluation_tools">Profiles and assessment</string>
-    <string name="player_performance_evaluation_tools_help">Contains profile migration rollback and on-device acceptance reports. These are not everyday playback parameters and never switch or delete a profile automatically.</string>
-    <string name="player_performance_evaluation_show">%1$d tools hidden · Show</string>
-    <string name="player_performance_evaluation_hide">%1$d tools shown · Hide</string>
+    <string name="player_performance_experiment_domain_help">%1$s experiment scope controls active preload, reload, rebuild or rollback actions only for the current engine. It takes effect only with the Experimental strategy; switch player engines to configure each engine separately.</string>
     <string name="player_performance_experiment_exo_frame_scheduling">EXO frame scheduling A/B</string>
     <string name="player_performance_experiment_exo_frame_not_enrolled">Not enrolled</string>
     <string name="player_performance_experiment_exo_frame_invalid">Invalid or stale assignment</string>

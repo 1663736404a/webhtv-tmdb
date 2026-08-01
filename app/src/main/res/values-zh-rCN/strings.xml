@@ -829,6 +829,8 @@
     <string name="player_performance_advanced_show">已隐藏 %1$d 项 · 点击展开</string>
     <string name="player_performance_advanced_hide">已展开 %1$d 项 · 点击收起</string>
     <string name="player_performance_experiment_section">实验与回退</string>
+    <string name="player_performance_experiment_advanced_section">实验高级项</string>
+    <string name="player_performance_experiment_scope">%1$s 实验范围</string>
     <string name="player_performance_experiment_strategy">策略</string>
     <string name="player_performance_experiment_stable">稳定策略 v1</string>
     <string name="player_performance_experiment_enabled">实验策略 v1</string>
@@ -838,9 +840,6 @@
     <string name="player_performance_experiment_on">启用</string>
     <string name="player_performance_experiment_off">关闭</string>
     <string name="player_performance_experiment_standby">待命</string>
-    <string name="player_performance_experiment_rollback">一键回退到稳定策略</string>
-    <string name="player_performance_experiment_rollback_ready">停止实验动作</string>
-    <string name="player_performance_experiment_rollback_done">当前已稳定</string>
     <string name="player_performance_experiment_enable_title">启用播放实验？</string>
     <string name="player_performance_experiment_enable_message">将允许所选内核执行受门控的主动预载、重载、重建、画质调整和跨内核回退，并允许本机明确加入的 EXO 帧调度实验单元生效。VOD 临时改速救援仍需单独确认。无论是否启用，安全保护都会保持生效。</string>
     <string name="player_performance_experiment_enable_confirm">启用实验</string>
@@ -853,16 +852,7 @@
     <string name="player_performance_experiment_rollback_message">将停止后续实验动作，使排队任务失效，取消实验预载并恢复实验产生的临时播放速度；下一次 EXO 播放恢复 50ms 帧调度基线，不打断当前播放，也不会清空用户参数或学习档案。</string>
     <string name="player_performance_experiment_rollback_confirm">回退到稳定策略</string>
     <string name="player_performance_experiment_help">默认使用稳定策略。内存、磁盘安全保护和只读遥测始终生效；实验策略只控制可能主动预载、重载、重建、临时改速或降画质、跨内核切换的动作。可按 EXO、MPV、IJK 分域隔离，一键回退不会清除手动播放参数。</string>
-    <string name="player_performance_experiment_domain_help">%1$s 实验授权只控制当前内核的主动预载、重载、重建或回退动作；切换内核后授权状态仍会保留，其他内核可在“管理全部内核实验”中调整。</string>
-    <string name="player_performance_all_kernel_experiments">管理全部内核实验</string>
-    <string name="player_performance_all_kernel_active">%1$d/%2$d 个内核启用</string>
-    <string name="player_performance_all_kernel_standby">%1$d/%2$d 个内核待命</string>
-    <string name="player_performance_all_kernel_experiments_title">内核实验授权</string>
-    <string name="player_performance_all_kernel_experiments_help">授权按设备保存。点击某个内核可切换状态；只有实验总开关和该内核授权同时开启时，相关实验动作才会执行。</string>
-    <string name="player_performance_evaluation_tools">档位与评估</string>
-    <string name="player_performance_evaluation_tools_help">包含档位迁移回滚和本机验收报告，不是日常播放参数，不会自动切档或删除档位。</string>
-    <string name="player_performance_evaluation_show">已隐藏 %1$d 项 · 点击展开</string>
-    <string name="player_performance_evaluation_hide">已展开 %1$d 项 · 点击收起</string>
+    <string name="player_performance_experiment_domain_help">%1$s 实验范围只控制当前内核的主动预载、重载、重建或回退动作，必须与“实验策略”同时启用才会生效；切换播放器内核后可分别设置。</string>
     <string name="player_performance_experiment_exo_frame_scheduling">EXO 帧调度 A/B</string>
     <string name="player_performance_experiment_exo_frame_not_enrolled">未加入实验</string>
     <string name="player_performance_experiment_exo_frame_invalid">分组损坏或已过期</string>

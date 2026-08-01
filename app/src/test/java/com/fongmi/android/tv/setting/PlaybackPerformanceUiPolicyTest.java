@@ -98,6 +98,27 @@ public class PlaybackPerformanceUiPolicyTest {
                 .showsExoFrameScheduling(PlayerSetting.MPV));
         assertFalse(PlaybackPerformanceUiPolicy
                 .showsExoFrameScheduling(PlayerSetting.IJK));
+        assertEquals(2, PlaybackPerformanceUiPolicy
+                .advancedExperimentControlCount(PlayerSetting.EXO));
+        assertEquals(1, PlaybackPerformanceUiPolicy
+                .advancedExperimentControlCount(PlayerSetting.MPV));
+        assertEquals(1, PlaybackPerformanceUiPolicy
+                .advancedExperimentControlCount(PlayerSetting.IJK));
+
+        PlaybackExperimentPolicy.State stable =
+                PlaybackExperimentPolicy.State.stable();
+        PlaybackExperimentPolicy.State exoActive =
+                new PlaybackExperimentPolicy.State(1, true,
+                        true, false, false);
+        assertEquals(PlaybackPerformanceUiPolicy.ExperimentStatus.STABLE,
+                PlaybackPerformanceUiPolicy.experimentStatus(
+                        stable, PlayerSetting.EXO));
+        assertEquals(PlaybackPerformanceUiPolicy.ExperimentStatus.ACTIVE,
+                PlaybackPerformanceUiPolicy.experimentStatus(
+                        exoActive, PlayerSetting.EXO));
+        assertEquals(PlaybackPerformanceUiPolicy.ExperimentStatus.STANDBY,
+                PlaybackPerformanceUiPolicy.experimentStatus(
+                        exoActive, PlayerSetting.MPV));
     }
 
     private static Set<String> ids(

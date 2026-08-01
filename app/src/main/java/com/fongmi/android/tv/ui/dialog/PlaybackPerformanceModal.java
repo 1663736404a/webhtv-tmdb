@@ -20,7 +20,6 @@ import com.fongmi.android.tv.utils.Util;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.textview.MaterialTextView;
 
-import java.util.List;
 import java.util.function.IntConsumer;
 
 /** Programmatic modal surfaces shared by playback performance settings. */
@@ -54,25 +53,6 @@ final class PlaybackPerformanceModal {
         return shell.dialog();
     }
 
-    static Dialog report(
-            Context context,
-            CharSequence title,
-            CharSequence message,
-            CharSequence closeLabel,
-            CharSequence actionLabel,
-            Runnable action) {
-        Shell shell = createShell(context, title);
-        addMessage(context, shell.body(), message);
-        if (actionLabel != null && action != null) {
-            addFooterButton(shell, actionLabel, false, () -> {
-                shell.dialog().dismiss();
-                action.run();
-            });
-        }
-        addFooterButton(shell, closeLabel, true, shell.dialog()::dismiss);
-        return shell.dialog();
-    }
-
     static Dialog choices(
             Context context,
             CharSequence title,
@@ -92,30 +72,6 @@ final class PlaybackPerformanceModal {
                             shell.dialog().dismiss();
                             if (onSelected != null) onSelected.accept(choice);
                         });
-            }
-        }
-        return shell.dialog();
-    }
-
-    static Dialog actions(
-            Context context,
-            CharSequence title,
-            CharSequence message,
-            List<ActionItem> items) {
-        Shell shell = createShell(context, title);
-        if (message != null && message.length() > 0) {
-            addMessage(context, shell.body(), message);
-        }
-        if (items != null) {
-            for (ActionItem item : items) {
-                if (item == null) continue;
-                String text = item.value() == null || item.value().isBlank()
-                        ? item.label()
-                        : item.label() + "    " + item.value();
-                addListButton(context, shell.body(), text, false, () -> {
-                    shell.dialog().dismiss();
-                    if (item.action() != null) item.action().run();
-                });
             }
         }
         return shell.dialog();
@@ -376,9 +332,6 @@ final class PlaybackPerformanceModal {
                     maxHeight, MeasureSpec.AT_MOST);
             super.onMeasure(widthMeasureSpec, cappedHeight);
         }
-    }
-
-    record ActionItem(String label, String value, Runnable action) {
     }
 
     private record Shell(

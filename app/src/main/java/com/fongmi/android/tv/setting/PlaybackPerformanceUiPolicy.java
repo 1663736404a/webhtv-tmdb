@@ -73,12 +73,43 @@ public final class PlaybackPerformanceUiPolicy {
         return kernel == PlayerSetting.EXO;
     }
 
+    public static int advancedExperimentControlCount(int kernel) {
+        return showsExoFrameScheduling(kernel) ? 2 : 1;
+    }
+
+    public static ExperimentStatus experimentStatus(
+            PlaybackExperimentPolicy.State state,
+            int kernel) {
+        if (state == null || !state.enabled()) return ExperimentStatus.STABLE;
+        return domainSelected(state, experimentDomain(kernel))
+                ? ExperimentStatus.ACTIVE
+                : ExperimentStatus.STANDBY;
+    }
+
+    public static boolean domainSelected(
+            PlaybackExperimentPolicy.State state,
+            PlaybackExperimentPolicy.Domain domain) {
+        if (state == null || domain == null) return false;
+        return switch (domain) {
+            case EXO -> state.exoEnabled();
+            case MPV -> state.mpvEnabled();
+            case IJK -> state.ijkEnabled();
+            case SHARED -> true;
+        };
+    }
+
     private static Set<String> commonIds(int kernel) {
         return switch (kernel) {
             case PlayerSetting.MPV -> MPV_COMMON;
             case PlayerSetting.IJK -> IJK_COMMON;
             default -> EXO_COMMON;
         };
+    }
+
+    public enum ExperimentStatus {
+        STABLE,
+        STANDBY,
+        ACTIVE
     }
 
     public record Split(

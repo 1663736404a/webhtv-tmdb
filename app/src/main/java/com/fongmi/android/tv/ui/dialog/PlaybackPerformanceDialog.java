@@ -25,15 +25,8 @@ import androidx.fragment.app.FragmentActivity;
 import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.App;
 import com.fongmi.android.tv.event.ConfigEvent;
-import com.fongmi.android.tv.player.PlaybackAutoContext;
-import com.fongmi.android.tv.player.PlaybackCompatibilityRetentionPolicy;
 import com.fongmi.android.tv.player.PlaybackExperimentCoordinator;
 import com.fongmi.android.tv.player.PlaybackExperimentPolicy;
-import com.fongmi.android.tv.player.PlaybackLightweightAssessmentPolicy;
-import com.fongmi.android.tv.player.PlaybackProfileAbAcceptancePolicy;
-import com.fongmi.android.tv.player.PlaybackProfileAbCoordinator;
-import com.fongmi.android.tv.player.PlaybackProfileAbIdentity;
-import com.fongmi.android.tv.player.PlaybackProfileAbPolicy;
 import com.fongmi.android.tv.player.exo.ExoFrameSchedulingExperimentPolicy;
 import com.fongmi.android.tv.player.exo.ExoNetworkProtectionPolicy;
 import com.fongmi.android.tv.setting.PlaybackPerformanceCatalog;
@@ -41,9 +34,7 @@ import com.fongmi.android.tv.setting.PlaybackPerformanceOption;
 import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
 import com.fongmi.android.tv.setting.PlaybackPerformanceUiPolicy;
 import com.fongmi.android.tv.setting.PlaybackProfileMergePolicy;
-import com.fongmi.android.tv.setting.PlaybackProfileAbSetting;
 import com.fongmi.android.tv.setting.PlaybackExperimentSetting;
-import com.fongmi.android.tv.setting.PlaybackLightweightAssessmentSetting;
 import com.fongmi.android.tv.setting.ExoFrameSchedulingExperimentSetting;
 import com.fongmi.android.tv.setting.MpvPerformanceSetting;
 import com.fongmi.android.tv.setting.IjkPerformanceSetting;
@@ -57,9 +48,6 @@ import com.google.android.material.button.MaterialButton;
 import com.google.android.material.tabs.TabLayout;
 import com.google.android.material.textview.MaterialTextView;
 
-import java.util.ArrayList;
-import java.util.List;
-
 import is.xyz.mpv.MPVLib;
 
 public final class PlaybackPerformanceDialog extends DialogFragment {
@@ -71,7 +59,6 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
     private TabLayout profileTabs;
     private boolean syncingProfileTabs;
     private boolean showAdvancedParameters;
-    private boolean showEvaluationTools;
 
     public static void show(Fragment fragment, Runnable callback) {
         PlaybackPerformanceDialog dialog = new PlaybackPerformanceDialog();
@@ -125,12 +112,6 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
         title.setTextSize(18);
         title.setGravity(Gravity.CENTER_VERTICAL);
         titleBar.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-
-        MaterialButton reset = actionButton(R.string.dialog_reset, view -> reset());
-        reset.setTextSize(13);
-        LinearLayout.LayoutParams resetParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(36));
-        resetParams.leftMargin = dp(8);
-        titleBar.addView(reset, resetParams);
 
         MaterialButton help = actionButton(R.string.player_performance_help, view -> showHelpDialog());
         help.setTextSize(13);
@@ -205,14 +186,9 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
         addHelpItem(content,
                 getString(R.string.player_performance_experiment_strategy),
                 getString(R.string.player_performance_experiment_help));
-        addHelpItem(content, getString(currentExperimentLabel()),
+        addHelpItem(content, currentExperimentScopeLabel(),
                 getString(R.string.player_performance_experiment_domain_help,
                         playerName()));
-        addHelpItem(content,
-                getString(R.string
-                        .player_performance_all_kernel_experiments),
-                getString(R.string
-                        .player_performance_all_kernel_experiments_help));
         if (PlaybackPerformanceUiPolicy.showsExoFrameScheduling(
                 PlayerSetting.getPlayer())) {
             addHelpItem(content,
@@ -220,33 +196,6 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                             .player_performance_experiment_exo_frame_scheduling),
                     getString(R.string
                             .player_performance_experiment_exo_frame_help));
-        }
-        addHelpItem(content,
-                getString(R.string.player_performance_evaluation_tools),
-                getString(R.string.player_performance_evaluation_tools_help));
-        addHelpItem(content,
-                getString(R.string.player_performance_experiment_rollback),
-                getString(R.string
-                        .player_performance_experiment_rollback_message));
-        addHelpItem(content,
-                getString(R.string.player_performance_profile_merge),
-                getString(R.string.player_performance_profile_merge_help));
-        addHelpItem(content,
-                getString(R.string
-                        .player_performance_lightweight_assessment_collection),
-                getString(R.string
-                        .player_performance_lightweight_assessment_help));
-        addHelpItem(content,
-                getString(R.string
-                        .player_performance_compatibility_assessment),
-                getString(R.string
-                        .player_performance_compatibility_assessment_help));
-        if (!PlaybackPerformanceSetting.isRecommendedMerged()) {
-            addHelpItem(content,
-                    getString(R.string
-                            .player_performance_experiment_profile_ab_collection),
-                    getString(R.string
-                            .player_performance_experiment_profile_ab_help));
         }
         if (split.profile() != null) {
             addHelpSection(content,
@@ -404,11 +353,6 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
         refresh();
     }
 
-    private void reset() {
-        PlaybackPerformanceSetting.applyAuto();
-        refresh();
-    }
-
     private void refresh() {
         refreshRows();
         syncProfileTabs();
@@ -528,12 +472,16 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                 getString(showAdvancedParameters
                                 ? R.string.player_performance_advanced_hide
                                 : R.string.player_performance_advanced_show,
-                        split.advanced().size()),
+                        split.advanced().size()
+                                + PlaybackPerformanceUiPolicy
+                                        .advancedExperimentControlCount(
+                                                PlayerSetting.getPlayer())),
                 () -> {
                     showAdvancedParameters = !showAdvancedParameters;
                     refreshRows();
                 });
         if (!showAdvancedParameters) return;
+        addAdvancedExperimentRows();
         String section = "";
         for (PlaybackPerformanceOption option : split.advanced()) {
             if (!section.equals(option.section())) {
@@ -550,15 +498,21 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
         addHeader(getString(R.string.player_performance_experiment_section));
         addRow(
                 getString(R.string.player_performance_experiment_strategy),
-                getString(state.enabled()
-                        ? R.string.player_performance_experiment_enabled
-                        : R.string.player_performance_experiment_stable),
+                experimentStrategyValue(state),
                 this::toggleExperimentStrategy);
+    }
+
+    private void addAdvancedExperimentRows() {
+        PlaybackExperimentPolicy.State state =
+                PlaybackExperimentSetting.getState();
+        addHeader(getString(R.string
+                .player_performance_experiment_advanced_section));
         PlaybackExperimentPolicy.Domain currentDomain = currentExperimentDomain();
         addExperimentDomainRow(
-                currentExperimentLabel(),
+                currentExperimentScopeLabel(),
                 currentDomain,
-                domainSelected(state, currentDomain),
+                PlaybackPerformanceUiPolicy.domainSelected(
+                        state, currentDomain),
                 state.enabled());
         if (PlaybackPerformanceUiPolicy.showsExoFrameScheduling(
                 PlayerSetting.getPlayer())) {
@@ -568,95 +522,17 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                     frameSchedulingExperimentValue(),
                     this::showFrameSchedulingExperimentDialog);
         }
-        addRow(
-                getString(R.string
-                        .player_performance_all_kernel_experiments),
-                allKernelExperimentValue(state),
-                this::showAllKernelExperimentDialog);
-        addRow(
-                getString(R.string.player_performance_evaluation_tools),
-                getString(showEvaluationTools
-                                ? R.string.player_performance_evaluation_hide
-                                : R.string.player_performance_evaluation_show,
-                        evaluationToolCount()),
-                () -> {
-                    showEvaluationTools = !showEvaluationTools;
-                    refreshRows();
-                });
-        if (showEvaluationTools) addEvaluationRows();
-        addRow(
-                getString(R.string.player_performance_experiment_rollback),
-                getString(state.enabled()
-                        ? R.string.player_performance_experiment_rollback_ready
-                        : R.string.player_performance_experiment_rollback_done),
-                state.enabled() ? this::confirmExperimentRollback : null);
     }
 
-    private void addEvaluationRows() {
-        boolean recommendedMerged =
-                PlaybackPerformanceSetting.isRecommendedMerged();
-        addRow(
-                getString(R.string.player_performance_profile_merge),
-                getString(recommendedMerged
-                        ? R.string.player_performance_profile_merge_enabled
-                        : R.string.player_performance_profile_merge_rolled_back),
-                PlaybackPerformanceSetting.canChangeRecommendedMerge()
-                        ? this::toggleRecommendedProfileMerge : null);
-        if (!recommendedMerged) {
-            addRow(
-                    getString(R.string
-                            .player_performance_experiment_profile_ab_collection),
-                    profileAbEnrollmentValue(),
-                    profileAbEnrollmentMutable()
-                            ? this::toggleProfileAbEnrollment : null);
-        }
-        addRow(
-                getString(R.string
-                        .player_performance_experiment_profile_ab_report),
-                profileAbReportValue(),
-                this::showProfileAbReportDialog);
-        addRow(
-                getString(R.string
-                        .player_performance_lightweight_assessment_collection),
-                lightweightAssessmentEnrollmentValue(),
-                lightweightAssessmentEnrollmentMutable()
-                        ? this::toggleLightweightAssessmentEnrollment : null);
-        addRow(
-                getString(R.string
-                        .player_performance_lightweight_assessment_report),
-                lightweightAssessmentReportValue(),
-                this::showLightweightAssessmentReportDialog);
-        addRow(
-                getString(R.string
-                        .player_performance_compatibility_assessment),
-                compatibilityAssessmentValue(),
-                this::showCompatibilityAssessmentDialog);
-    }
-
-    private int evaluationToolCount() {
-        return PlaybackPerformanceSetting.isRecommendedMerged() ? 5 : 6;
-    }
-
-    private String allKernelExperimentValue(
+    private String experimentStrategyValue(
             PlaybackExperimentPolicy.State state) {
-        int selected = (state.exoEnabled() ? 1 : 0)
-                + (state.mpvEnabled() ? 1 : 0)
-                + (state.ijkEnabled() ? 1 : 0);
-        return getString(state.enabled()
-                        ? R.string.player_performance_all_kernel_active
-                        : R.string.player_performance_all_kernel_standby,
-                selected, 3);
-    }
-
-    private boolean domainSelected(
-            PlaybackExperimentPolicy.State state,
-            PlaybackExperimentPolicy.Domain domain) {
-        return switch (domain) {
-            case EXO -> state.exoEnabled();
-            case MPV -> state.mpvEnabled();
-            case IJK -> state.ijkEnabled();
-            case SHARED -> true;
+        int value = switch (PlaybackPerformanceUiPolicy.experimentStatus(
+                state, PlayerSetting.getPlayer())) {
+            case ACTIVE -> R.string.player_performance_experiment_enabled;
+            case STANDBY -> R.string.player_performance_experiment_standby;
+            case STABLE -> R.string.player_performance_experiment_stable;
         };
+        return getString(value);
     }
 
     private String frameSchedulingExperimentValue() {
@@ -724,476 +600,8 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                 }));
     }
 
-    private String profileAbEnrollmentValue() {
-        PlaybackProfileAbPolicy.EnrollmentResolution resolution =
-                PlaybackProfileAbSetting.getEnrollmentResolution();
-        if (resolution.status()
-                == PlaybackProfileAbPolicy.EnrollmentStatus.NOT_ENROLLED) {
-            return getString(
-                    R.string.player_performance_experiment_off);
-        }
-        if (!resolution.active()) {
-            return getString(R.string
-                    .player_performance_experiment_profile_ab_invalid);
-        }
-        return getString(profileAbGateOpenForCurrentKernel()
-                ? R.string.player_performance_experiment_on
-                : R.string.player_performance_experiment_standby);
-    }
-
-    private void toggleRecommendedProfileMerge() {
-        boolean merged = PlaybackPerformanceSetting.isRecommendedMerged();
-        showConfirmDialog(
-                merged
-                        ? R.string.player_performance_profile_merge_rollback_title
-                        : R.string.player_performance_profile_merge_enable_title,
-                merged
-                        ? R.string.player_performance_profile_merge_rollback_message
-                        : R.string.player_performance_profile_merge_enable_message,
-                merged
-                        ? R.string.player_performance_profile_merge_rollback_confirm
-                        : R.string.player_performance_profile_merge_enable_confirm,
-                () -> {
-                    boolean changed = merged
-                            ? PlaybackPerformanceSetting
-                            .rollbackRecommendedMerge()
-                            : PlaybackPerformanceSetting
-                            .enableRecommendedMerge();
-                    if (!changed) return;
-                    PlaybackProfileAbCoordinator.process()
-                            .invalidateActive(
-                                    PlaybackProfileAbCoordinator
-                                            .InvalidationReason
-                                            .PROFILE_CHANGED);
-                    PlaybackLightweightAssessmentSetting.coordinator()
-                            .invalidateActive(
-                                    PlaybackProfileAbCoordinator
-                                            .InvalidationReason
-                                            .PROFILE_CHANGED);
-                    refresh();
-                });
-    }
-
-    private boolean profileAbEnrollmentMutable() {
-        return PlaybackProfileAbSetting.getEnrollmentResolution().status()
-                != PlaybackProfileAbPolicy.EnrollmentStatus.FUTURE_SCHEMA;
-    }
-
-    private boolean profileAbGateOpenForCurrentKernel() {
-        PlaybackAutoContext.Kernel kernel = switch (
-                PlayerSetting.getPlayer()) {
-            case PlayerSetting.MPV -> PlaybackAutoContext.Kernel.MPV;
-            case PlayerSetting.IJK -> PlaybackAutoContext.Kernel.IJK;
-            default -> PlaybackAutoContext.Kernel.EXO;
-        };
-        return PlaybackProfileAbPolicy.gateAllows(
-                PlaybackExperimentSetting.getState(), kernel);
-    }
-
-    private void toggleProfileAbEnrollment() {
-        if (PlaybackProfileAbSetting.isEnrolled()) {
-            if (PlaybackProfileAbSetting.putEnrolled(false)) {
-                PlaybackProfileAbCoordinator.process().invalidateActive(
-                        PlaybackProfileAbCoordinator.InvalidationReason
-                                .ENROLLMENT_CHANGED);
-                refreshRows();
-            }
-            return;
-        }
-        showConfirmDialog(
-                R.string.player_performance_experiment_profile_ab_enable_title,
-                R.string.player_performance_experiment_profile_ab_enable_message,
-                R.string.player_performance_experiment_profile_ab_enable_confirm,
-                () -> {
-                    if (!PlaybackProfileAbSetting.putEnrolled(true)) return;
-                    PlaybackProfileAbCoordinator.process()
-                            .invalidateActive(
-                                    PlaybackProfileAbCoordinator
-                                            .InvalidationReason
-                                            .ENROLLMENT_CHANGED);
-                    refreshRows();
-                });
-    }
-
-    private String profileAbReportValue() {
-        PlaybackProfileAbAcceptancePolicy.Report report =
-                PlaybackProfileAbSetting.report(System.currentTimeMillis());
-        return getString(
-                R.string.player_performance_experiment_profile_ab_report_value,
-                report.automaticSamples(),
-                report.recommendedSamples(),
-                profileAbStatusLabel(report.status()));
-    }
-
-    private void showProfileAbReportDialog() {
-        PlaybackProfileAbAcceptancePolicy.Report report =
-                PlaybackProfileAbSetting.report(System.currentTimeMillis());
-        StringBuilder message = new StringBuilder(getString(
-                R.string
-                        .player_performance_experiment_profile_ab_report_summary,
-                profileAbStatusLabel(report.status()),
-                report.automaticSamples(),
-                report.recommendedSamples(),
-                report.totalGroups(),
-                report.evaluableGroups(),
-                report.passedGroups(),
-                report.failedGroups(),
-                report.insufficientGroups()));
-        appendProfileComparisonGroups(message, report);
-        showReportDialog(
-                R.string.player_performance_experiment_profile_ab_report_title,
-                message,
-                R.string.player_performance_experiment_profile_ab_clear,
-                this::confirmClearProfileAbReport);
-    }
-
-    private void appendProfileComparisonGroups(
-            StringBuilder message,
-            PlaybackProfileAbAcceptancePolicy.Report report) {
-        int shown = 0;
-        for (PlaybackProfileAbAcceptancePolicy.GroupReport group
-                : report.groups()) {
-            if (shown++ >= 20 || group.groupKey() == null) break;
-            PlaybackProfileAbPolicy.GroupKey key = group.groupKey();
-            message.append("\n\n")
-                    .append('#')
-                    .append(PlaybackProfileAbIdentity.shortDigest(
-                            PlaybackProfileAbIdentity.groupDigest(key)))
-                    .append(" · ")
-                    .append(key.kernel().label())
-                    .append(" · ")
-                    .append(key.decodeMode().label())
-                    .append(" · ")
-                    .append(key.protocol().label())
-                    .append(" · ")
-                    .append(key.streamKind().label())
-                    .append(" · ")
-                    .append(key.videoMime().label())
-                    .append(" · ")
-                    .append(key.hdrType().label())
-                    .append(" · ")
-                    .append(key.pathKind().label())
-                    .append('\n')
-                    .append(profileAbStatusLabel(group.status()))
-                    .append(" · A ")
-                    .append(group.automaticSamples())
-                    .append(" / B ")
-                    .append(group.recommendedSamples());
-            appendProfileAbMetricList(
-                    message,
-                    R.string
-                            .player_performance_experiment_profile_ab_failed_metrics,
-                    group.failedMetrics());
-            appendProfileAbMetricList(
-                    message,
-                    R.string
-                            .player_performance_experiment_profile_ab_missing_metrics,
-                    group.missingMetrics());
-        }
-    }
-
-    private void appendProfileAbMetricList(
-            StringBuilder message,
-            int label,
-            java.util.List<PlaybackProfileAbAcceptancePolicy.Metric>
-                    metrics) {
-        if (metrics == null || metrics.isEmpty()) return;
-        message.append('\n').append(getString(label)).append(": ");
-        for (int index = 0; index < metrics.size(); index++) {
-            if (index > 0) message.append(", ");
-            message.append(profileAbMetricLabel(metrics.get(index)));
-        }
-    }
-
-    private void confirmClearProfileAbReport() {
-        showConfirmDialog(
-                R.string.player_performance_experiment_profile_ab_clear_title,
-                R.string.player_performance_experiment_profile_ab_clear_message,
-                R.string.player_performance_experiment_profile_ab_clear_confirm,
-                () -> {
-                    PlaybackProfileAbSetting.clearReport();
-                    refreshRows();
-                });
-    }
-
-    private String lightweightAssessmentEnrollmentValue() {
-        PlaybackProfileAbPolicy.EnrollmentResolution resolution =
-                PlaybackLightweightAssessmentSetting
-                        .getEnrollmentResolution();
-        if (resolution.status()
-                == PlaybackProfileAbPolicy.EnrollmentStatus.NOT_ENROLLED) {
-            return getString(R.string.player_performance_experiment_off);
-        }
-        if (!resolution.active()) {
-            return getString(R.string
-                    .player_performance_experiment_profile_ab_invalid);
-        }
-        return getString(profileAbGateOpenForCurrentKernel()
-                ? R.string.player_performance_experiment_on
-                : R.string.player_performance_experiment_standby);
-    }
-
-    private boolean lightweightAssessmentEnrollmentMutable() {
-        return PlaybackLightweightAssessmentSetting
-                .getEnrollmentResolution().status()
-                != PlaybackProfileAbPolicy.EnrollmentStatus.FUTURE_SCHEMA;
-    }
-
-    private void toggleLightweightAssessmentEnrollment() {
-        if (PlaybackLightweightAssessmentSetting.isEnrolled()) {
-            if (PlaybackLightweightAssessmentSetting.putEnrolled(false)) {
-                PlaybackLightweightAssessmentSetting.coordinator()
-                        .invalidateActive(
-                                PlaybackProfileAbCoordinator
-                                        .InvalidationReason
-                                        .ENROLLMENT_CHANGED);
-                refreshRows();
-            }
-            return;
-        }
-        showConfirmDialog(
-                R.string.player_performance_lightweight_assessment_enable_title,
-                R.string.player_performance_lightweight_assessment_enable_message,
-                R.string.player_performance_lightweight_assessment_enable_confirm,
-                () -> {
-                    if (!PlaybackLightweightAssessmentSetting
-                            .putEnrolled(true)) return;
-                    PlaybackLightweightAssessmentSetting.coordinator()
-                            .invalidateActive(
-                                    PlaybackProfileAbCoordinator
-                                            .InvalidationReason
-                                            .ENROLLMENT_CHANGED);
-                    refreshRows();
-                });
-    }
-
-    private String lightweightAssessmentReportValue() {
-        PlaybackLightweightAssessmentPolicy.Report report =
-                PlaybackLightweightAssessmentSetting.report(
-                        System.currentTimeMillis());
-        PlaybackProfileAbAcceptancePolicy.Report comparison =
-                report.comparison();
-        return getString(
-                R.string.player_performance_lightweight_assessment_report_value,
-                comparison.automaticSamples(),
-                comparison.comparisonSamples(),
-                lightweightAssessmentStatusLabel(report.status()));
-    }
-
-    private void showLightweightAssessmentReportDialog() {
-        PlaybackLightweightAssessmentPolicy.Report report =
-                PlaybackLightweightAssessmentSetting.report(
-                        System.currentTimeMillis());
-        PlaybackProfileAbAcceptancePolicy.Report comparison =
-                report.comparison();
-        StringBuilder message = new StringBuilder(getString(
-                R.string
-                        .player_performance_lightweight_assessment_report_summary,
-                lightweightAssessmentStatusLabel(report.status()),
-                comparison.automaticSamples(),
-                comparison.comparisonSamples(),
-                comparison.totalGroups(),
-                comparison.evaluableGroups(),
-                comparison.passedGroups(),
-                comparison.failedGroups(),
-                comparison.insufficientGroups(),
-                report.covered().size(),
-                PlaybackLightweightAssessmentPolicy.CoverageCell
-                        .values().length));
-        appendProfileComparisonGroups(message, comparison);
-        if (!report.missingCoverage().isEmpty()) {
-            message.append("\n\n")
-                    .append(getString(R.string
-                            .player_performance_lightweight_assessment_missing_coverage))
-                    .append(": ");
-            for (int index = 0;
-                 index < report.missingCoverage().size(); index++) {
-                if (index > 0) message.append(", ");
-                message.append(lightweightCoverageLabel(
-                        report.missingCoverage().get(index)));
-            }
-        }
-        showReportDialog(
-                R.string.player_performance_lightweight_assessment_report_title,
-                message,
-                R.string.player_performance_lightweight_assessment_clear,
-                this::confirmClearLightweightAssessmentReport);
-    }
-
-    private String lightweightAssessmentStatusLabel(
-            PlaybackLightweightAssessmentPolicy.Status status) {
-        int value = switch (status) {
-            case PASSED -> R.string
-                    .player_performance_experiment_profile_ab_passed;
-            case FAILED -> R.string
-                    .player_performance_experiment_profile_ab_failed;
-            case COVERAGE_MISSING -> R.string
-                    .player_performance_lightweight_assessment_coverage_missing;
-            case METRICS_MISSING -> R.string
-                    .player_performance_experiment_profile_ab_metrics_missing;
-            case INSUFFICIENT_SAMPLES -> R.string
-                    .player_performance_experiment_profile_ab_insufficient;
-            case NO_DATA -> R.string
-                    .player_performance_experiment_profile_ab_no_data;
-        };
-        return getString(value);
-    }
-
-    private String lightweightCoverageLabel(
-            PlaybackLightweightAssessmentPolicy.CoverageCell cell) {
-        int kind = cell.kind()
-                == PlaybackLightweightAssessmentPolicy.CoverageKind.SOFTWARE
-                ? R.string
-                .player_performance_lightweight_assessment_coverage_software
-                : R.string
-                .player_performance_lightweight_assessment_coverage_low_ram_hardware;
-        return cell.kernel().label() + " " + getString(kind);
-    }
-
-    private void confirmClearLightweightAssessmentReport() {
-        showConfirmDialog(
-                R.string.player_performance_lightweight_assessment_clear_title,
-                R.string.player_performance_lightweight_assessment_clear_message,
-                R.string.player_performance_lightweight_assessment_clear_confirm,
-                () -> {
-                    PlaybackLightweightAssessmentSetting.clearReport();
-                    refreshRows();
-                });
-    }
-
-    private String compatibilityAssessmentValue() {
-        PlaybackCompatibilityRetentionPolicy.Assessment assessment =
-                PlaybackCompatibilityRetentionPolicy.current();
-        return getString(
-                R.string.player_performance_compatibility_assessment_value,
-                compatibilityAssessmentStatusLabel(assessment.status()),
-                assessment.reliableRequirements(),
-                assessment.totalRequirements());
-    }
-
-    private void showCompatibilityAssessmentDialog() {
-        PlaybackCompatibilityRetentionPolicy.Assessment assessment =
-                PlaybackCompatibilityRetentionPolicy.current();
-        StringBuilder message = new StringBuilder(getString(
-                R.string
-                        .player_performance_compatibility_assessment_summary,
-                compatibilityAssessmentStatusLabel(assessment.status()),
-                assessment.reliableRequirements(),
-                assessment.totalRequirements(),
-                assessment.limitedRequirements(),
-                assessment.unverifiedRequirements(),
-                assessment.unobservableRequirements(),
-                assessment.missingRequirements()));
-        if (!assessment.blockers().isEmpty()) {
-            message.append("\n\n")
-                    .append(getString(R.string
-                            .player_performance_compatibility_assessment_blockers));
-            for (PlaybackCompatibilityRetentionPolicy.Finding finding
-                    : assessment.blockers()) {
-                message.append("\n• ")
-                        .append(compatibilityRequirementLabel(
-                                finding.requirement()))
-                        .append(" · ")
-                        .append(compatibilityCoverageLabel(
-                                finding.coverage()));
-            }
-        }
-        showReportDialog(
-                R.string.player_performance_compatibility_assessment_title,
-                message,
-                0,
-                null);
-    }
-
-    private String compatibilityAssessmentStatusLabel(
-            PlaybackCompatibilityRetentionPolicy.Status status) {
-        return getString(status
-                == PlaybackCompatibilityRetentionPolicy.Status.REVIEW_ELIGIBLE
-                ? R.string
-                .player_performance_compatibility_assessment_review
-                : R.string
-                .player_performance_compatibility_assessment_retain);
-    }
-
-    private String compatibilityRequirementLabel(
-            PlaybackCompatibilityRetentionPolicy.Requirement requirement) {
-        if (requirement == null) return getString(R.string
-                .player_performance_compatibility_area_device_evidence);
-        String area = getString(switch (requirement.area()) {
-            case CODEC_FAILURE -> R.string
-                    .player_performance_compatibility_area_codec;
-            case HARDWARE_MISREPORT -> R.string
-                    .player_performance_compatibility_area_hardware_misreport;
-            case OUTPUT_MODE -> R.string
-                    .player_performance_compatibility_area_output;
-            case PROTOCOL_RANGE -> R.string
-                    .player_performance_compatibility_area_protocol;
-            case VISUAL_CORRECTNESS -> R.string
-                    .player_performance_compatibility_area_visual;
-            case LONG_TERM_DEVICE_EVIDENCE -> R.string
-                    .player_performance_compatibility_area_device_evidence;
-        });
-        return requirement.kernelScoped()
-                ? requirement.kernel().label() + " · " + area : area;
-    }
-
-    private String compatibilityCoverageLabel(
-            PlaybackCompatibilityRetentionPolicy.Coverage coverage) {
-        int value = switch (coverage) {
-            case RELIABLE -> R.string
-                    .player_performance_compatibility_coverage_reliable;
-            case LIMITED -> R.string
-                    .player_performance_compatibility_coverage_limited;
-            case UNVERIFIED -> R.string
-                    .player_performance_compatibility_coverage_unverified;
-            case UNOBSERVABLE -> R.string
-                    .player_performance_compatibility_coverage_unobservable;
-            case MISSING -> R.string
-                    .player_performance_compatibility_coverage_missing;
-        };
-        return getString(value);
-    }
-
-    private String profileAbStatusLabel(
-            PlaybackProfileAbAcceptancePolicy.Status status) {
-        int value = switch (status) {
-            case PASSED -> R.string
-                    .player_performance_experiment_profile_ab_passed;
-            case FAILED -> R.string
-                    .player_performance_experiment_profile_ab_failed;
-            case METRICS_MISSING -> R.string
-                    .player_performance_experiment_profile_ab_metrics_missing;
-            case INSUFFICIENT_SAMPLES -> R.string
-                    .player_performance_experiment_profile_ab_insufficient;
-            case NO_DATA -> R.string
-                    .player_performance_experiment_profile_ab_no_data;
-        };
-        return getString(value);
-    }
-
-    private String profileAbMetricLabel(
-            PlaybackProfileAbAcceptancePolicy.Metric metric) {
-        int value = switch (metric) {
-            case FIRST_FRAME_MS -> R.string
-                    .player_performance_experiment_profile_ab_metric_first_frame;
-            case REBUFFER_RATIO_PPM -> R.string
-                    .player_performance_experiment_profile_ab_metric_rebuffer_ratio;
-            case REBUFFER_COUNT -> R.string
-                    .player_performance_experiment_profile_ab_metric_rebuffer_count;
-            case PEAK_PSS_BYTES -> R.string
-                    .player_performance_experiment_profile_ab_metric_peak_pss;
-            case DROPPED_FRAMES_PER_MINUTE_MILLI -> R.string
-                    .player_performance_experiment_profile_ab_metric_dropped;
-            case LIVE_LAG_MS -> R.string
-                    .player_performance_experiment_profile_ab_metric_live_lag;
-            case ERROR_RATE_PPM -> R.string
-                    .player_performance_experiment_profile_ab_metric_error_rate;
-        };
-        return getString(value);
-    }
-
     private void addExperimentDomainRow(
-            int label,
+            String label,
             PlaybackExperimentPolicy.Domain domain,
             boolean selected,
             boolean globalEnabled) {
@@ -1202,7 +610,7 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                 : globalEnabled
                 ? R.string.player_performance_experiment_on
                 : R.string.player_performance_experiment_standby;
-        addRow(getString(label), getString(value), () -> {
+        addRow(label, getString(value), () -> {
             PlaybackExperimentSetting.putDomainEnabled(domain, !selected);
             notifyExperimentPolicyChanged(
                     PlaybackExperimentCoordinator.Change.POLICY_CHANGED);
@@ -1210,7 +618,19 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
     }
 
     private void toggleExperimentStrategy() {
-        if (PlaybackExperimentSetting.isEnabled()) {
+        PlaybackExperimentPolicy.State state =
+                PlaybackExperimentSetting.getState();
+        PlaybackExperimentPolicy.Domain currentDomain =
+                currentExperimentDomain();
+        if (state.enabled()
+                && !PlaybackPerformanceUiPolicy.domainSelected(
+                        state, currentDomain)) {
+            PlaybackExperimentSetting.putDomainEnabled(currentDomain, true);
+            notifyExperimentPolicyChanged(
+                    PlaybackExperimentCoordinator.Change.POLICY_CHANGED);
+            return;
+        }
+        if (state.enabled()) {
             confirmExperimentRollback();
             return;
         }
@@ -1219,6 +639,8 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                 R.string.player_performance_experiment_enable_message,
                 R.string.player_performance_experiment_enable_confirm,
                 () -> {
+                    PlaybackExperimentSetting.putDomainEnabled(
+                            currentDomain, true);
                     PlaybackExperimentSetting.putEnabled(true);
                     notifyExperimentPolicyChanged(
                             PlaybackExperimentCoordinator.Change.POLICY_CHANGED);
@@ -1244,60 +666,6 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
         if (callback != null) callback.run();
     }
 
-    private void showAllKernelExperimentDialog() {
-        PlaybackExperimentPolicy.State state =
-                PlaybackExperimentSetting.getState();
-        List<PlaybackPerformanceModal.ActionItem> items = new ArrayList<>();
-        addKernelExperimentAction(
-                items,
-                R.string.player_performance_experiment_exo,
-                PlaybackExperimentPolicy.Domain.EXO,
-                state.exoEnabled(),
-                state.enabled());
-        addKernelExperimentAction(
-                items,
-                R.string.player_performance_experiment_mpv,
-                PlaybackExperimentPolicy.Domain.MPV,
-                state.mpvEnabled(),
-                state.enabled());
-        addKernelExperimentAction(
-                items,
-                R.string.player_performance_experiment_ijk,
-                PlaybackExperimentPolicy.Domain.IJK,
-                state.ijkEnabled(),
-                state.enabled());
-        showModal(PlaybackPerformanceModal.actions(
-                requireContext(),
-                getString(R.string
-                        .player_performance_all_kernel_experiments_title),
-                getString(R.string
-                        .player_performance_all_kernel_experiments_help),
-                items));
-    }
-
-    private void addKernelExperimentAction(
-            List<PlaybackPerformanceModal.ActionItem> items,
-            int label,
-            PlaybackExperimentPolicy.Domain domain,
-            boolean selected,
-            boolean globalEnabled) {
-        int value = !selected
-                ? R.string.player_performance_experiment_off
-                : globalEnabled
-                ? R.string.player_performance_experiment_on
-                : R.string.player_performance_experiment_standby;
-        items.add(new PlaybackPerformanceModal.ActionItem(
-                getString(label),
-                getString(value),
-                () -> {
-                    PlaybackExperimentSetting.putDomainEnabled(
-                            domain, !selected);
-                    notifyExperimentPolicyChanged(
-                            PlaybackExperimentCoordinator.Change
-                                    .POLICY_CHANGED);
-                }));
-    }
-
     private void showConfirmDialog(
             int title,
             int message,
@@ -1309,20 +677,6 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                 getString(message),
                 getString(R.string.dialog_cancel),
                 getString(confirm),
-                action));
-    }
-
-    private void showReportDialog(
-            int title,
-            CharSequence message,
-            int actionLabel,
-            Runnable action) {
-        showModal(PlaybackPerformanceModal.report(
-                requireContext(),
-                getString(title),
-                message,
-                getString(R.string.dialog_close),
-                actionLabel == 0 ? null : getString(actionLabel),
                 action));
     }
 
@@ -1341,12 +695,10 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                 PlayerSetting.getPlayer());
     }
 
-    private int currentExperimentLabel() {
-        return switch (currentExperimentDomain()) {
-            case MPV -> R.string.player_performance_experiment_mpv;
-            case IJK -> R.string.player_performance_experiment_ijk;
-            default -> R.string.player_performance_experiment_exo;
-        };
+    private String currentExperimentScopeLabel() {
+        return getString(
+                R.string.player_performance_experiment_scope,
+                playerName());
     }
 
     private String playerName() {
