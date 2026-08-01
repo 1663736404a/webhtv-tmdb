@@ -827,11 +827,6 @@
     <string name="player_performance_help_close">Close</string>
     <string name="player_performance_help_intro">Current player engine: %1$s. Most users should leave the profile on Auto. Protected automatic preload, recovery and fallback are built into Auto and roll back on failure without a separate experiment switch. All available controls for the current engine are shown directly and grouped by purpose. Most low-level changes take effect after playback restarts or the player is rebuilt.</string>
     <string name="player_performance_common_section">Common settings</string>
-    <string name="player_performance_exo_rescue_enable_title">Allow single-rate network rescue?</string>
-    <string name="player_performance_exo_rescue_enable_message">This is off by default. When EXO can confirm that a VOD item has only one video rate, it may temporarily use 0.97–1.00x to reduce network demand. The current item becomes slightly longer while rescue is active. Each activation is capped at 60 seconds, each item at two activations, with at least 60 seconds between them. Multi-rate media uses Media3 ABR; unknown media stays disabled. Seek, pause, item changes, manual speed, performance-setting changes and exit restore 1.00x immediately.</string>
-    <string name="player_performance_exo_rescue_enable_confirm">Allow rescue</string>
-    <string name="exo_single_rate_rescue_started">Single-rate network rescue started at %1$.3fx. The item will be slightly longer while active (maximum 60 seconds).</string>
-    <string name="exo_single_rate_rescue_time_limit">Single-rate network rescue reached its 60-second limit and restored 1.00x.</string>
     <string name="player_performance_profile_merge">Balanced profile merge</string>
     <string name="player_performance_profile_merge_enabled">Merged into Auto · rollback available</string>
     <string name="player_performance_profile_merge_rolled_back">Legacy Balanced restored</string>

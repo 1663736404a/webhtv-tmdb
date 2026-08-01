@@ -169,8 +169,7 @@ public class Backup {
         if (key.startsWith("playback_performance_profile_merge_")) {
             return false;
         }
-        if ("perf_exo_network_protection_mode".equals(key)
-                || "perf_exo_single_rate_rescue_enabled_v1".equals(key)) {
+        if ("perf_exo_single_rate_rescue_enabled_v1".equals(key)) {
             return false;
         }
         if (key.startsWith("remote_trust_")) return false;

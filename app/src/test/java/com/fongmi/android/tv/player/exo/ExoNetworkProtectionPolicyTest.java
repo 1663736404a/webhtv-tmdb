@@ -17,18 +17,17 @@ public class ExoNetworkProtectionPolicyTest {
     }
 
     @Test
-    public void explicitSingleRateRescueUsesStrictLightFloor() {
-        ExoNetworkProtectionPolicy.Decision decision = ExoNetworkProtectionPolicy.resolve(ExoNetworkProtectionPolicy.MODE_SINGLE_RATE_RESCUE);
+    public void automaticModeUsesExtendedFloorAndPreferredLightBoundary() {
+        ExoNetworkProtectionPolicy.Decision decision = ExoNetworkProtectionPolicy.resolve(ExoNetworkProtectionPolicy.MODE_AUTO);
 
         assertTrue(decision.enabled());
-        assertEquals(0.97f, decision.minimumSpeed(), 0.0001f);
+        assertEquals(0.85f, decision.minimumSpeed(), 0.0001f);
         assertEquals(0.97f, ExoNetworkProtectionPolicy.PREFERRED_MIN_SPEED, 0.0001f);
-        assertEquals(ExoNetworkProtectionPolicy.MODE_OFF, ExoNetworkProtectionPolicy.defaultMode());
     }
 
     @Test
-    public void unknownAndLegacyModeValuesFailClosed() {
+    public void migratesLegacyPositiveModesToAutomatic() {
         assertEquals(ExoNetworkProtectionPolicy.MODE_OFF, ExoNetworkProtectionPolicy.resolve(-1).mode());
-        assertEquals(ExoNetworkProtectionPolicy.MODE_OFF, ExoNetworkProtectionPolicy.resolve(99).mode());
+        assertEquals(ExoNetworkProtectionPolicy.MODE_AUTO, ExoNetworkProtectionPolicy.resolve(99).mode());
     }
 }

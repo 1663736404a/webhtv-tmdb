@@ -809,11 +809,6 @@
     <string name="player_performance_help_close">關閉</string>
     <string name="player_performance_help_intro">目前播放器內核：%1$s。一般使用者保持「自動」即可；受保護的自動預載、恢復和回退已內建於自動檔，失敗時會自行撤銷，不再需要另外開啟實驗開關。目前內核可用參數均直接顯示並按用途分組，多數底層參數需重新播放或重建播放器後生效。</string>
     <string name="player_performance_common_section">常用參數</string>
-    <string name="player_performance_exo_rescue_enable_title">允許單碼率網路救援？</string>
-    <string name="player_performance_exo_rescue_enable_message">此功能預設關閉。僅當 EXO 明確確認點播資源只有一個視訊碼率時，才可能暫時使用 0.97～1.00x 降低網路需求；救援期間目前片長會略微延長。每次最多 60 秒、每個媒體最多 2 次，兩次之間至少冷卻 60 秒。多碼率資源繼續使用 Media3 ABR，資源證據未知時保持關閉。Seek、暫停、切換資源、手動改速、播放效能設定變更和退出都會立即恢復 1.00x。</string>
-    <string name="player_performance_exo_rescue_enable_confirm">允許救援</string>
-    <string name="exo_single_rate_rescue_started">單碼率網路救援已啟動：目前 %1$.3fx，救援期間片長會略微延長（本次最多 60 秒）。</string>
-    <string name="exo_single_rate_rescue_time_limit">單碼率網路救援已達到 60 秒上限，並恢復 1.00x。</string>
     <string name="player_performance_profile_merge">均衡檔合併</string>
     <string name="player_performance_profile_merge_enabled">已合併到自動 · 可回退</string>
     <string name="player_performance_profile_merge_rolled_back">已恢復舊均衡檔</string>

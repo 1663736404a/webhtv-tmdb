@@ -25,7 +25,6 @@ import androidx.fragment.app.FragmentActivity;
 import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.App;
 import com.fongmi.android.tv.event.ConfigEvent;
-import com.fongmi.android.tv.player.exo.ExoNetworkProtectionPolicy;
 import com.fongmi.android.tv.setting.PlaybackPerformanceCatalog;
 import com.fongmi.android.tv.setting.PlaybackPerformanceOption;
 import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
@@ -717,28 +716,11 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                 refresh();
             };
             case PlaybackPerformanceCatalog.EXO_NETWORK_PROTECTION -> () -> {
-                toggleSingleRateNetworkRescue();
+                ExoPerformanceSetting.putNetworkProtectionMode(ExoPerformanceSetting.nextNetworkProtectionMode());
+                refresh();
             };
             default -> null;
         };
-    }
-
-    private void toggleSingleRateNetworkRescue() {
-        if (ExoPerformanceSetting.isNetworkProtectionEnabled()) {
-            ExoPerformanceSetting.putNetworkProtectionMode(
-                    ExoNetworkProtectionPolicy.MODE_OFF);
-            refresh();
-            return;
-        }
-        showConfirmDialog(
-                R.string.player_performance_exo_rescue_enable_title,
-                R.string.player_performance_exo_rescue_enable_message,
-                R.string.player_performance_exo_rescue_enable_confirm,
-                () -> {
-                    ExoPerformanceSetting.putNetworkProtectionMode(
-                            ExoNetworkProtectionPolicy.MODE_SINGLE_RATE_RESCUE);
-                    refresh();
-                });
     }
 
     private void toggle(java.util.function.BooleanSupplier getter, java.util.function.Consumer<Boolean> setter) {

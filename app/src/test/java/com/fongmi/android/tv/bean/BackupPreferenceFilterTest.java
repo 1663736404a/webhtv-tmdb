@@ -97,14 +97,14 @@ public class BackupPreferenceFilterTest {
     }
 
     @Test
-    public void singleRateRescueRequiresConsentAgainAfterRestore() {
+    public void dynamicNetworkProtectionFollowsSettingsBackupButRetiredConsentDoesNot() {
         SyncOptions everything = new SyncOptions()
                 .config(true)
                 .spider(true)
                 .webHome(true)
                 .settings(true);
 
-        assertFalse(Backup.include(
+        assertTrue(Backup.include(
                 "perf_exo_network_protection_mode", everything));
         assertFalse(Backup.include(
                 "perf_exo_single_rate_rescue_enabled_v1", everything));
