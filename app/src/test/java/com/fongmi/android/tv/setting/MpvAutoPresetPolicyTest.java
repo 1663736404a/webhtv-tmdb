@@ -36,7 +36,7 @@ public class MpvAutoPresetPolicyTest {
 
     @Test
     public void automaticHlsTextNoLongerClaimsFixedHighestBitrate() {
-        assertEquals("自动 · 起步≤15Mbps，可逐档降",
+        assertEquals("自动 · ≤15Mbps起步",
                 MpvPerformanceSetting.getHlsBitrateText(true));
     }
 }

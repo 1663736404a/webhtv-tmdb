@@ -206,7 +206,7 @@ public final class MpvPerformanceSetting {
     }
 
     public static String getHlsBitrateText(boolean automatic) {
-        if (automatic) return "自动 · 起步≤15Mbps，可逐档降";
+        if (automatic) return "自动 · ≤15Mbps起步";
         return switch (getHlsBitrateMode()) {
             case HLS_15_MBPS -> "不超过15Mbps";
             case HLS_8_MBPS -> "不超过8Mbps";
