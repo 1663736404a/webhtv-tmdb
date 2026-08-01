@@ -34,6 +34,8 @@ public class PlaybackPerformanceSetting {
             "playback_performance_profile_merge_rolled_back";
     private static final String KEY_PROFILE_MERGE_MIGRATED_MASK =
             "playback_performance_profile_merge_migrated_mask";
+    private static final String KEY_PROFILE_AUTO_LIGHT_MIGRATED =
+            "playback_performance_profile_auto_light_v1";
     private static final String KEY_CODEC_ASYNC_QUEUEING = "perf_codec_async_queueing";
     private static final String KEY_DYNAMIC_SCHEDULING = "perf_dynamic_scheduling";
     private static final String KEY_VIDEO_DURATION_PROGRESS = "perf_video_duration_progress";
@@ -62,7 +64,10 @@ public class PlaybackPerformanceSetting {
         migrateExoRebuffer();
         migrateMpvRebuffer();
         migrateMpvAutoBaseline();
-        migrateRecommendedProfileMerge();
+        // The former recommended-profile rollback must not run after the
+        // profile list has been consolidated, otherwise an interrupted old
+        // rollback could restore a removed profile behind the new UI.
+        migrateAutoLightProfiles();
     }
 
     public static int getProfile() {
@@ -83,12 +88,7 @@ public class PlaybackPerformanceSetting {
     }
 
     public static void applyRecommended() {
-        if (isRecommendedMerged()) {
-            applyAuto();
-            return;
-        }
-        applyRecommendedProfile(PlayerSetting.getPlayer());
-        putCurrentProfile(PROFILE_RECOMMENDED);
+        applyAuto();
     }
 
     private static void applyRecommendedProfile(int kernel) {
@@ -130,57 +130,27 @@ public class PlaybackPerformanceSetting {
     }
 
     public static void applyCompatible() {
-        KernelPerformanceSetting.applyPreset(PlayerSetting.getPlayer(), PROFILE_COMPATIBLE);
-        if (PlayerSetting.getPlayer() == PlayerSetting.EXO) ExoPerformanceSetting.applyCompatible();
-        if (PlayerSetting.getPlayer() == PlayerSetting.MPV) MpvPerformanceSetting.applyCompatible();
-        if (PlayerSetting.getPlayer() == PlayerSetting.IJK) IjkPerformanceSetting.applyCompatible();
-        if (PlayerSetting.getPlayer() == PlayerSetting.EXO) {
-            put(KEY_CODEC_ASYNC_QUEUEING, true);
-            put(KEY_DYNAMIC_SCHEDULING, false);
-            put(KEY_VIDEO_DURATION_PROGRESS, false);
-            put(KEY_LATE_DROP_INPUT, false);
-            put(KEY_TRACK_LIMIT, true);
-            put(KEY_ADAPTIVE_DOWNGRADE, true);
-            put(KEY_LOAD_ONLY_SELECTED_TRACKS, false);
-            put(KEY_SURFACE_FIXED_SIZE, false);
-            put(KEY_DECODER_FALLBACK, true);
-            put(KEY_SOFT_VIDEO_TUNE, true);
-            put(KEY_HIGH_BUFFER, true);
-            put(KEY_BANDWIDTH_METER, false);
-        }
-        if (PlayerSetting.getPlayer() == PlayerSetting.EXO) {
-            Prefers.put("render", PlayerSetting.RENDER_SURFACE);
-            Prefers.put("tunnel", false);
-            Prefers.put("exo_4k_compat", false);
-        }
-        putCurrentProfile(PROFILE_COMPATIBLE);
+        applyLightweight();
     }
 
     public static void applyLightweight() {
-        KernelPerformanceSetting.applyPreset(PlayerSetting.getPlayer(), PROFILE_LIGHTWEIGHT);
-        if (PlayerSetting.getPlayer() == PlayerSetting.EXO) ExoPerformanceSetting.applyLightweight();
-        if (PlayerSetting.getPlayer() == PlayerSetting.MPV) MpvPerformanceSetting.applyLightweight();
-        if (PlayerSetting.getPlayer() == PlayerSetting.IJK) IjkPerformanceSetting.applyLightweight();
-        if (PlayerSetting.getPlayer() == PlayerSetting.EXO) {
-            put(KEY_CODEC_ASYNC_QUEUEING, true);
-            put(KEY_DYNAMIC_SCHEDULING, false);
-            put(KEY_VIDEO_DURATION_PROGRESS, false);
-            put(KEY_LATE_DROP_INPUT, false);
-            put(KEY_TRACK_LIMIT, true);
-            put(KEY_ADAPTIVE_DOWNGRADE, true);
-            put(KEY_LOAD_ONLY_SELECTED_TRACKS, true);
-            put(KEY_SURFACE_FIXED_SIZE, false);
-            put(KEY_DECODER_FALLBACK, true);
-            put(KEY_SOFT_VIDEO_TUNE, true);
-            put(KEY_HIGH_BUFFER, true);
-            put(KEY_BANDWIDTH_METER, false);
-        }
-        if (PlayerSetting.getPlayer() == PlayerSetting.EXO) {
+        applyLightweightProfile(PlayerSetting.getPlayer());
+        putCurrentProfile(PROFILE_LIGHTWEIGHT);
+    }
+
+    private static void applyLightweightProfile(int kernel) {
+        KernelPerformanceSetting.applyPreset(kernel, PROFILE_LIGHTWEIGHT);
+        if (kernel == PlayerSetting.EXO) {
+            putRecommendedFlags();
+            ExoPerformanceSetting.applyLightweight();
             Prefers.put("render", PlayerSetting.RENDER_SURFACE);
             Prefers.put("tunnel", false);
-            Prefers.put("exo_4k_compat", false);
+            Prefers.put("exo_4k_compat", true);
+        } else if (kernel == PlayerSetting.MPV) {
+            MpvPerformanceSetting.applyLightweight();
+        } else {
+            IjkPerformanceSetting.applyLightweight();
         }
-        putCurrentProfile(PROFILE_LIGHTWEIGHT);
     }
 
     public static void markCustom() {
@@ -191,8 +161,8 @@ public class PlaybackPerformanceSetting {
     public static String getProfileName() {
         return switch (getProfile()) {
             case PROFILE_AUTO -> "自动";
-            case PROFILE_COMPATIBLE -> "兼容";
-            case PROFILE_LIGHTWEIGHT -> "轻量";
+            case PROFILE_COMPATIBLE,
+                 PROFILE_LIGHTWEIGHT -> "轻量";
             case PROFILE_CUSTOM -> "自定义";
             default -> "均衡";
         };
@@ -203,36 +173,19 @@ public class PlaybackPerformanceSetting {
     }
 
     public static boolean isRecommendedMerged() {
-        ensureInitialized();
-        return profileMergeResolution().mergeEnabled();
-    }
-
-    public static boolean canChangeRecommendedMerge() {
-        ensureInitialized();
-        return profileMergeResolution().mutable();
-    }
-
-    public static synchronized boolean rollbackRecommendedMerge() {
-        ensureInitialized();
-        PlaybackProfileMergePolicy.Resolution resolution =
-                profileMergeResolution();
-        if (!resolution.mutable()) return false;
-        PlaybackProfileMergePolicy.State state =
-                resolution.state().withRolledBack(true);
-        if (!writeProfileMergeState(state)) return false;
-        completeRecommendedProfileRollback(state);
         return true;
     }
 
+    public static boolean canChangeRecommendedMerge() {
+        return false;
+    }
+
+    public static synchronized boolean rollbackRecommendedMerge() {
+        return false;
+    }
+
     public static synchronized boolean enableRecommendedMerge() {
-        ensureInitialized();
-        PlaybackProfileMergePolicy.Resolution resolution =
-                profileMergeResolution();
-        if (!resolution.mutable()) return false;
-        if (!writeProfileMergeState(
-                resolution.state().withRolledBack(false))) return false;
-        migrateRecommendedProfileMerge();
-        return profileMergeResolution().mergeEnabled();
+        return true;
     }
 
     public static boolean isAuto() {
@@ -244,7 +197,7 @@ public class PlaybackPerformanceSetting {
     }
 
     public static boolean isCompatible() {
-        return getProfile() == PROFILE_COMPATIBLE;
+        return isLightweight();
     }
 
     public static boolean isLightweight() {
@@ -566,6 +519,31 @@ public class PlaybackPerformanceSetting {
         }
         if (PlaybackProfileAbSetting.isEnrolled()) {
             PlaybackProfileAbSetting.putEnrolled(false);
+        }
+    }
+
+    private static synchronized void migrateAutoLightProfiles() {
+        if (Prefers.getBoolean(KEY_PROFILE_AUTO_LIGHT_MIGRATED)) return;
+        try {
+            for (int kernel : new int[]{
+                    PlayerSetting.EXO, PlayerSetting.MPV, PlayerSetting.IJK}) {
+                int rawProfile = rawProfile(kernel);
+                int targetProfile = PlaybackProfileMergePolicy.effectiveProfile(
+                        rawProfile, true);
+                switch (PlaybackProfileMergePolicy.consolidationAction(
+                        rawProfile)) {
+                    case APPLY_AUTO -> applyAutoProfile(kernel);
+                    case APPLY_LIGHTWEIGHT -> applyLightweightProfile(kernel);
+                    case KEEP -> {
+                    }
+                }
+                Prefers.put(profileKey(kernel), targetProfile);
+            }
+            Prefers.put(KEY_PROFILE, rawProfile(PlayerSetting.getPlayer()));
+            Prefers.put(KEY_PROFILE_AUTO_LIGHT_MIGRATED, true);
+        } catch (Throwable ignored) {
+            // Partial writes are safe: without the completion marker the
+            // idempotent migration is retried on the next initialization.
         }
     }
 

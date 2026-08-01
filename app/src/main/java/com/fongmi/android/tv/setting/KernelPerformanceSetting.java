@@ -132,7 +132,8 @@ public final class KernelPerformanceSetting {
     }
 
     public static void applyPreset(int kernel, int profile) {
-        if (profile == PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT) {
+        if (profile == PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT
+                || profile == PlaybackPerformanceSetting.PROFILE_COMPATIBLE) {
             putBuffer(kernel, kernel == PlayerSetting.EXO ? exoBufferForPreset(profile)
                     : kernel == PlayerSetting.MPV ? mpvBufferForPreset(profile) : 5);
             putBufferBytesOption(kernel, kernel == PlayerSetting.EXO ? exoBufferBytesOptionForPreset(profile)
@@ -143,22 +144,6 @@ public final class KernelPerformanceSetting {
             putPreload(kernel, false);
             putPreloadThreads(kernel, preloadThreadsForPreset(profile));
             putPreloadSizeMb(kernel, PreloadSetting.MIN_SIZE_MB);
-            putPreloadTimeSeconds(kernel, preloadTimeForPreset(profile));
-            putAudioPassThrough(kernel, false);
-            putPreferAac(kernel, true);
-            putAudioPrefer(kernel, false);
-            putVideoPrefer(kernel, false);
-        } else if (profile == PlaybackPerformanceSetting.PROFILE_COMPATIBLE) {
-            putBuffer(kernel, kernel == PlayerSetting.EXO ? exoBufferForPreset(profile)
-                    : kernel == PlayerSetting.MPV ? mpvBufferForPreset(profile) : 5);
-            putBufferBytesOption(kernel, kernel == PlayerSetting.EXO ? exoBufferBytesOptionForPreset(profile)
-                    : kernel == PlayerSetting.MPV ? mpvBufferBytesOptionForPreset(profile) : 1);
-            putBackBufferOption(kernel, kernel == PlayerSetting.MPV
-                    ? mpvBackBufferOptionForPreset(profile) : 1);
-            putPlayCacheOption(kernel, 1);
-            putPreload(kernel, false);
-            putPreloadThreads(kernel, preloadThreadsForPreset(profile));
-            putPreloadSizeMb(kernel, 128);
             putPreloadTimeSeconds(kernel, preloadTimeForPreset(profile));
             putAudioPassThrough(kernel, false);
             putPreferAac(kernel, true);
@@ -222,8 +207,8 @@ public final class KernelPerformanceSetting {
 
     static int exoBufferForPreset(int profile) {
         return switch (profile) {
-            case PlaybackPerformanceSetting.PROFILE_COMPATIBLE -> 4;
-            case PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT -> 1;
+            case PlaybackPerformanceSetting.PROFILE_COMPATIBLE,
+                 PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT -> 1;
             default -> 10;
         };
     }
@@ -237,7 +222,7 @@ public final class KernelPerformanceSetting {
     }
 
     static int exoBackBufferOptionForPreset(int profile) {
-        return profile == PlaybackPerformanceSetting.PROFILE_COMPATIBLE ? 1 : 0;
+        return 0;
     }
 
     static int mpvBufferForPreset(int profile) {
@@ -257,8 +242,8 @@ public final class KernelPerformanceSetting {
     static int mpvBackBufferOptionForPreset(int profile) {
         return switch (profile) {
             case PlaybackPerformanceSetting.PROFILE_AUTO,
-                 PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT -> 0;
-            case PlaybackPerformanceSetting.PROFILE_COMPATIBLE -> 1;
+                 PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT,
+                 PlaybackPerformanceSetting.PROFILE_COMPATIBLE -> 0;
             default -> 2;
         };
     }

@@ -825,7 +825,7 @@
     <string name="player_performance_help">Guide</string>
     <string name="player_performance_help_title">Playback performance guide</string>
     <string name="player_performance_help_close">Close</string>
-    <string name="player_performance_help_intro">Current player engine: %1$s. Most users should leave the profile on Auto. Protected automatic preload, recovery and fallback are built into Auto and roll back on failure without a separate experiment switch. All available controls for the current engine are shown directly and grouped by purpose. Most low-level changes take effect after playback restarts or the player is rebuilt.</string>
+    <string name="player_performance_help_intro">Current player engine: %1$s. Most users should leave the profile on Auto. Light targets lower-end devices, combines stability choices from the former Compatible profile with lower fixed resource budgets, and replaces that separate profile. Engine-specific decode, output, and protocol controls remain available below for unusual devices and create a Custom profile when changed. Most low-level changes take effect after playback restarts or the player is rebuilt.</string>
     <string name="player_performance_common_section">Common settings</string>
     <string name="player_performance_profile_merge">Balanced profile merge</string>
     <string name="player_performance_profile_merge_enabled">Merged into Auto · rollback available</string>

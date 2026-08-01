@@ -330,17 +330,12 @@ public final class ExoPerformanceSetting {
     }
 
     public static void applyCompatible() {
-        Prefers.put(KEY_CODEC_QUEUE_MODE, CODEC_QUEUE_SYNC);
-        Prefers.put(KEY_FRAME_RATE_MODE, FRAME_RATE_OFF);
-        Prefers.put(KEY_NETWORK_PROTECTION_MODE, ExoNetworkProtectionPolicy.MODE_OFF);
-        applyStartBufferPreset(PlaybackPerformanceSetting.PROFILE_COMPATIBLE);
-        applyRebufferPreset(PlaybackPerformanceSetting.PROFILE_COMPATIBLE);
-        applyPrioritizeTimePreset(PlaybackPerformanceSetting.PROFILE_COMPATIBLE);
+        applyLightweight();
     }
 
     public static void applyLightweight() {
         Prefers.put(KEY_CODEC_QUEUE_MODE, CODEC_QUEUE_AUTO);
-        Prefers.put(KEY_FRAME_RATE_MODE, FRAME_RATE_SEAMLESS);
+        Prefers.put(KEY_FRAME_RATE_MODE, FRAME_RATE_OFF);
         Prefers.put(KEY_NETWORK_PROTECTION_MODE, ExoNetworkProtectionPolicy.MODE_OFF);
         applyStartBufferPreset(PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT);
         applyRebufferPreset(PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT);
@@ -353,8 +348,8 @@ public final class ExoPerformanceSetting {
 
     static int startBufferForPreset(int profile) {
         return switch (profile) {
-            case PlaybackPerformanceSetting.PROFILE_COMPATIBLE -> 2_000;
-            case PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT -> 1_000;
+            case PlaybackPerformanceSetting.PROFILE_COMPATIBLE,
+                 PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT -> 1_500;
             default -> 1_500;
         };
     }
@@ -365,8 +360,8 @@ public final class ExoPerformanceSetting {
 
     static int rebufferForPreset(int profile) {
         return switch (profile) {
-            case PlaybackPerformanceSetting.PROFILE_COMPATIBLE -> 5_000;
-            case PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT -> 2_000;
+            case PlaybackPerformanceSetting.PROFILE_COMPATIBLE,
+                 PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT -> 3_000;
             default -> 3_000;
         };
     }

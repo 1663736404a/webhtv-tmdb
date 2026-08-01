@@ -331,10 +331,11 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
     }
 
     private void apply(int profile) {
-        if (profile == PlaybackPerformanceSetting.PROFILE_AUTO) PlaybackPerformanceSetting.applyAuto();
-        else if (profile == PlaybackPerformanceSetting.PROFILE_COMPATIBLE) PlaybackPerformanceSetting.applyCompatible();
-        else if (profile == PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT) PlaybackPerformanceSetting.applyLightweight();
-        else PlaybackPerformanceSetting.applyRecommended();
+        if (profile == PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT) {
+            PlaybackPerformanceSetting.applyLightweight();
+        } else {
+            PlaybackPerformanceSetting.applyAuto();
+        }
         refresh();
     }
 
@@ -437,10 +438,6 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
 
     private int profileLabel(int profile) {
         return switch (profile) {
-            case PlaybackPerformanceSetting.PROFILE_RECOMMENDED ->
-                    R.string.player_performance_recommended;
-            case PlaybackPerformanceSetting.PROFILE_COMPATIBLE ->
-                    R.string.player_performance_compatible;
             case PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT ->
                     R.string.player_performance_lightweight;
             default -> R.string.player_performance_auto;

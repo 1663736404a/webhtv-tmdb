@@ -286,16 +286,7 @@ public final class MpvPerformanceSetting {
     }
 
     public static void applyCompatible() {
-        Prefers.put(KEY_OUTPUT_MODE, OUTPUT_GPU);
-        Prefers.put(KEY_HWDEC, HWDEC_COPY);
-        Prefers.put(KEY_SYNC, SYNC_AUDIO);
-        Prefers.put(KEY_FRAME_DROP, FRAME_DROP_OUTPUT);
-        Prefers.put(KEY_INTERPOLATION, false);
-        Prefers.put(KEY_SOFT_TUNE, SOFT_TUNE_MILD);
-        Prefers.put(KEY_VERBOSE_LOG, false);
-        Prefers.put(KEY_FRAME_RATE, FRAME_RATE_OFF);
-        Prefers.put(KEY_HLS_BITRATE, HLS_HIGHEST);
-        applyRebufferPreset(PlaybackPerformanceSetting.PROFILE_COMPATIBLE);
+        applyLightweight();
     }
 
     public static void applyLightweight() {
@@ -304,9 +295,9 @@ public final class MpvPerformanceSetting {
         Prefers.put(KEY_SYNC, SYNC_AUDIO);
         Prefers.put(KEY_FRAME_DROP, FRAME_DROP_OUTPUT);
         Prefers.put(KEY_INTERPOLATION, false);
-        Prefers.put(KEY_SOFT_TUNE, SOFT_TUNE_AGGRESSIVE);
+        Prefers.put(KEY_SOFT_TUNE, SOFT_TUNE_MILD);
         Prefers.put(KEY_VERBOSE_LOG, false);
-        Prefers.put(KEY_FRAME_RATE, FRAME_RATE_SEAMLESS);
+        Prefers.put(KEY_FRAME_RATE, FRAME_RATE_OFF);
         Prefers.put(KEY_HLS_BITRATE, HLS_8_MBPS);
         applyRebufferPreset(PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT);
     }
@@ -317,8 +308,8 @@ public final class MpvPerformanceSetting {
 
     static int rebufferForPreset(int profile) {
         return switch (profile) {
-            case PlaybackPerformanceSetting.PROFILE_COMPATIBLE -> 3_000;
-            case PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT -> 1_000;
+            case PlaybackPerformanceSetting.PROFILE_COMPATIBLE,
+                 PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT -> 3_000;
             default -> 2_000;
         };
     }

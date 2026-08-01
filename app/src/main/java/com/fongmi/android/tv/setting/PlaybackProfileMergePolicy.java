@@ -1,20 +1,13 @@
 package com.fongmi.android.tv.setting;
 
-/** Pure, versioned policy for merging the legacy recommended profile. */
+/** Pure, versioned policy for consolidating legacy playback profiles. */
 public final class PlaybackProfileMergePolicy {
 
     public static final int CURRENT_SCHEMA_VERSION = 1;
     public static final int ALL_MIGRATED_MASK = 0b111;
 
-    private static final int[] MERGED_PROFILES = {
+    private static final int[] CONSOLIDATED_PROFILES = {
             PlaybackPerformanceSetting.PROFILE_AUTO,
-            PlaybackPerformanceSetting.PROFILE_COMPATIBLE,
-            PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT
-    };
-    private static final int[] LEGACY_PROFILES = {
-            PlaybackPerformanceSetting.PROFILE_AUTO,
-            PlaybackPerformanceSetting.PROFILE_RECOMMENDED,
-            PlaybackPerformanceSetting.PROFILE_COMPATIBLE,
             PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT
     };
 
@@ -56,18 +49,25 @@ public final class PlaybackProfileMergePolicy {
     }
 
     public static int effectiveProfile(int rawProfile, boolean mergeEnabled) {
+        return switch (consolidationAction(rawProfile)) {
+            case APPLY_AUTO -> PlaybackPerformanceSetting.PROFILE_AUTO;
+            case APPLY_LIGHTWEIGHT ->
+                    PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT;
+            case KEEP -> rawProfile;
+        };
+    }
+
+    public static ConsolidationAction consolidationAction(int rawProfile) {
         return switch (rawProfile) {
             case PlaybackPerformanceSetting.PROFILE_RECOMMENDED ->
-                    mergeEnabled
-                            ? PlaybackPerformanceSetting.PROFILE_AUTO
-                            : PlaybackPerformanceSetting.PROFILE_RECOMMENDED;
+                    ConsolidationAction.APPLY_AUTO;
             case PlaybackPerformanceSetting.PROFILE_COMPATIBLE,
-                 PlaybackPerformanceSetting.PROFILE_CUSTOM,
-                 PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT,
-                 PlaybackPerformanceSetting.PROFILE_AUTO -> rawProfile;
-            default -> mergeEnabled
-                    ? PlaybackPerformanceSetting.PROFILE_AUTO
-                    : PlaybackPerformanceSetting.PROFILE_RECOMMENDED;
+                 PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT ->
+                    ConsolidationAction.APPLY_LIGHTWEIGHT;
+            case PlaybackPerformanceSetting.PROFILE_CUSTOM,
+                 PlaybackPerformanceSetting.PROFILE_AUTO ->
+                    ConsolidationAction.KEEP;
+            default -> ConsolidationAction.APPLY_AUTO;
         };
     }
 
@@ -91,14 +91,13 @@ public final class PlaybackProfileMergePolicy {
     }
 
     public static int[] selectableProfiles(boolean mergeEnabled) {
-        return (mergeEnabled ? MERGED_PROFILES : LEGACY_PROFILES).clone();
+        return CONSOLIDATED_PROFILES.clone();
     }
 
     public static int positionOf(int profile, boolean mergeEnabled) {
         int effective = effectiveProfile(profile, mergeEnabled);
-        int[] profiles = mergeEnabled ? MERGED_PROFILES : LEGACY_PROFILES;
-        for (int index = 0; index < profiles.length; index++) {
-            if (profiles[index] == effective) return index;
+        for (int index = 0; index < CONSOLIDATED_PROFILES.length; index++) {
+            if (CONSOLIDATED_PROFILES[index] == effective) return index;
         }
         return -1;
     }
@@ -118,6 +117,12 @@ public final class PlaybackProfileMergePolicy {
         CURRENT,
         CORRUPT,
         FUTURE_SCHEMA
+    }
+
+    public enum ConsolidationAction {
+        KEEP,
+        APPLY_AUTO,
+        APPLY_LIGHTWEIGHT
     }
 
     public enum Slot {

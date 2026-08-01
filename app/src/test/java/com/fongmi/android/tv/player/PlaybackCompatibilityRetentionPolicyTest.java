@@ -15,7 +15,7 @@ import static org.junit.Assert.assertTrue;
 public class PlaybackCompatibilityRetentionPolicyTest {
 
     @Test
-    public void currentAssessmentRequiresCompatibleProfile() {
+    public void currentAssessmentRequiresCompatibilityProtection() {
         PlaybackCompatibilityRetentionPolicy.Assessment assessment =
                 PlaybackCompatibilityRetentionPolicy.current();
 
@@ -62,7 +62,7 @@ public class PlaybackCompatibilityRetentionPolicyTest {
         assertTrue(Arrays.stream(
                         PlaybackProfileMergePolicy.selectableProfiles(true))
                 .anyMatch(profile -> profile
-                        == PlaybackPerformanceSetting.PROFILE_COMPATIBLE));
+                        == PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT));
     }
 
     @Test

@@ -823,7 +823,7 @@
     <string name="player_performance_help">说明</string>
     <string name="player_performance_help_title">播放性能参数说明</string>
     <string name="player_performance_help_close">关闭</string>
-    <string name="player_performance_help_intro">当前播放器内核：%1$s。普通用户保持“自动”即可；受保护的自动预载、恢复和回退已内置于自动档，失败时会自行撤销，不再需要单独开启实验开关。当前内核可用参数均直接显示并按用途分组，多数底层参数需重新播放或重建播放器后生效。</string>
+    <string name="player_performance_help_intro">当前播放器内核：%1$s。普通用户保持“自动”即可；“轻量”面向低端设备，整合原兼容档的稳定性取向并降低固定资源预算，替代原独立兼容档。遇到特殊硬解、输出或协议问题仍可直接调整下方参数形成“自定义”。当前内核可用参数均直接显示并按用途分组，多数底层参数需重新播放或重建播放器后生效。</string>
     <string name="player_performance_common_section">常用参数</string>
     <string name="player_performance_profile_merge">均衡档合并</string>
     <string name="player_performance_profile_merge_enabled">已合并到自动 · 可回滚</string>

@@ -169,6 +169,9 @@ public class Backup {
         if (key.startsWith("playback_performance_profile_merge_")) {
             return false;
         }
+        if ("playback_performance_profile_auto_light_v1".equals(key)) {
+            return false;
+        }
         if ("perf_exo_single_rate_rescue_enabled_v1".equals(key)) {
             return false;
         }
@@ -200,9 +203,20 @@ public class Backup {
         }
         SharedPreferences.Editor editor = Prefers.getPrefers().edit();
         if (clear) editor.clear();
+        if (containsPlaybackPerformanceProfile(values)) {
+            editor.remove("playback_performance_profile_auto_light_v1");
+        }
         putPrefers(editor, preserved);
         putPrefers(editor, values);
         editor.commit();
+    }
+
+    private static boolean containsPlaybackPerformanceProfile(
+            Map<String, ?> values) {
+        return values.containsKey("playback_performance_profile")
+                || values.containsKey("perf_exo_profile")
+                || values.containsKey("perf_mpv_profile")
+                || values.containsKey("perf_ijk_profile");
     }
 
     private static void putPrefers(SharedPreferences.Editor editor, Map<String, ?> values) {

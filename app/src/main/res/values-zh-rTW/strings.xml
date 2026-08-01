@@ -807,7 +807,7 @@
     <string name="player_performance_help">說明</string>
     <string name="player_performance_help_title">播放效能參數說明</string>
     <string name="player_performance_help_close">關閉</string>
-    <string name="player_performance_help_intro">目前播放器內核：%1$s。一般使用者保持「自動」即可；受保護的自動預載、恢復和回退已內建於自動檔，失敗時會自行撤銷，不再需要另外開啟實驗開關。目前內核可用參數均直接顯示並按用途分組，多數底層參數需重新播放或重建播放器後生效。</string>
+    <string name="player_performance_help_intro">目前播放器內核：%1$s。一般使用者保持「自動」即可；「輕量」面向低階裝置，整合原相容檔的穩定性取向並降低固定資源預算，取代原本獨立的相容檔。遇到特殊硬解、輸出或協定問題仍可直接調整下方參數形成「自訂」。目前內核可用參數均直接顯示並按用途分組，多數底層參數需重新播放或重建播放器後生效。</string>
     <string name="player_performance_common_section">常用參數</string>
     <string name="player_performance_profile_merge">均衡檔合併</string>
     <string name="player_performance_profile_merge_enabled">已合併到自動 · 可回退</string>

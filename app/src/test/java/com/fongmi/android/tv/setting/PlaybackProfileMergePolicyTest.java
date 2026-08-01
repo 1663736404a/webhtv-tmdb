@@ -55,31 +55,57 @@ public class PlaybackProfileMergePolicyTest {
                 PlaybackProfileMergePolicy.effectiveProfile(
                         PlaybackPerformanceSetting.PROFILE_CUSTOM,
                         true));
+        assertEquals(PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT,
+                PlaybackProfileMergePolicy.effectiveProfile(
+                        PlaybackPerformanceSetting.PROFILE_COMPATIBLE,
+                        true));
     }
 
     @Test
-    public void rollbackModeRetainsLegacyRecommendedBehavior() {
-        assertEquals(PlaybackPerformanceSetting.PROFILE_RECOMMENDED,
+    public void legacyMergeStateCannotRestoreRemovedProfiles() {
+        assertEquals(PlaybackPerformanceSetting.PROFILE_AUTO,
                 PlaybackProfileMergePolicy.effectiveProfile(
                         PlaybackPerformanceSetting.PROFILE_RECOMMENDED,
                         false));
-        assertEquals(PlaybackPerformanceSetting.PROFILE_RECOMMENDED,
+        assertEquals(PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT,
+                PlaybackProfileMergePolicy.effectiveProfile(
+                        PlaybackPerformanceSetting.PROFILE_COMPATIBLE,
+                        false));
+        assertEquals(PlaybackPerformanceSetting.PROFILE_AUTO,
                 PlaybackProfileMergePolicy.effectiveProfile(99, false));
     }
 
     @Test
-    public void mergedProfileListRemovesOnlyRecommended() {
+    public void consolidationRefreshesOnlyLegacyFixedBaselines() {
+        assertEquals(PlaybackProfileMergePolicy.ConsolidationAction.APPLY_AUTO,
+                PlaybackProfileMergePolicy.consolidationAction(
+                        PlaybackPerformanceSetting.PROFILE_RECOMMENDED));
+        assertEquals(PlaybackProfileMergePolicy.ConsolidationAction.APPLY_LIGHTWEIGHT,
+                PlaybackProfileMergePolicy.consolidationAction(
+                        PlaybackPerformanceSetting.PROFILE_COMPATIBLE));
+        assertEquals(PlaybackProfileMergePolicy.ConsolidationAction.APPLY_LIGHTWEIGHT,
+                PlaybackProfileMergePolicy.consolidationAction(
+                        PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT));
+        assertEquals(PlaybackProfileMergePolicy.ConsolidationAction.KEEP,
+                PlaybackProfileMergePolicy.consolidationAction(
+                        PlaybackPerformanceSetting.PROFILE_AUTO));
+        assertEquals(PlaybackProfileMergePolicy.ConsolidationAction.KEEP,
+                PlaybackProfileMergePolicy.consolidationAction(
+                        PlaybackPerformanceSetting.PROFILE_CUSTOM));
+    }
+
+    @Test
+    public void profileListAlwaysContainsOnlyAutoAndLightweight() {
         assertArrayEquals(new int[]{
                         PlaybackPerformanceSetting.PROFILE_AUTO,
-                        PlaybackPerformanceSetting.PROFILE_COMPATIBLE,
                         PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT},
                 PlaybackProfileMergePolicy.selectableProfiles(true));
         assertArrayEquals(new int[]{
                         PlaybackPerformanceSetting.PROFILE_AUTO,
-                        PlaybackPerformanceSetting.PROFILE_RECOMMENDED,
-                        PlaybackPerformanceSetting.PROFILE_COMPATIBLE,
                         PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT},
                 PlaybackProfileMergePolicy.selectableProfiles(false));
+        assertEquals(1, PlaybackProfileMergePolicy.positionOf(
+                PlaybackPerformanceSetting.PROFILE_COMPATIBLE, true));
         assertEquals(-1, PlaybackProfileMergePolicy.positionOf(
                 PlaybackPerformanceSetting.PROFILE_CUSTOM, true));
     }
