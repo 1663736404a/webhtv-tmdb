@@ -823,11 +823,8 @@
     <string name="player_performance_help">说明</string>
     <string name="player_performance_help_title">播放性能参数说明</string>
     <string name="player_performance_help_close">关闭</string>
-    <string name="player_performance_help_intro">当前播放器内核：%1$s。普通用户保持“自动”即可；主页面只保留高频设置，高级参数仍可展开，说明会列出每项用途、适用场景和代价。多数底层参数需重新播放或重建播放器后生效。</string>
+    <string name="player_performance_help_intro">当前播放器内核：%1$s。普通用户保持“自动”即可；当前内核可用参数均直接显示并按用途分组，说明会列出每项用途、适用场景和代价。多数底层参数需重新播放或重建播放器后生效。</string>
     <string name="player_performance_common_section">常用参数</string>
-    <string name="player_performance_advanced_section">高级参数</string>
-    <string name="player_performance_advanced_show">已隐藏 %1$d 项 · 点击展开</string>
-    <string name="player_performance_advanced_hide">已展开 %1$d 项 · 点击收起</string>
     <string name="player_performance_experiment_section">实验与回退</string>
     <string name="player_performance_experiment_scope">%1$s 实验范围</string>
     <string name="player_performance_experiment_strategy">策略</string>

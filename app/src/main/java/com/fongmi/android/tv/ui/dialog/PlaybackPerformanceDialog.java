@@ -58,7 +58,6 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
     private LinearLayout list;
     private TabLayout profileTabs;
     private boolean syncingProfileTabs;
-    private boolean showAdvancedParameters;
 
     public static void show(Fragment fragment, Runnable callback) {
         PlaybackPerformanceDialog dialog = new PlaybackPerformanceDialog();
@@ -212,12 +211,13 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
         for (PlaybackPerformanceOption option : split.common()) {
             addHelpItem(content, option.title(), option.description());
         }
-        addHelpSection(content,
-                getString(R.string.player_performance_advanced_section));
+        String section = "";
         for (PlaybackPerformanceOption option : split.advanced()) {
-            addHelpItem(content,
-                    option.section() + " · " + option.title(),
-                    option.description());
+            if (!section.equals(option.section())) {
+                section = option.section();
+                addHelpSection(content, section);
+            }
+            addHelpItem(content, option.title(), option.description());
         }
 
         Dialog dialog = new Dialog(requireContext(), R.style.Theme_WebHTV_LightDialog);
@@ -478,17 +478,6 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
             addRow(option.title(), optionValue(option.id()),
                     optionAction(option.id()));
         }
-        addRow(
-                getString(R.string.player_performance_advanced_section),
-                getString(showAdvancedParameters
-                                ? R.string.player_performance_advanced_hide
-                                : R.string.player_performance_advanced_show,
-                        split.advanced().size()),
-                () -> {
-                    showAdvancedParameters = !showAdvancedParameters;
-                    refreshRows();
-                });
-        if (!showAdvancedParameters) return;
         String section = "";
         for (PlaybackPerformanceOption option : split.advanced()) {
             if (!section.equals(option.section())) {

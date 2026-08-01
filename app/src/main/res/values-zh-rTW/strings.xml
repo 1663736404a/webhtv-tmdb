@@ -807,11 +807,8 @@
     <string name="player_performance_help">說明</string>
     <string name="player_performance_help_title">播放效能參數說明</string>
     <string name="player_performance_help_close">關閉</string>
-    <string name="player_performance_help_intro">目前播放器內核：%1$s。一般使用者保持「自動」即可；主頁面只保留高頻設定，高級參數仍可展開，說明會列出每項用途、適用場景和代價。多數底層參數需重新播放或重建播放器後生效。</string>
+    <string name="player_performance_help_intro">目前播放器內核：%1$s。一般使用者保持「自動」即可；目前內核可用參數均直接顯示並按用途分組，說明會列出每項用途、適用場景和代價。多數底層參數需重新播放或重建播放器後生效。</string>
     <string name="player_performance_common_section">常用參數</string>
-    <string name="player_performance_advanced_section">高級參數</string>
-    <string name="player_performance_advanced_show">已隱藏 %1$d 項 · 點擊展開</string>
-    <string name="player_performance_advanced_hide">已展開 %1$d 項 · 點擊收起</string>
     <string name="player_performance_experiment_section">實驗與回退</string>
     <string name="player_performance_experiment_scope">%1$s 實驗範圍</string>
     <string name="player_performance_experiment_strategy">策略</string>

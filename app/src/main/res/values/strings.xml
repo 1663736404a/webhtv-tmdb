@@ -825,11 +825,8 @@
     <string name="player_performance_help">Guide</string>
     <string name="player_performance_help_title">Playback performance guide</string>
     <string name="player_performance_help_close">Close</string>
-    <string name="player_performance_help_intro">Current player engine: %1$s. Most users should leave the profile on Auto. The main page keeps high-frequency controls visible and folds specialist parameters into Advanced; this guide lists the purpose, suitable use and trade-offs of every item. Most low-level changes take effect after playback restarts or the player is rebuilt.</string>
+    <string name="player_performance_help_intro">Current player engine: %1$s. Most users should leave the profile on Auto. All available controls for the current engine are shown directly and grouped by purpose; this guide lists the purpose, suitable use and trade-offs of every item. Most low-level changes take effect after playback restarts or the player is rebuilt.</string>
     <string name="player_performance_common_section">Common settings</string>
-    <string name="player_performance_advanced_section">Advanced settings</string>
-    <string name="player_performance_advanced_show">%1$d items hidden · Show</string>
-    <string name="player_performance_advanced_hide">%1$d items shown · Hide</string>
     <string name="player_performance_experiment_section">Experiments and rollback</string>
     <string name="player_performance_experiment_scope">%1$s experiment scope</string>
     <string name="player_performance_experiment_strategy">Strategy</string>
