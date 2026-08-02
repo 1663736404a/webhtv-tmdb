@@ -6,6 +6,7 @@ public final class ExoNetworkGuardController {
     public static final long OBSERVE_INTERVAL_MS = 5_000;
     public static final long CONTROL_INTERVAL_MS = 1_000;
     static final long MIN_TREND_WINDOW_MS = 10_000;
+    static final long REBUFFER_MIN_TREND_WINDOW_MS = 5_000;
     static final long ENTRY_CONFIRM_MS = 10_000;
     static final long URGENT_ENTRY_CONFIRM_MS = 3_000;
     static final long RECOVERY_CONFIRM_MS = 8_000;
@@ -78,7 +79,13 @@ public final class ExoNetworkGuardController {
         lastRebufferCount = Math.max(lastRebufferCount, input.rebufferCount());
         if (!input.ready() || !input.playing()) return hold(currentSpeed, input, metrics, "inactive", true);
         if (!input.loading()) return evaluateFullBufferRecovery(input, currentSpeed, metrics);
-        if (!input.trendKnown() || input.trendWindowMs() < MIN_TREND_WINDOW_MS) {
+        boolean rebufferTrendReady = rebuffered
+                && input.trendKnown()
+                && input.trendWindowMs() >= REBUFFER_MIN_TREND_WINDOW_MS
+                && input.bufferedMs() <= metrics.safeBufferMs() + RECOVERY_BUFFER_HEADROOM_MS;
+        if (!input.trendKnown()
+                || (input.trendWindowMs() < MIN_TREND_WINDOW_MS
+                && !rebufferTrendReady)) {
             if (rebuffered) state = State.WARNING;
             else state = currentSpeed < 1f - EPSILON ? State.PROTECT : State.NORMAL;
             tier = tierForSpeed(currentSpeed);

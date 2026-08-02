@@ -449,7 +449,11 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
         BITRATE_ESTIMATOR.updateContent(bytes.contentLengthBytes(), player.getDuration());
         boolean stablePlayback = player.getPlaybackState() == Player.STATE_READY && player.isPlaying();
         BITRATE_ESTIMATOR.observeBytePosition(now, player.getBufferedPosition(), bytes, stablePlayback);
-        BUFFER_TREND.observe(now, player.getTotalBufferedDuration(), stablePlayback && player.isLoading());
+        BUFFER_TREND.observe(
+                now,
+                player.getTotalBufferedDuration(),
+                stablePlayback,
+                player.isLoading());
         ForwardBufferTrend.Snapshot trend = BUFFER_TREND.snapshot();
         rememberStableBufferTrend(trend);
         observeAutoThresholds(

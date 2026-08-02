@@ -1,6 +1,8 @@
 package com.fongmi.android.tv.player.exo;
 
 import com.fongmi.android.tv.player.PlaybackAutoContext;
+import com.fongmi.android.tv.player.PlaybackRoute;
+import com.fongmi.android.tv.player.PlaybackRouteCapabilities;
 
 import org.junit.Test;
 
@@ -54,6 +56,110 @@ public class ExoTargetBufferPolicyTest {
         assertEquals(mib(16), decision.targetBytes());
         assertEquals(0, decision.payloadDemandBytes());
         assertEquals(ExoTargetBufferPolicy.LimitingFactor.UNKNOWN_MEDIA, decision.limitingFactor());
+    }
+
+    @Test
+    public void appOwnedProxyVodUsesConservativeUnknownMediaFallback() {
+        ExoTargetBufferPolicy.UnknownMediaFallback fallback =
+                ExoTargetBufferPolicy.unknownMediaFallback(
+                        proxyVodResource(PlaybackAutoContext.Protocol.UNKNOWN, null),
+                        appProxyPath(),
+                        true,
+                        false,
+                        0);
+        ExoTargetBufferPolicy.Decision decision = ExoTargetBufferPolicy.resolve(
+                ExoTargetBufferPolicy.MediaDemand.unknown(),
+                0,
+                budget(1024, false),
+                fallback,
+                PlaybackAutoContext.DeviceFacts.unknown(),
+                0);
+
+        assertEquals(ExoTargetBufferPolicy.UnknownMediaFallback.APP_PROXY_VOD, fallback);
+        assertEquals(mib(96), decision.targetBytes());
+        assertEquals(mib(96), decision.mediaTierBytes());
+        assertEquals(ExoTargetBufferPolicy.LimitingFactor.UNKNOWN_MEDIA, decision.limitingFactor());
+    }
+
+    @Test
+    public void appProxyFallbackStillObeysUserAndLowRamCapacityCaps() {
+        ExoTargetBufferPolicy.Decision userCapped = ExoTargetBufferPolicy.resolve(
+                ExoTargetBufferPolicy.MediaDemand.unknown(),
+                mib(64),
+                budget(1024, false),
+                ExoTargetBufferPolicy.UnknownMediaFallback.APP_PROXY_VOD,
+                PlaybackAutoContext.DeviceFacts.unknown(),
+                0);
+        ExoTargetBufferPolicy.Decision lowRam = ExoTargetBufferPolicy.resolve(
+                ExoTargetBufferPolicy.MediaDemand.unknown(),
+                0,
+                budget(128, true),
+                ExoTargetBufferPolicy.UnknownMediaFallback.APP_PROXY_VOD,
+                PlaybackAutoContext.DeviceFacts.unknown(),
+                0);
+
+        assertEquals(mib(64), userCapped.targetBytes());
+        assertEquals(mib(24), lowRam.targetBytes());
+    }
+
+    @Test
+    public void adaptiveOrSegmentedProxyDoesNotUseUnknownVodFallback() {
+        assertEquals(
+                ExoTargetBufferPolicy.UnknownMediaFallback.MINIMUM,
+                ExoTargetBufferPolicy.unknownMediaFallback(
+                        proxyVodResource(PlaybackAutoContext.Protocol.UNKNOWN, null),
+                        appProxyPath(),
+                        true,
+                        true,
+                        0));
+        assertEquals(
+                ExoTargetBufferPolicy.UnknownMediaFallback.MINIMUM,
+                ExoTargetBufferPolicy.unknownMediaFallback(
+                        proxyVodResource(PlaybackAutoContext.Protocol.HLS, 1),
+                        appProxyPath(),
+                        true,
+                        false,
+                        0));
+        assertEquals(
+                ExoTargetBufferPolicy.UnknownMediaFallback.MINIMUM,
+                ExoTargetBufferPolicy.unknownMediaFallback(
+                        proxyVodResource(PlaybackAutoContext.Protocol.UNKNOWN, 2),
+                        appProxyPath(),
+                        true,
+                        false,
+                        0));
+        assertEquals(
+                ExoTargetBufferPolicy.UnknownMediaFallback.MINIMUM,
+                ExoTargetBufferPolicy.unknownMediaFallback(
+                        proxyVodResource(
+                                PlaybackAutoContext.Protocol.UNKNOWN,
+                                null,
+                                PlaybackAutoContext.TransferUnit.SEGMENT,
+                                PlaybackAutoContext.ManifestKind.UNKNOWN),
+                        appProxyPath(),
+                        true,
+                        false,
+                        0));
+        assertEquals(
+                ExoTargetBufferPolicy.UnknownMediaFallback.MINIMUM,
+                ExoTargetBufferPolicy.unknownMediaFallback(
+                        proxyVodResource(
+                                PlaybackAutoContext.Protocol.UNKNOWN,
+                                1,
+                                PlaybackAutoContext.TransferUnit.UNKNOWN,
+                                PlaybackAutoContext.ManifestKind.HLS_MEDIA),
+                        appProxyPath(),
+                        true,
+                        false,
+                        0));
+        assertEquals(
+                ExoTargetBufferPolicy.UnknownMediaFallback.MINIMUM,
+                ExoTargetBufferPolicy.unknownMediaFallback(
+                        proxyVodResource(PlaybackAutoContext.Protocol.UNKNOWN, null),
+                        appProxyPath(),
+                        false,
+                        false,
+                        0));
     }
 
     @Test
@@ -269,6 +375,67 @@ public class ExoTargetBufferPolicyTest {
                 PlaybackAutoContext.Fact.unknown(PlaybackAutoContext.PowerState.UNKNOWN),
                 PlaybackAutoContext.Fact.unknown(PlaybackAutoContext.NetworkCost.UNKNOWN),
                 PlaybackAutoContext.Fact.unknown(PlaybackAutoContext.NetworkSnapshot.unknown()));
+    }
+
+    private static PlaybackAutoContext.ResourceFacts proxyVodResource(
+            PlaybackAutoContext.Protocol protocol,
+            Integer variants) {
+        return proxyVodResource(
+                protocol,
+                variants,
+                PlaybackAutoContext.TransferUnit.UNKNOWN,
+                variants == null
+                        ? PlaybackAutoContext.ManifestKind.UNKNOWN
+                        : PlaybackAutoContext.ManifestKind.NONE);
+    }
+
+    private static PlaybackAutoContext.ResourceFacts proxyVodResource(
+            PlaybackAutoContext.Protocol protocol,
+            Integer variants,
+            PlaybackAutoContext.TransferUnit transferUnit,
+            PlaybackAutoContext.ManifestKind manifestKind) {
+        boolean manifestUnknown = variants == null
+                && manifestKind == PlaybackAutoContext.ManifestKind.UNKNOWN;
+        PlaybackAutoContext.ManifestFacts manifest = manifestUnknown
+                ? PlaybackAutoContext.ManifestFacts.unknown()
+                : new PlaybackAutoContext.ManifestFacts(
+                manifestKind,
+                true,
+                null,
+                null,
+                null,
+                variants,
+                null,
+                false);
+        return new PlaybackAutoContext.ResourceFacts(
+                fact(protocol),
+                fact(PlaybackAutoContext.StreamKind.VOD),
+                PlaybackAutoContext.Fact.unknown(PlaybackAutoContext.RangeSupport.UNKNOWN),
+                fact(transferUnit),
+                manifestUnknown
+                        ? PlaybackAutoContext.Fact.unknown(manifest)
+                        : fact(manifest));
+    }
+
+    private static PlaybackAutoContext.PathFacts appProxyPath() {
+        return new PlaybackAutoContext.PathFacts(
+                fact(PlaybackRoute.APP_LOCAL_SERVICE),
+                fact(PlaybackRoute.Owner.APP_MAIN_SERVER),
+                fact(true),
+                fact(PlaybackRouteCapabilities.ObservedLeg.APP_TO_OWNED_LOCAL_SERVICE),
+                fact(PlaybackRouteCapabilities.UpstreamVisibility.APP_SERVICE_PATH),
+                fact(PlaybackRouteCapabilities.ControlScope.APP_OWNED_SERVICE_CODE),
+                fact(PlaybackAutoContext.PathKind.APP_INTERNAL_SERVICE),
+                fact(PlaybackAutoContext.PathKind.APP_INTERNAL_SERVICE),
+                fact(PlaybackAutoContext.UpstreamState.VISIBLE));
+    }
+
+    private static <T> PlaybackAutoContext.Fact<T> fact(T value) {
+        return PlaybackAutoContext.Fact.forSession(
+                value,
+                PlaybackAutoContext.ValueSource.PLAYER_CALLBACK,
+                PlaybackAutoContext.Confidence.HIGH,
+                0);
     }
 
     private static PlaybackAutoContext.Fact<PlaybackAutoContext.MemorySnapshot> snapshotFact(

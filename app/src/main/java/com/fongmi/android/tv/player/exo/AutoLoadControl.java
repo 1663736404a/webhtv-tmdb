@@ -118,7 +118,12 @@ final class AutoLoadControl implements LoadControl {
             return delegateReady;
         }
 
-        int thresholdMs = selection.thresholdMs();
+        int thresholdMs = effectiveDynamicThresholdMs(
+                selection.thresholdMs(),
+                parameters.rebuffering,
+                mode.appProxyVodFallback(),
+                parameters.playbackSpeed,
+                selection.policy().riskLevel());
         boolean adaptiveReady = reachedAdaptiveThreshold(
                 parameters.bufferedDurationUs,
                 parameters.playbackSpeed,
@@ -139,7 +144,11 @@ final class AutoLoadControl implements LoadControl {
                     targetSizeReady,
                     adaptiveReady);
         }
-        return shouldStartDynamicPlayback(targetSizeReady, adaptiveReady);
+        return shouldStartDynamicPlayback(
+                parameters.rebuffering,
+                mode.appProxyVodFallback(),
+                targetSizeReady,
+                adaptiveReady);
     }
 
     @Override
@@ -176,6 +185,33 @@ final class AutoLoadControl implements LoadControl {
             boolean targetSizeReady,
             boolean adaptiveReady) {
         return targetSizeReady || adaptiveReady;
+    }
+
+    static boolean shouldStartDynamicPlayback(
+            boolean rebuffering,
+            boolean appProxyVodFallback,
+            boolean targetSizeReady,
+            boolean adaptiveReady) {
+        if (rebuffering && appProxyVodFallback) return adaptiveReady;
+        return shouldStartDynamicPlayback(targetSizeReady, adaptiveReady);
+    }
+
+    static int effectiveDynamicThresholdMs(
+            int selectedThresholdMs,
+            boolean rebuffering,
+            boolean appProxyVodFallback,
+            float playbackSpeed,
+            ExoPlaybackThresholdPolicy.RiskLevel riskLevel) {
+        int selected = Math.max(0, selectedThresholdMs);
+        if (!rebuffering || !appProxyVodFallback) return selected;
+        ExoPlaybackThresholdPolicy.RiskLevel risk = riskLevel == null
+                ? ExoPlaybackThresholdPolicy.RiskLevel.NONE : riskLevel;
+        boolean minimumProtectionStillFailing =
+                Math.abs(playbackSpeed - ExoNetworkProtectionPolicy.AUTO_MIN_SPEED) <= 0.005f
+                        && risk == ExoPlaybackThresholdPolicy.RiskLevel.CRITICAL;
+        return minimumProtectionStillFailing
+                ? selected
+                : Math.min(selected, ExoLoadControlModePolicy.SINGLE_TRACK_RESCUE_BUFFER_MS);
     }
 
     static long effectiveBackBufferDurationUs(

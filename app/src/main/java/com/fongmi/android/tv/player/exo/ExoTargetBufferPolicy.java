@@ -1,6 +1,7 @@
 package com.fongmi.android.tv.player.exo;
 
 import com.fongmi.android.tv.player.PlaybackAutoContext;
+import com.fongmi.android.tv.player.PlaybackRoute;
 
 import java.util.Objects;
 
@@ -9,6 +10,7 @@ final class ExoTargetBufferPolicy {
 
     static final int MIB = 1024 * 1024;
     static final int MIN_TARGET_BYTES = 16 * MIB;
+    static final int UNKNOWN_PROXY_VOD_TARGET_BYTES = 96 * MIB;
     static final int GUARD_TARGET_BYTES = 192 * MIB;
     static final long TARGET_BUFFER_DURATION_MS = 30_000L;
     static final long BURST_WINDOW_MS = 10_000L;
@@ -32,8 +34,26 @@ final class ExoTargetBufferPolicy {
             ExoBufferBudget.Budget fallbackBudget,
             PlaybackAutoContext.DeviceFacts deviceFacts,
             long elapsedRealtimeMs) {
+        return resolve(
+                mediaDemand,
+                configuredTargetBytes,
+                fallbackBudget,
+                UnknownMediaFallback.MINIMUM,
+                deviceFacts,
+                elapsedRealtimeMs);
+    }
+
+    static Decision resolve(
+            MediaDemand mediaDemand,
+            int configuredTargetBytes,
+            ExoBufferBudget.Budget fallbackBudget,
+            UnknownMediaFallback unknownMediaFallback,
+            PlaybackAutoContext.DeviceFacts deviceFacts,
+            long elapsedRealtimeMs) {
         MediaDemand media = mediaDemand == null ? MediaDemand.unknown() : mediaDemand;
         ExoBufferBudget.Budget fallback = Objects.requireNonNull(fallbackBudget);
+        UnknownMediaFallback unknownFallback = unknownMediaFallback == null
+                ? UnknownMediaFallback.MINIMUM : unknownMediaFallback;
         PlaybackAutoContext.DeviceFacts device = deviceFacts == null
                 ? PlaybackAutoContext.DeviceFacts.unknown() : deviceFacts;
         long now = Math.max(0, elapsedRealtimeMs);
@@ -43,13 +63,15 @@ final class ExoTargetBufferPolicy {
         long burstDemandBytes = media.burstReliable()
                 ? bytesForDuration(media.burstBitsPerSecond(), BURST_WINDOW_MS) : 0;
         long payloadDemandBytes = Math.max(averageDemandBytes, burstDemandBytes);
-        int mediaTierBytes = tierForDemand(payloadDemandBytes);
 
         DeviceBudget deviceBudget = resolveDeviceBudget(fallback, device, now);
         int configuredCap = Math.max(0, configuredTargetBytes);
         long safeCapacityBytes = Math.min(GUARD_TARGET_BYTES, deviceBudget.deviceBudgetBytes());
         if (configuredCap > 0) safeCapacityBytes = Math.min(safeCapacityBytes, configuredCap);
         int safeTierBytes = tierForCapacity(safeCapacityBytes);
+        int mediaTierBytes = media.knownReliable()
+                ? tierForDemand(payloadDemandBytes)
+                : unknownFallback.targetBytes();
         int targetBytes = Math.min(mediaTierBytes, safeTierBytes);
         LimitingFactor factor = limitingFactor(
                 payloadDemandBytes,
@@ -77,7 +99,45 @@ final class ExoTargetBufferPolicy {
                 deviceBudget.pressureUsable(),
                 deviceBudget.memoryPressure(),
                 factor,
+                unknownFallback,
                 media);
+    }
+
+    static UnknownMediaFallback unknownMediaFallback(
+            PlaybackAutoContext.ResourceFacts resourceFacts,
+            PlaybackAutoContext.PathFacts pathFacts,
+            boolean hasVideo,
+            boolean adaptiveVideo,
+            long elapsedRealtimeMs) {
+        if (!hasVideo || adaptiveVideo) return UnknownMediaFallback.MINIMUM;
+        PlaybackAutoContext.ResourceFacts resource = resourceFacts == null
+                ? PlaybackAutoContext.ResourceFacts.unknown() : resourceFacts;
+        PlaybackAutoContext.PathFacts path = pathFacts == null
+                ? PlaybackAutoContext.PathFacts.unknown() : pathFacts;
+        long now = Math.max(0, elapsedRealtimeMs);
+        PlaybackAutoContext.StreamKind stream = usableValue(
+                resource.streamKind(), PlaybackAutoContext.StreamKind.UNKNOWN, now);
+        PlaybackAutoContext.Protocol protocol = usableValue(
+                resource.protocol(), PlaybackAutoContext.Protocol.UNKNOWN, now);
+        PlaybackAutoContext.TransferUnit transferUnit = usableValue(
+                resource.transferUnit(), PlaybackAutoContext.TransferUnit.UNKNOWN, now);
+        PlaybackAutoContext.PathKind playerPath = usableValue(
+                path.playerPath(), PlaybackAutoContext.PathKind.UNKNOWN, now);
+        PlaybackAutoContext.UpstreamState upstreamState = usableValue(
+                path.upstreamState(), PlaybackAutoContext.UpstreamState.UNKNOWN, now);
+        PlaybackRoute.Owner owner = usableValue(
+                path.owner(), PlaybackRoute.Owner.UNKNOWN, now);
+        if (stream != PlaybackAutoContext.StreamKind.VOD
+                || playerPath != PlaybackAutoContext.PathKind.APP_INTERNAL_SERVICE
+                || upstreamState != PlaybackAutoContext.UpstreamState.VISIBLE
+                || owner != PlaybackRoute.Owner.APP_MAIN_SERVER
+                || segmentedOrRealtime(protocol)
+                || segmentedTransfer(transferUnit)
+                || segmentedManifest(resource.manifest(), now)
+                || hasMultipleManifestVariants(resource.manifest(), now)) {
+            return UnknownMediaFallback.MINIMUM;
+        }
+        return UnknownMediaFallback.APP_PROXY_VOD;
     }
 
     static int tierForDemand(long demandBytes) {
@@ -219,6 +279,45 @@ final class ExoTargetBufferPolicy {
         return first + second;
     }
 
+    private static boolean segmentedOrRealtime(PlaybackAutoContext.Protocol protocol) {
+        return protocol == PlaybackAutoContext.Protocol.LOCAL
+                || protocol == PlaybackAutoContext.Protocol.HLS
+                || protocol == PlaybackAutoContext.Protocol.DASH
+                || protocol == PlaybackAutoContext.Protocol.RTSP
+                || protocol == PlaybackAutoContext.Protocol.RTMP;
+    }
+
+    private static boolean segmentedTransfer(PlaybackAutoContext.TransferUnit transferUnit) {
+        return transferUnit == PlaybackAutoContext.TransferUnit.SEGMENT
+                || transferUnit == PlaybackAutoContext.TransferUnit.PART;
+    }
+
+    private static boolean segmentedManifest(
+            PlaybackAutoContext.Fact<PlaybackAutoContext.ManifestFacts> fact,
+            long now) {
+        if (fact == null || !fact.isUsable(now)) return false;
+        PlaybackAutoContext.ManifestKind kind = fact.value().kind();
+        return kind == PlaybackAutoContext.ManifestKind.HLS_MASTER
+                || kind == PlaybackAutoContext.ManifestKind.HLS_MEDIA
+                || kind == PlaybackAutoContext.ManifestKind.DASH_STATIC
+                || kind == PlaybackAutoContext.ManifestKind.DASH_DYNAMIC;
+    }
+
+    private static boolean hasMultipleManifestVariants(
+            PlaybackAutoContext.Fact<PlaybackAutoContext.ManifestFacts> fact,
+            long now) {
+        if (fact == null || !fact.isUsable(now)) return false;
+        Integer variants = fact.value().variantCount();
+        return variants != null && variants > 1;
+    }
+
+    private static <T> T usableValue(
+            PlaybackAutoContext.Fact<T> fact,
+            T fallback,
+            long now) {
+        return fact != null && fact.isUsable(now) ? fact.value() : fallback;
+    }
+
     enum DemandSource {
         CONTENT_LENGTH("content-length", PlaybackAutoContext.ValueSource.ESTIMATOR),
         FORMAT("format", PlaybackAutoContext.ValueSource.ESTIMATOR),
@@ -262,6 +361,27 @@ final class ExoTargetBufferPolicy {
 
         String label() {
             return label;
+        }
+    }
+
+    enum UnknownMediaFallback {
+        MINIMUM("minimum", MIN_TARGET_BYTES),
+        APP_PROXY_VOD("app-proxy-vod", UNKNOWN_PROXY_VOD_TARGET_BYTES);
+
+        private final String label;
+        private final int targetBytes;
+
+        UnknownMediaFallback(String label, int targetBytes) {
+            this.label = label;
+            this.targetBytes = targetBytes;
+        }
+
+        String label() {
+            return label;
+        }
+
+        int targetBytes() {
+            return targetBytes;
         }
     }
 
@@ -335,12 +455,15 @@ final class ExoTargetBufferPolicy {
             boolean memoryPressureUsable,
             PlaybackAutoContext.MemoryPressure memoryPressure,
             LimitingFactor limitingFactor,
+            UnknownMediaFallback unknownMediaFallback,
             MediaDemand mediaDemand) {
 
         Decision {
             memoryPressure = memoryPressure == null
                     ? PlaybackAutoContext.MemoryPressure.UNKNOWN : memoryPressure;
             limitingFactor = limitingFactor == null ? LimitingFactor.UNKNOWN_MEDIA : limitingFactor;
+            unknownMediaFallback = unknownMediaFallback == null
+                    ? UnknownMediaFallback.MINIMUM : unknownMediaFallback;
             mediaDemand = mediaDemand == null ? MediaDemand.unknown() : mediaDemand;
         }
     }

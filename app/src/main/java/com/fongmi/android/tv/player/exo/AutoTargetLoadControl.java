@@ -320,12 +320,23 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
                 PlaybackAnalyticsListener.getMediaBitrateEstimate();
         ExoTargetBufferPolicy.MediaDemand mediaDemand =
                 resolveMediaDemand(trackSelections, estimate);
+        ExoLoadControlModePolicy.TrackProfile tracks =
+                ExoLoadControlModePolicy.TrackProfile.inspect(null, trackSelections);
+        ExoTargetBufferPolicy.UnknownMediaFallback unknownMediaFallback =
+                ExoTargetBufferPolicy.unknownMediaFallback(
+                        context.resource(),
+                        context.path(),
+                        tracks.hasVideo(),
+                        tracks.adaptiveVideo(),
+                        now);
         ExoTargetBufferPolicy.Decision baseline = calculateDecision(
                 mediaDemand,
+                unknownMediaFallback,
                 PlaybackAutoContext.DeviceFacts.unknown(),
                 now);
         ExoTargetBufferPolicy.Decision observed = calculateDecision(
                 mediaDemand,
+                unknownMediaFallback,
                 device,
                 now);
         TargetState previousState = targetStates.get(parameters.playerId);
@@ -362,25 +373,48 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
         PlaybackAnalyticsListener.Snapshot analytics = PlaybackAnalyticsListener.getSnapshot();
         DemandKey actualKey = DemandKey.from(
                 analytics.videoFormat(), analytics.audioFormat());
-        if (!actualKey.known() || actualKey.equals(previous.demandKey())) return;
-
         long now = SystemClock.elapsedRealtime();
-        ExoTargetBufferPolicy.MediaDemand mediaDemand = resolveMediaDemand(
+        ModeState modeState = modeStates.get(playerId);
+        boolean adaptiveVideo = modeState != null
+                && previous.session().equals(modeState.session())
+                && modeState.tracks().adaptiveVideo();
+        boolean hasVideo = modeState != null
+                && previous.session().equals(modeState.session())
+                && modeState.tracks().hasVideo();
+        ExoTargetBufferPolicy.UnknownMediaFallback unknownMediaFallback =
+                ExoTargetBufferPolicy.unknownMediaFallback(
+                        context.resource(),
+                        context.path(),
+                        hasVideo,
+                        adaptiveVideo,
+                        now);
+        boolean demandChanged = actualKey.known()
+                && !actualKey.equals(previous.demandKey());
+        boolean fallbackChanged = unknownMediaFallback
+                != previous.decision().unknownMediaFallback();
+        if (!demandChanged && !fallbackChanged) return;
+
+        ExoTargetBufferPolicy.MediaDemand mediaDemand = actualKey.known()
+                ? resolveMediaDemand(
                 analytics.videoFormat(),
                 analytics.audioFormat(),
-                PlaybackAnalyticsListener.getMediaBitrateEstimate());
-        if (mediaDemand.averageBitsPerSecond() <= 0
-                && mediaDemand.burstBitsPerSecond() <= 0) return;
+                PlaybackAnalyticsListener.getMediaBitrateEstimate())
+                : previous.decision().mediaDemand();
         ExoTargetBufferPolicy.Decision baseline = calculateDecision(
                 mediaDemand,
+                unknownMediaFallback,
                 PlaybackAutoContext.DeviceFacts.unknown(),
                 now);
         ExoTargetBufferPolicy.Decision observed = calculateDecision(
                 mediaDemand,
+                unknownMediaFallback,
                 context.device(),
                 now);
         TargetState next = new TargetState(
-                previous.session(), baseline, observed, actualKey);
+                previous.session(),
+                baseline,
+                observed,
+                actualKey.known() ? actualKey : previous.demandKey());
         if (!targetStates.replace(playerId, previous, next)) return;
 
         boolean published = coordinator.publish(previous.session(), baseline, now);
@@ -413,6 +447,7 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
                 actualTarget.mediaDemand(),
                 configuredTargetBytes,
                 fallbackBudget,
+                actualTarget.unknownMediaFallback(),
                 safeContext.device(),
                 now);
         return ExoLoadControlModePolicy.resolve(
@@ -686,10 +721,23 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
             ExoTargetBufferPolicy.MediaDemand mediaDemand,
             PlaybackAutoContext.DeviceFacts deviceFacts,
             long elapsedRealtimeMs) {
+        return calculateDecision(
+                mediaDemand,
+                ExoTargetBufferPolicy.UnknownMediaFallback.MINIMUM,
+                deviceFacts,
+                elapsedRealtimeMs);
+    }
+
+    private ExoTargetBufferPolicy.Decision calculateDecision(
+            ExoTargetBufferPolicy.MediaDemand mediaDemand,
+            ExoTargetBufferPolicy.UnknownMediaFallback unknownMediaFallback,
+            PlaybackAutoContext.DeviceFacts deviceFacts,
+            long elapsedRealtimeMs) {
         return ExoTargetBufferPolicy.resolve(
                 mediaDemand,
                 configuredTargetBytes,
                 fallbackBudget,
+                unknownMediaFallback,
                 deviceFacts,
                 elapsedRealtimeMs);
     }
@@ -844,6 +892,7 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
                                 computedInput("average_need_bytes", decision.averageDemandBytes(), media.averageSource(), media.averageConfidence()),
                                 computedInput("burst_need_bytes", decision.burstDemandBytes(), media.burstSource(), media.burstConfidence()),
                                 PlaybackTelemetry.DecisionInput.number("media_tier_bytes", decision.mediaTierBytes(), PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH),
+                                PlaybackTelemetry.DecisionInput.text("unknown_media_fallback", decision.unknownMediaFallback().label(), PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH),
                                 PlaybackTelemetry.DecisionInput.number("heap_budget_bytes", decision.heapBudgetBytes(), PlaybackAutoContext.ValueSource.SYSTEM_API, PlaybackAutoContext.Confidence.MEDIUM),
                                 memoryBudgetInput("java_headroom_budget_bytes", decision.javaHeadroomBudgetBytes(), memorySnapshot),
                                 memoryBudgetInput("system_budget_bytes", decision.systemBudgetBytes(), memorySnapshot),
@@ -851,7 +900,6 @@ final class AutoTargetLoadControl extends DefaultLoadControl {
                                 decision.configuredCapBytes() > 0
                                         ? PlaybackTelemetry.DecisionInput.number("configured_cap_bytes", decision.configuredCapBytes(), PlaybackAutoContext.ValueSource.PLAYBACK_REQUEST, PlaybackAutoContext.Confidence.HIGH)
                                         : PlaybackTelemetry.DecisionInput.text("configured_cap_bytes", "auto", PlaybackAutoContext.ValueSource.PLAYBACK_REQUEST, PlaybackAutoContext.Confidence.HIGH),
-                                PlaybackTelemetry.DecisionInput.number("guard_bytes", ExoTargetBufferPolicy.GUARD_TARGET_BYTES, PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH),
                                 pressureInput(decision, memoryPressure))),
                 now);
     }

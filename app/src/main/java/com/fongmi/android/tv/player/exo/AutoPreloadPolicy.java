@@ -21,6 +21,8 @@ final class AutoPreloadPolicy {
     private static final long FAST_BUFFER_MS = 20_000;
     private static final long FAST_FALLBACK_BUFFER_MS = 12_000;
     private static final long EXTERNAL_LOOPBACK_RESUME_BUFFER_MS = 12_000;
+    private static final long APP_PROXY_RECOVERY_BUFFER_MS =
+            ExoNetworkGuardBufferPolicy.LOOPBACK_FLOOR_MS;
     private static final long EXTERNAL_LOOPBACK_NORMAL_BUFFER_MS = 20_000;
     private static final long NORMAL_STABLE_MS = 20_000;
     private static final long RESUME_DELAY_MS = 10_000;
@@ -163,6 +165,10 @@ final class AutoPreloadPolicy {
                 || system.thermal() == PlaybackAutoContext.ThermalState.CRITICAL)) {
             return Reason.THERMAL_PRESSURE;
         }
+        if (unknownAppProxyRecovery(input)
+                && input.bufferedMs() < APP_PROXY_RECOVERY_BUFFER_MS) {
+            return Reason.FOREGROUND_RECOVERY;
+        }
         if (input.loading() && input.bufferedMs() < PreCachePolicy.INITIAL_SAFE_BUFFER_MS) {
             return Reason.FRONT_BUFFER_LOW;
         }
@@ -199,8 +205,11 @@ final class AutoPreloadPolicy {
     }
 
     private boolean resumeEligible(Inputs input) {
-        long requiredBuffer = input.route() == PlaybackRoute.EXTERNAL_LOOPBACK_PROXY
-                ? EXTERNAL_LOOPBACK_RESUME_BUFFER_MS : NORMAL_BUFFER_MS;
+        long requiredBuffer = unknownAppProxyRecovery(input)
+                ? APP_PROXY_RECOVERY_BUFFER_MS
+                : input.route() == PlaybackRoute.EXTERNAL_LOOPBACK_PROXY
+                ? EXTERNAL_LOOPBACK_RESUME_BUFFER_MS
+                : NORMAL_BUFFER_MS;
         if (input.bufferedMs() < requiredBuffer) return false;
         TrendEvidence trend = TrendEvidence.from(input.trend(), input.nowElapsedMs());
         if (trend.usable()) {
@@ -385,6 +394,12 @@ final class AutoPreloadPolicy {
     private static boolean supportsFast(PlaybackRoute route) {
         return route == PlaybackRoute.DIRECT_REMOTE_HTTP
                 || route == PlaybackRoute.APP_LOCAL_SERVICE;
+    }
+
+    private static boolean unknownAppProxyRecovery(Inputs input) {
+        return input.route() == PlaybackRoute.APP_LOCAL_SERVICE
+                && input.mediaBitrateBitsPerSecond() <= 0
+                && input.rebufferCount() > 0;
     }
 
     private static boolean confidenceAtLeast(
@@ -729,6 +744,7 @@ final class AutoPreloadPolicy {
         POWER_SAVE("power-save"),
         THERMAL_PRESSURE("thermal-pressure"),
         THERMAL_MODERATE("thermal-moderate"),
+        FOREGROUND_RECOVERY("foreground-recovery"),
         FRONT_BUFFER_LOW("front-buffer-low"),
         FRONT_BUFFER_MARGIN("front-buffer-margin"),
         BUFFER_DECLINING("buffer-declining"),

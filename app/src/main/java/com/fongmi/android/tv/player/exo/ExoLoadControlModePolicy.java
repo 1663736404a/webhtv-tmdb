@@ -157,7 +157,10 @@ final class ExoLoadControlModePolicy {
                 rescueBytes,
                 hardCapacityBytes(safety),
                 hardProtection,
-                pressure);
+                pressure,
+                actualTarget != null
+                        && actualTarget.unknownMediaFallback()
+                        == ExoTargetBufferPolicy.UnknownMediaFallback.APP_PROXY_VOD);
     }
 
     private static long controlBitrate(ExoTargetBufferPolicy.Decision target) {
@@ -351,7 +354,8 @@ final class ExoLoadControlModePolicy {
             long rescueBytes,
             long hardCapacityBytes,
             boolean hardProtectionAvailable,
-            PlaybackAutoContext.MemoryPressure memoryPressure) {
+            PlaybackAutoContext.MemoryPressure memoryPressure,
+            boolean appProxyVodFallback) {
 
         Decision {
             mode = mode == null ? Mode.OTHER_BYTES : mode;
@@ -381,7 +385,8 @@ final class ExoLoadControlModePolicy {
                     0,
                     0,
                     false,
-                    PlaybackAutoContext.MemoryPressure.UNKNOWN);
+                    PlaybackAutoContext.MemoryPressure.UNKNOWN,
+                    false);
         }
     }
 }

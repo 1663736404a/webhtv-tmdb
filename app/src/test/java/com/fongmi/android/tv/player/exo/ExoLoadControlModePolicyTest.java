@@ -238,6 +238,27 @@ public class ExoLoadControlModePolicyTest {
     }
 
     @Test
+    public void unknownAppProxyVodFallbackIsCarriedIntoRecoveryMode() {
+        ExoTargetBufferPolicy.Decision target = ExoTargetBufferPolicy.resolve(
+                ExoTargetBufferPolicy.MediaDemand.unknown(),
+                0,
+                FALLBACK,
+                ExoTargetBufferPolicy.UnknownMediaFallback.APP_PROXY_VOD,
+                normalDevice(128),
+                NOW);
+
+        ExoLoadControlModePolicy.Decision decision = resolve(
+                PlaybackAutoContext.ResourceFacts.unknown(),
+                singleVideo(),
+                target,
+                target);
+
+        assertEquals(mib(96), target.targetBytes());
+        assertTrue(decision.appProxyVodFallback());
+        assertEquals(ExoLoadControlModePolicy.Mode.OTHER_BYTES, decision.mode());
+    }
+
+    @Test
     public void audioOnlyProgressiveDoesNotUseVideoRescue() {
         ExoTargetBufferPolicy.Decision target = target(
                 100_000_000L, 0, normalDevice(40));

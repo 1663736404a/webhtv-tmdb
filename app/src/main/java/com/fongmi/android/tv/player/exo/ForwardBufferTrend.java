@@ -6,6 +6,7 @@ import java.util.Deque;
 public final class ForwardBufferTrend {
 
     private static final long MIN_SAMPLE_INTERVAL_MS = 1_000;
+    static final long MAX_IDLE_RETENTION_MS = 5_000;
     private static final long MIN_WINDOW_MS = 5_000;
     private static final long MEDIUM_WINDOW_MS = 15_000;
     private static final long HIGH_WINDOW_MS = 30_000;
@@ -19,22 +20,52 @@ public final class ForwardBufferTrend {
     private double fastSlope;
     private double slowSlope;
     private boolean slopeInitialized;
+    private long idleSinceMs = -1;
 
     public synchronized void reset() {
         samples.clear();
         fastSlope = 0;
         slowSlope = 0;
         slopeInitialized = false;
+        idleSinceMs = -1;
     }
 
     public synchronized void observe(long nowMs, long bufferedMs, boolean stablePlayback) {
-        if (!stablePlayback || bufferedMs < 0) {
+        observe(nowMs, bufferedMs, stablePlayback, stablePlayback);
+    }
+
+    public synchronized void observe(
+            long nowMs,
+            long bufferedMs,
+            boolean activePlayback,
+            boolean loading) {
+        if (!activePlayback || bufferedMs < 0) {
             reset();
             return;
         }
+        if (!loading) {
+            if (idleSinceMs < 0) idleSinceMs = nowMs;
+            if (nowMs < idleSinceMs
+                    || nowMs - idleSinceMs > MAX_IDLE_RETENTION_MS) {
+                reset();
+            }
+            return;
+        }
+        boolean resumedAfterIdle = idleSinceMs >= 0;
+        if (resumedAfterIdle) {
+            if (nowMs < idleSinceMs
+                    || nowMs - idleSinceMs > MAX_IDLE_RETENTION_MS) {
+                reset();
+                resumedAfterIdle = false;
+            }
+            idleSinceMs = -1;
+        }
         Sample last = samples.peekLast();
-        if (last != null && nowMs - last.nowMs() < MIN_SAMPLE_INTERVAL_MS) return;
-        if (last != null) updateSlope(nowMs - last.nowMs(), bufferedMs - last.bufferedMs());
+        if (last != null && !resumedAfterIdle
+                && nowMs - last.nowMs() < MIN_SAMPLE_INTERVAL_MS) return;
+        if (last != null && !resumedAfterIdle) {
+            updateSlope(nowMs - last.nowMs(), bufferedMs - last.bufferedMs());
+        }
         samples.addLast(new Sample(nowMs, bufferedMs));
         while (samples.size() > 2 && nowMs - samples.peekFirst().nowMs() > MAX_WINDOW_MS) samples.removeFirst();
     }

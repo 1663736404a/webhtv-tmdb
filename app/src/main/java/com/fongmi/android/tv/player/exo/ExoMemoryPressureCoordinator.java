@@ -174,6 +174,7 @@ final class ExoMemoryPressureCoordinator implements AutoCloseable {
                 baseline.decision().mediaDemand(),
                 baseline.configuredTargetBytes(),
                 baseline.fallbackBudget(),
+                baseline.decision().unknownMediaFallback(),
                 deviceFacts,
                 nowElapsedMs);
     }

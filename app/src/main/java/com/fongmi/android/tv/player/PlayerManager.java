@@ -937,7 +937,11 @@ public class PlayerManager implements ParseCallback {
         boolean playing = player.isPlaying();
         boolean loading = player.isLoading();
         long bufferedMs = Math.max(0, player.getTotalBufferedDuration());
-        networkProtectionTrend.observe(nowMs, bufferedMs, eligible && ready && playing && loading);
+        networkProtectionTrend.observe(
+                nowMs,
+                bufferedMs,
+                eligible && ready && playing,
+                loading);
         ForwardBufferTrend.Snapshot trend = networkProtectionTrend.snapshot();
         PlaybackAnalyticsListener.Snapshot analytics = PlaybackAnalyticsListener.getSnapshot();
         PlaybackAnalyticsListener.DisplayMediaBitrateEstimate media = PlaybackAnalyticsListener.getDisplayMediaBitrateEstimate(getVideoFormat());

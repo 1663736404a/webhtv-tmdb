@@ -191,6 +191,48 @@ public class ExoNetworkGuardControllerTest {
     }
 
     @Test
+    public void actualRebufferCanUseFiveSecondDecliningTrendImmediately() {
+        ExoNetworkGuardController controller = new ExoNetworkGuardController();
+
+        ExoNetworkGuardController.Decision decision = evaluate(
+                controller,
+                10_000,
+                23_000,
+                true,
+                -100,
+                -100,
+                -100,
+                ExoNetworkGuardController.REBUFFER_MIN_TREND_WINDOW_MS,
+                1,
+                1.00f);
+
+        assertTrue(decision.changed());
+        assertEquals(0.990f, decision.targetSpeed(), 0.0001f);
+        assertEquals(ExoNetworkGuardController.State.PROTECT, decision.state());
+    }
+
+    @Test
+    public void highBufferLoaderIdleNeverStartsProtection() {
+        ExoNetworkGuardController controller = new ExoNetworkGuardController();
+
+        ExoNetworkGuardController.Decision decision = evaluate(
+                controller,
+                10_000,
+                45_000,
+                false,
+                -500,
+                -500,
+                -500,
+                20_000,
+                0,
+                1.00f);
+
+        assertFalse(decision.changed());
+        assertEquals(1.00f, decision.targetSpeed(), 0.0001f);
+        assertEquals(ExoNetworkGuardController.State.NORMAL, decision.state());
+    }
+
+    @Test
     public void ineligibleSessionRestoresNormalSpeed() {
         ExoNetworkGuardController controller = new ExoNetworkGuardController();
         ExoNetworkGuardController.Input input = new ExoNetworkGuardController.Input(0, false, true, true, true, 10_000, true, -20, 15_000, 0, 0.93f, 0.85f);

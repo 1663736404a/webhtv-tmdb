@@ -57,6 +57,46 @@ public class AutoLoadControlTest {
         assertTrue(AutoLoadControl.shouldStartDynamicPlayback(true, false));
         assertTrue(AutoLoadControl.shouldStartDynamicPlayback(false, true));
         assertFalse(AutoLoadControl.shouldStartDynamicPlayback(false, false));
+        assertTrue(AutoLoadControl.shouldStartDynamicPlayback(
+                false, true, true, false));
+        assertFalse(AutoLoadControl.shouldStartDynamicPlayback(
+                true, true, true, false));
+        assertTrue(AutoLoadControl.shouldStartDynamicPlayback(
+                true, true, true, true));
+    }
+
+    @Test
+    public void proxyVodKeepsStartupFastAndOnlyUsesLongRecoveryAtProtectionFloor() {
+        assertEquals(1_500, AutoLoadControl.effectiveDynamicThresholdMs(
+                1_500,
+                false,
+                true,
+                1f,
+                ExoPlaybackThresholdPolicy.RiskLevel.NONE));
+        assertEquals(3_000, AutoLoadControl.effectiveDynamicThresholdMs(
+                15_000,
+                true,
+                true,
+                0.90f,
+                ExoPlaybackThresholdPolicy.RiskLevel.CRITICAL));
+        assertEquals(15_000, AutoLoadControl.effectiveDynamicThresholdMs(
+                15_000,
+                true,
+                true,
+                0.85f,
+                ExoPlaybackThresholdPolicy.RiskLevel.CRITICAL));
+        assertEquals(3_000, AutoLoadControl.effectiveDynamicThresholdMs(
+                15_000,
+                true,
+                true,
+                0.75f,
+                ExoPlaybackThresholdPolicy.RiskLevel.CRITICAL));
+        assertEquals(15_000, AutoLoadControl.effectiveDynamicThresholdMs(
+                15_000,
+                true,
+                false,
+                1f,
+                ExoPlaybackThresholdPolicy.RiskLevel.CRITICAL));
     }
 
     @Test

@@ -41,8 +41,8 @@ final class ExoPlaybackDiagnostics {
     static void logTargetDecision(ExoTargetBufferPolicy.Decision decision) {
         if (!SpiderDebug.isEnabled() || decision == null) return;
         ExoTargetBufferPolicy.MediaDemand media = decision.mediaDemand();
-        SpiderDebug.log("exo-buffer", "target selectedBytes=%d mediaTierBytes=%d safeTierBytes=%d factor=%s averageBps=%d averageSource=%s averageConfidence=%s burstBps=%d burstSource=%s burstConfidence=%s averageNeedBytes=%d burstNeedBytes=%d payloadNeedBytes=%d deviceBudgetBytes=%d heapBudgetBytes=%d javaHeadroomBudgetBytes=%d systemBudgetBytes=%d configuredCapBytes=%d guardBytes=%d reserveBytes=%d lowRam=%s snapshotUsable=%s pressureUsable=%s pressure=%s",
-                decision.targetBytes(), decision.mediaTierBytes(), decision.safeTierBytes(), decision.limitingFactor().label(),
+        SpiderDebug.log("exo-buffer", "target selectedBytes=%d mediaTierBytes=%d safeTierBytes=%d factor=%s unknownFallback=%s averageBps=%d averageSource=%s averageConfidence=%s burstBps=%d burstSource=%s burstConfidence=%s averageNeedBytes=%d burstNeedBytes=%d payloadNeedBytes=%d deviceBudgetBytes=%d heapBudgetBytes=%d javaHeadroomBudgetBytes=%d systemBudgetBytes=%d configuredCapBytes=%d guardBytes=%d reserveBytes=%d lowRam=%s snapshotUsable=%s pressureUsable=%s pressure=%s",
+                decision.targetBytes(), decision.mediaTierBytes(), decision.safeTierBytes(), decision.limitingFactor().label(), decision.unknownMediaFallback().label(),
                 media.averageBitsPerSecond(), media.averageSource().label(), media.averageConfidence().label(),
                 media.burstBitsPerSecond(), media.burstSource().label(), media.burstConfidence().label(),
                 decision.averageDemandBytes(), decision.burstDemandBytes(), decision.payloadDemandBytes(),
@@ -54,9 +54,9 @@ final class ExoPlaybackDiagnostics {
     static void logLoadControlMode(ExoLoadControlModePolicy.Decision decision) {
         if (!SpiderDebug.isEnabled() || decision == null) return;
         ExoLoadControlModePolicy.TrackProfile tracks = decision.tracks();
-        SpiderDebug.log("exo-buffer", "mode=%s reason=%s protocol=%s stream=%s prioritizeTime=%s adaptiveVideo=%s selectedVideoCandidates=%d availableVideoFormats=%d manifestVariants=%d bitrateBps=%d targetBytes=%d targetDurationMs=%d rescueBytes=%d hardCapacityBytes=%d hardProtection=%s memoryPressure=%s",
+        SpiderDebug.log("exo-buffer", "mode=%s reason=%s protocol=%s stream=%s prioritizeTime=%s appProxyVodFallback=%s adaptiveVideo=%s selectedVideoCandidates=%d availableVideoFormats=%d manifestVariants=%d bitrateBps=%d targetBytes=%d targetDurationMs=%d rescueBytes=%d hardCapacityBytes=%d hardProtection=%s memoryPressure=%s",
                 decision.mode().label(), decision.reason().label(), decision.protocol().label(),
-                decision.streamKind().label(), decision.mode().prioritizeTime(),
+                decision.streamKind().label(), decision.mode().prioritizeTime(), decision.appProxyVodFallback(),
                 tracks.adaptiveVideo(), tracks.selectedVideoCandidates(), tracks.availableVideoFormats(),
                 decision.manifestVariantCount(), decision.bitrateBitsPerSecond(), decision.targetBytes(),
                 decision.targetDurationMs(), decision.rescueBytes(), decision.hardCapacityBytes(),

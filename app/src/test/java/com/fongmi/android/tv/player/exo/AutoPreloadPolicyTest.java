@@ -325,6 +325,47 @@ public class AutoPreloadPolicyTest {
     }
 
     @Test
+    public void unknownAppProxyMediaKeepsPreloadPausedUntilForegroundReserveRecovers() {
+        AutoPreloadPolicy policy = new AutoPreloadPolicy();
+        AutoPreloadPolicy.Inputs low = new AutoPreloadPolicy.Inputs(
+                SESSION,
+                true,
+                PlaybackRoute.APP_LOCAL_SERVICE,
+                ExoNetworkGuardBufferPolicy.LOOPBACK_FLOOR_MS - 1,
+                0,
+                1,
+                true,
+                stableTrend(0, ExoNetworkGuardBufferPolicy.LOOPBACK_FLOOR_MS - 1),
+                AutoPreloadPolicy.ThroughputEvidence.unknown(),
+                safeSystem(),
+                false,
+                false,
+                0);
+        AutoPreloadPolicy.Inputs recovered = new AutoPreloadPolicy.Inputs(
+                SESSION,
+                true,
+                PlaybackRoute.APP_LOCAL_SERVICE,
+                ExoNetworkGuardBufferPolicy.LOOPBACK_FLOOR_MS,
+                0,
+                1,
+                true,
+                stableTrend(15_000, ExoNetworkGuardBufferPolicy.LOOPBACK_FLOOR_MS),
+                AutoPreloadPolicy.ThroughputEvidence.unknown(),
+                safeSystem(),
+                false,
+                false,
+                15_000);
+
+        AutoPreloadPolicy.Decision paused = policy.evaluate(low);
+        AutoPreloadPolicy.Decision resumed = policy.evaluate(recovered);
+
+        assertFalse(paused.enabled());
+        assertEquals("foreground-recovery", paused.reason());
+        assertTrue(resumed.enabled());
+        assertEquals(1, resumed.threads());
+    }
+
+    @Test
     public void fastModeFallsBackWhenFrontBufferMarginShrinks() {
         AutoPreloadPolicy policy = fastPolicy();
 
