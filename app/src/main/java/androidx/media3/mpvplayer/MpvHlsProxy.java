@@ -78,8 +78,6 @@ public final class MpvHlsProxy extends NanoHTTPD {
     private static final int PREFIX_SCAN_LIMIT = 64 * 1024;
     private static final long SESSION_TTL_MS = TimeUnit.MINUTES.toMillis(3);
     private static final long MIN_CACHE_FILE_BYTES = 1;
-    private static final byte[] PNG_SIGNATURE = new byte[]{(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
-    private static final byte[] PNG_IEND = new byte[]{0x49, 0x45, 0x4E, 0x44, (byte) 0xAE, 0x42, 0x60, (byte) 0x82};
     private static final Pattern DASH_BASE_URL = Pattern.compile("(<BaseURL\\b[^>]*>)(.*?)(</BaseURL>)", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
     private static final Pattern CONTENT_RANGE = Pattern.compile("bytes\\s+(\\d+)-(\\d+)/(\\d+|\\*)", Pattern.CASE_INSENSITIVE);
 
@@ -607,10 +605,12 @@ public final class MpvHlsProxy extends NanoHTTPD {
                 }
             }
 
-            boolean mayStripPngPrefix = isPngMime(type);
+            boolean mayStripPngPrefix = MpvHlsSegmentContentPolicy.shouldProbePngPrefix(
+                    type == null ? null : type.toString(),
+                    target.role() == HlsPlaylistRewriter.UriRole.MEDIA_SEGMENT);
             recordItemResponse(target.sessionId, response.code(), target.url);
             long contentLength = body.contentLength();
-            String mime = mediaMimeFor(target.url, finalUrl, type);
+            String mime = mayStripPngPrefix ? MIME_TS : mediaMimeFor(target.url, finalUrl, type);
             InputStream source = body.byteStream();
             if (automaticPreloadMode && kernel == PlayerSetting.MPV
                     && response.isSuccessful() && !mayStripPngPrefix
@@ -880,7 +880,9 @@ public final class MpvHlsProxy extends NanoHTTPD {
         try (okhttp3.Response response = fetch(session, url, null, true)) {
             if (!preloadGate.allows(preloadGeneration)) return;
             ResponseBody body = response.body();
-            if (!response.isSuccessful() || body == null || isPlaylistUrl(url, body.contentType()) || isPngMime(body.contentType())) return;
+            if (!response.isSuccessful() || body == null || isPlaylistUrl(url, body.contentType())
+                    || MpvHlsSegmentContentPolicy.shouldProbePngPrefix(
+                    body.contentType() == null ? null : body.contentType().toString(), true)) return;
             long contentLength = body.contentLength();
             if (contentLength < MIN_CACHE_FILE_BYTES || contentLength > configuredCacheLimitBytes()) return;
             String key = file.getName();
@@ -2119,8 +2121,8 @@ public final class MpvHlsProxy extends NanoHTTPD {
             initialized = true;
             prefix = readPrefix();
             prefixLength = prefix.length;
-            int stripOffset = pngStripOffset(prefix);
-            if (stripOffset > 0 && stripOffset < prefixLength && looksLikeTransportStream(prefix, stripOffset)) {
+            int stripOffset = MpvHlsSegmentContentPolicy.findPngWrappedTransportStreamOffset(prefix, prefixLength);
+            if (stripOffset > 0 && stripOffset < prefixLength) {
                 prefixOffset = stripOffset;
                 SpiderDebug.log(TAG, "strip png prefix offset=%d prefixBytes=%d url=%s", stripOffset, prefixLength, shortUrl(url));
             } else {
@@ -2135,8 +2137,8 @@ public final class MpvHlsProxy extends NanoHTTPD {
                 int read = upstream.read(buffer, length, buffer.length - length);
                 if (read == -1) break;
                 length += read;
-                if (length >= PNG_SIGNATURE.length && !startsWith(buffer, length, PNG_SIGNATURE)) break;
-                int offset = pngStripOffset(buffer, length);
+                if (length >= 8 && !MpvHlsSegmentContentPolicy.startsWithPngSignature(buffer, length)) break;
+                int offset = MpvHlsSegmentContentPolicy.findPngWrappedTransportStreamOffset(buffer, length);
                 if (offset > 0 && length > offset + 188) break;
             }
             byte[] result = new byte[length];
@@ -2144,42 +2146,5 @@ public final class MpvHlsProxy extends NanoHTTPD {
             return result;
         }
 
-        private static int pngStripOffset(byte[] data) {
-            return pngStripOffset(data, data.length);
-        }
-
-        private static int pngStripOffset(byte[] data, int length) {
-            if (!startsWith(data, length, PNG_SIGNATURE)) return -1;
-            int iend = indexOf(data, length, PNG_IEND);
-            return iend < 0 ? -1 : iend + PNG_IEND.length;
-        }
-
-        private static boolean looksLikeTransportStream(byte[] data, int offset) {
-            if (offset >= data.length || data[offset] != 0x47) return false;
-            if (offset + 188 < data.length && data[offset + 188] == 0x47) return true;
-            if (offset + 376 < data.length && data[offset + 376] == 0x47) return true;
-            return true;
-        }
-
-        private static boolean startsWith(byte[] data, int length, byte[] prefix) {
-            if (length < prefix.length) return false;
-            for (int i = 0; i < prefix.length; i++) if (data[i] != prefix[i]) return false;
-            return true;
-        }
-
-        private static int indexOf(byte[] data, int length, byte[] needle) {
-            int end = length - needle.length;
-            for (int i = 0; i <= end; i++) {
-                boolean match = true;
-                for (int j = 0; j < needle.length; j++) {
-                    if (data[i + j] != needle[j]) {
-                        match = false;
-                        break;
-                    }
-                }
-                if (match) return i;
-            }
-            return -1;
-        }
     }
 }
