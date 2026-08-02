@@ -38,7 +38,8 @@ public final class EpisodeTitleCompact {
     private static final Pattern CATEGORY_HEADER = Pattern.compile("(?i)^\\s*\\[(PV|其他|番外|花絮|舞台剧|舞台劇)\\]\\s*(.*)$");
     private static final Pattern REPEATED_BRACKET_SERIES = Pattern.compile("(?i)^\\s*[\\[【]\\s*([^\\]】]{1,24}?)\\s*[\\]】]\\s*\\1\\s*((?:S\\s*[0-9]{1,2}\\s*E\\s*[0-9]{1,4}|EP?\\s*[0-9]{1,4}|SP\\s*[0-9]{1,4}|[0-9]{1,4}(?:[.·][0-9]+)?))(?=$|[\\s._\\-·|/\\\\:：,，;；\\[\\]()（）【】《》])");
     private static final Pattern BARE_STRUCTURED_HEADER = Pattern.compile("(?i)^\\s*\\[(?:DBD-Raws|[^\\]]*(?:字幕组|字幕組|字幕团|字幕團))\\]");
-    private static final Pattern INLINE_EPISODE = Pattern.compile("(?i)(?<![0-9])([0-9]{1,3}(?:\\.[0-9]+)?(?:SP)?)[\\s._-]*([\\p{IsHan}々〆〇ヶ]+(?:[（(][^）)]{1,16}[）)])?)");
+    // Android 9's ICU 60 rejects the Java-specific IsHan alias; sc=Han works on both Android and the JVM.
+    private static final Pattern INLINE_EPISODE = Pattern.compile("(?i)(?<![0-9])([0-9]{1,3}(?:\\.[0-9]+)?(?:SP)?)[\\s._-]*([\\p{sc=Han}々〆〇ヶ]+(?:[（(][^）)]{1,16}[）)])?)");
     private static final Pattern LEADING_FILE_EPISODE = Pattern.compile("(?i)^\\s*([0-9]{1,3})(?=$|[\\s._\\-·|/\\\\:：,，;；\\[\\]()（）【】《》])");
     private static final Pattern SEMANTIC_FILE_TITLE = Pattern.compile("(?i)^\\s*(剧场版|劇場版|特别篇|特別篇)\\s+(.+)$");
     private static final Pattern TECHNICAL_TITLE_SUFFIX = Pattern.compile("(?i)(?:^|[\\s._\\-·])(?:4320P|2160P|1080P|720P|[48]K|HDR10(?:\\+|⁺)?|HDR|SDR|DV|DOLBY|HEVC|H[.]?26[45]|X26[45]|AVC|AV1|AAC|FLAC|WEB-?DL|WEBRIP|BLU-?RAY|BDRIP|BD|MP4|MKV|AVI|TS|(?:HI)?10-?BIT|8-?BIT|(?:19|20)[0-9]{2}[-._][0-9]{1,2}[-._][0-9]{1,2})(?=$|[\\s._\\-·])");
