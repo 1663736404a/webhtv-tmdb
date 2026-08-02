@@ -92,8 +92,6 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     private static final String HLS_LOAD_OPTIONS = "demuxer=lavf,demuxer-lavf-format=hls,demuxer-lavf-probesize=10485760,demuxer-lavf-analyzeduration=5";
     private static final String DASH_LOAD_OPTIONS = "demuxer=lavf,demuxer-lavf-format=dash,demuxer-lavf-probesize=10485760,demuxer-lavf-analyzeduration=5";
     private static final int RECENT_LOG_LIMIT = 32;
-    private static final String HEADER_ACCEPT = "Accept";
-    private static final String HEADER_ORIGIN = "Origin";
     private static final Object NATIVE_CONTEXT_LOCK = new Object();
     @Nullable
     private static MpvPlayer nativeContextOwner;
@@ -1795,30 +1793,18 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     }
 
     private Map<String, String> applyMediaOptions(MediaItem item) {
-        Map<String, String> headers = new LinkedHashMap<>(extractHeaders(item));
-        String userAgent = findHeader(headers, HttpHeaders.USER_AGENT);
-        String referer = findHeader(headers, HttpHeaders.REFERER);
-        boolean explicitReferer = !TextUtils.isEmpty(referer);
-        boolean localProxy = item.localConfiguration != null && isOpaqueLocalProxy(item.localConfiguration.uri.toString());
-        if (TextUtils.isEmpty(userAgent)) userAgent = config.userAgent();
-        // Loopback media URLs are opaque proxy endpoints. Deriving their origin as
-        // the upstream Referer can make the proxy forward 127.0.0.1 to providers
-        // which reject it. Preserve only Referer values supplied by the source.
-        if (TextUtils.isEmpty(referer) && !localProxy) referer = config.referer();
-        if (TextUtils.isEmpty(referer) && !localProxy && item.localConfiguration != null) referer = originOf(item.localConfiguration.uri);
-        String origin = findHeader(headers, HEADER_ORIGIN);
-        if (!TextUtils.isEmpty(userAgent)) putHeader(headers, HttpHeaders.USER_AGENT, userAgent);
-        if (!TextUtils.isEmpty(referer)) putHeader(headers, HttpHeaders.REFERER, referer);
-        if (TextUtils.isEmpty(origin) && (!localProxy || explicitReferer)) origin = originOf(referer);
-        if (!TextUtils.isEmpty(origin)) putHeader(headers, HEADER_ORIGIN, origin);
-        if (TextUtils.isEmpty(findHeader(headers, HEADER_ACCEPT))) putHeader(headers, HEADER_ACCEPT, "*/*");
+        MpvRequestHeaderPolicy.Resolved resolved = MpvRequestHeaderPolicy.resolve(extractHeaders(item), config.userAgent());
+        Map<String, String> headers = resolved.headers();
+        String userAgent = resolved.userAgent();
+        String referer = resolved.referer();
+        String origin = resolved.origin();
         String headerFields = buildHeaderFields(headers);
         setRuntimeString("user-agent", userAgent == null ? "" : userAgent);
         setRuntimeString("referrer", referer == null ? "" : referer);
         setRuntimeString("http-header-fields", headerFields);
         if (item.mediaMetadata.title != null) setRuntimeString("force-media-title", item.mediaMetadata.title.toString());
-        SpiderDebug.log("mpv", "media options localProxy=%s uaEmpty=%s refererEmpty=%s originEmpty=%s headerNames=%s headerFields=%s",
-                localProxy, TextUtils.isEmpty(userAgent), TextUtils.isEmpty(referer), TextUtils.isEmpty(origin), headerNames(headers), !TextUtils.isEmpty(headerFields));
+        SpiderDebug.log("mpv", "media options sourceHeadersOnly=true uaEmpty=%s refererEmpty=%s originEmpty=%s headerNames=%s headerFields=%s",
+                TextUtils.isEmpty(userAgent), TextUtils.isEmpty(referer), TextUtils.isEmpty(origin), headerNames(headers), !TextUtils.isEmpty(headerFields));
         return headers;
     }
 
@@ -1844,18 +1830,6 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         return String.join(",", fields);
     }
 
-    private void putHeader(Map<String, String> headers, String name, String value) {
-        if (TextUtils.isEmpty(value)) return;
-        String existing = null;
-        for (String key : headers.keySet()) {
-            if (equalsHeader(key, name)) {
-                existing = key;
-                break;
-            }
-        }
-        headers.put(existing == null ? name : existing, value.trim());
-    }
-
     private List<String> headerNames(Map<String, String> headers) {
         if (headers.isEmpty()) return List.of();
         List<String> names = new ArrayList<>();
@@ -1868,35 +1842,8 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         return value.replace("\\", "\\\\").replace(",", "\\,");
     }
 
-    @Nullable
-    private String findHeader(Map<String, String> headers, String name) {
-        for (Map.Entry<String, String> entry : headers.entrySet()) {
-            if (equalsHeader(entry.getKey(), name)) return entry.getValue();
-        }
-        return null;
-    }
-
     private boolean equalsHeader(String a, String b) {
         return a != null && a.equalsIgnoreCase(b);
-    }
-
-    @Nullable
-    private String originOf(String uri) {
-        if (TextUtils.isEmpty(uri)) return null;
-        try {
-            return originOf(Uri.parse(uri));
-        } catch (Throwable ignored) {
-            return null;
-        }
-    }
-
-    @Nullable
-    private String originOf(Uri uri) {
-        if (uri == null || TextUtils.isEmpty(uri.getScheme()) || TextUtils.isEmpty(uri.getHost())) return null;
-        String scheme = uri.getScheme();
-        int port = uri.getPort();
-        if (port > 0 && port != 80 && port != 443) return scheme + "://" + uri.getHost() + ":" + port;
-        return scheme + "://" + uri.getHost();
     }
 
     private String playableUri(Uri uri) throws IOException {
