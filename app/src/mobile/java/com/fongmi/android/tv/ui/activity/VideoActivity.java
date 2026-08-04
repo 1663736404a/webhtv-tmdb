@@ -5593,6 +5593,7 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
                 player().reset();
                 break;
             case Player.STATE_ENDED:
+                checkEnded(true);
                 break;
         }
     }
