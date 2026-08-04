@@ -1115,7 +1115,7 @@ public class LiveActivity extends PlaybackActivity implements CustomKeyDown.List
             Notify.show(R.string.live_program_empty);
             return;
         }
-        LiveProgramDialog.create().channel(mChannel).zoneId(mViewModel.getZoneId()).show(this);
+        LiveProgramDialog.create().channel(mChannel).zoneId(mViewModel.getZoneId()).listener(this::onItemClick).show(this);
         hideControl();
         hideInfo();
     }
