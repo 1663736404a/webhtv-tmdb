@@ -388,6 +388,37 @@ public class EpisodeTitleCompactTest {
         }
     }
 
+    @Test
+    public void shinkengerQuarkUsesMakuAndSemanticSpecialLabels() throws Exception {
+        List<String> names = loadFixture("/shinkenger-quark-short-display-regression.txt");
+        List<String> displays = EpisodeTitleCompact.compact(names);
+        assertEquals(57, names.size());
+        assertEquals(names.size(), displays.size());
+
+        for (String display : displays) {
+            assertFalse(display, display.contains("DAY]"));
+            assertFalse(display, display.matches("(?i).*(?:BDRIP|WEBRIP|1080P|480P|X264|FLAC).*"));
+        }
+        for (int i = 0; i < 51; i++) {
+            if (names.get(i).contains("仮面ライダーディケイド")) continue;
+            assertTrue(names.get(i) + " -> " + displays.get(i), displays.get(i).matches("^(?:第[0-9一二三四五六七八九十百千零〇两兩]+幕|最終幕)(?: DC版)? \\[[0-9.]+GB\\]$"));
+        }
+
+        assertEquals("第四十七幕 [1.67GB]", displays.get(0));
+        assertEquals("第一幕 DC版 [1.86GB]", displays.get(1));
+        assertEquals("第24話 [1.37GB]", displays.get(16));
+        assertEquals("第25話 [1.29GB]", displays.get(32));
+        assertEquals("最終幕 [1.71GB]", displays.get(50));
+        assertEquals(List.of(
+                "スペシャルDVD 光侍驚変身 [988.77MB]",
+                "VS エピック ON 銀幕 [4.71GB]",
+                "VS 銀幕BANG [5.11GB]",
+                "特別幕 [5.65GB]",
+                "ファイナルライブ2010 [1.86GB]",
+                "銀幕版 天下分け目の戦 [1.52GB]"
+        ), displays.subList(51, 57));
+    }
+
     private List<String> loadFixture(String resource) throws Exception {
         InputStream stream = getClass().getResourceAsStream(resource);
         assertNotNull(stream);

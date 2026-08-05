@@ -38,6 +38,10 @@ public final class EpisodeTitleCompact {
     private static final Pattern CATEGORY_HEADER = Pattern.compile("(?i)^\\s*\\[(PV|其他|番外|花絮|舞台剧|舞台劇)\\]\\s*(.*)$");
     private static final Pattern REPEATED_BRACKET_SERIES = Pattern.compile("(?i)^\\s*[\\[【]\\s*([^\\]】]{1,24}?)\\s*[\\]】]\\s*\\1\\s*((?:S\\s*[0-9]{1,2}\\s*E\\s*[0-9]{1,4}|EP?\\s*[0-9]{1,4}|SP\\s*[0-9]{1,4}|[0-9]{1,4}(?:[.·][0-9]+)?))(?=$|[\\s._\\-·|/\\\\:：,，;；\\[\\]()（）【】《》])");
     private static final Pattern BARE_STRUCTURED_HEADER = Pattern.compile("(?i)^\\s*\\[(?:DBD-Raws|[^\\]]*(?:字幕组|字幕組|字幕团|字幕團))\\]");
+    private static final String CJK_NUMBER = "[0-9一二三四五六七八九十百千零〇两兩]+";
+    private static final Pattern MAKU_BRACKET = Pattern.compile("^\\s*((?:第\\s*" + CJK_NUMBER + "\\s*幕)|(?:(?:最終|最终)\\s*幕))(?:\\s+.*)?$");
+    private static final Pattern MAKU_EDITION = Pattern.compile("(?i)[\\[【]\\s*(?:特別版|特别版)(?:\\s*[（(]\\s*([^）)]+)\\s*[）)])?\\s*[\\]】]");
+    private static final Pattern DAY_RELEASE_CONTENT = Pattern.compile("(?i)\\[DAY\\]\\s*\\[([^\\]]+)\\]");
     // Android 9's ICU 60 rejects the Java-specific IsHan alias; sc=Han works on both Android and the JVM.
     private static final Pattern INLINE_EPISODE = Pattern.compile("(?i)(?<![0-9])([0-9]{1,3}(?:\\.[0-9]+)?(?:SP)?)[\\s._-]*([\\p{sc=Han}々〆〇ヶ]+(?:[（(][^）)]{1,16}[）)])?)");
     private static final Pattern LEADING_FILE_EPISODE = Pattern.compile("(?i)^\\s*([0-9]{1,3})(?=$|[\\s._\\-·|/\\\\:：,，;；\\[\\]()（）【】《》])");
@@ -51,7 +55,7 @@ public final class EpisodeTitleCompact {
     private static final Pattern TECHNICAL_DETAIL = Pattern.compile("(?i).*(?:[0-9]{3,4}\\s*[x×]\\s*[0-9]{3,4}|(?:4320|2160|1080|720|576|480)P(?:60P)?|HI[0-9]+P|HDR10|HDR|SDR|DOLBY|HEVC|AVC|X26[45]|H[.]?26[45]|DIVX|AAC|AC3|EAC3|DDP|PCM|FLAC|DTS|TRUEHD|WEB-?DL|WEBRIP|BLU-?RAY|BDRIP|TVRIP|DVDRIP|HDRIP|MP4|MKV|AVI|M2TS).*");
     private static final Pattern LANGUAGE_DETAIL = Pattern.compile("(?i)(?:(?:GB|CHS|CHT|BIG5)(?:[·._\\s-]*(?:CN|JAP|JP|CHS|CHT))*|.*(?:字幕|双语|中字|外挂|内嵌|简繁|繁中|简中).*)");
     private static final Pattern COLLECTION_VARIANT_TOKEN = Pattern.compile("(?i)(?:4320|2160|1080|720)P|[48]K|HDR10(?:\\+|⁺)?|HDR|SDR|DV|HEVC|H[.]?265|X265|AVC|H[.]?264|X264|AV1");
-    private static final Pattern EPISODE_START = Pattern.compile("(?i)^(?:S\\s*[0-9]{1,2}\\s*E\\s*[0-9]{1,4}(?:\\s*(?:E|[-~—–])\\s*[0-9]{1,4})?|[0-9]{1,2}\\s*x\\s*[0-9]{1,4}(?:\\s*[-~—–]\\s*[0-9]{1,4})?|第\\s*[0-9一二三四五六七八九十百]+\\s*(?:集|话|話|期|章|回)|[0-9]{1,4}\\s*(?:集|话|話|期|章|回)|(?:EP|E)\\s*[0-9]{1,4}(?:\\s*[-~—–]\\s*[0-9]{1,4})?|[0-9]{4}[-._][0-9]{1,2}[-._][0-9]{1,2}|[0-9]{1,4}(?:\\D|$)|[上下](?:集|部)?|前篇|后篇|後篇|正片|预告|預告|花絮)");
+    private static final Pattern EPISODE_START = Pattern.compile("(?i)^(?:S\\s*[0-9]{1,2}\\s*E\\s*[0-9]{1,4}(?:\\s*(?:E|[-~—–])\\s*[0-9]{1,4})?|[0-9]{1,2}\\s*x\\s*[0-9]{1,4}(?:\\s*[-~—–]\\s*[0-9]{1,4})?|第\\s*[0-9一二三四五六七八九十百千零〇两兩]+\\s*(?:集|话|話|期|章|回|幕)|(?:最終|最终|特別|特别)\\s*幕|[0-9]{1,4}\\s*(?:集|话|話|期|章|回)|(?:EP|E)\\s*[0-9]{1,4}(?:\\s*[-~—–]\\s*[0-9]{1,4})?|[0-9]{4}[-._][0-9]{1,2}[-._][0-9]{1,2}|[0-9]{1,4}(?:\\D|$)|[上下](?:集|部)?|前篇|后篇|後篇|正片|预告|預告|花絮)");
     private static final Pattern WEAK_EPISODE_TOKEN = Pattern.compile("(?i)[上下](?:集|部)?|前篇|后篇|後篇|正片|预告|預告|花絮");
     private static final Pattern VARIANT_TOKEN = Pattern.compile("(?i)(?:^|[\\s._\\-·|/\\\\:：,，;；\\[\\]()（）【】《》])((?:4320|2160|1080|720)P|[48]K|HQ|HD|HDR10(?:\\+|⁺)?|HDR|SDR|DV|60FPS|50FPS|30FPS|25FPS|24FPS|10BITS|8BITS|HEVC|H265|H\\.265|AVC|H264|H\\.264|AV1|DDP\\s*2[.·]?0|AAC\\s*2[.·]?0)(?=$|[\\s._\\-·|/\\\\:：,，;；\\[\\]()（）【】《》])");
     private static final Pattern TAIL_CODE = Pattern.compile("(?i)[._\\-·]([0-9]{8,})$");
@@ -59,6 +63,7 @@ public final class EpisodeTitleCompact {
     private static final Pattern[] EPISODE_TOKENS = {
             Pattern.compile("(?i)S\\s*[0-9]{1,2}\\s*E\\s*[0-9]{1,4}(?:\\s*(?:E|[-~—–])\\s*[0-9]{1,4})?"),
             Pattern.compile("(?i)(?<![0-9])[0-9]{1,2}\\s*[x×]\\s*[0-9]{1,4}(?:\\s*[-~—–]\\s*[0-9]{1,4})?(?![0-9])"),
+            Pattern.compile("(?i)(?:第\\s*[0-9一二三四五六七八九十百千零〇两兩]+\\s*幕|(?:最終|最终|特別|特别)\\s*幕)"),
             Pattern.compile("(?i)第\\s*[0-9一二三四五六七八九十百]+\\s*(?:集|话|話|期|章|回)"),
             Pattern.compile("(?i)[0-9]{1,4}\\s*(?:集|话|話|期|章|回)"),
             Pattern.compile("(?i)(?:EP|E)\\s*[0-9]{1,4}(?:\\s*[-~—–]\\s*[0-9]{1,4})?"),
@@ -317,12 +322,62 @@ public final class EpisodeTitleCompact {
         if (nested.matches()) return findNestedCollectionDisplay(nested.group(2));
         Matcher category = CATEGORY_HEADER.matcher(text);
         if (category.matches()) return findCategoryDisplay(category.group(1), category.group(2));
+        String maku = findMakuDisplay(text);
+        if (!isEmpty(maku)) return maku;
+        String dayRelease = findDayReleaseDisplay(text);
+        if (!isEmpty(dayRelease)) return dayRelease;
         String repeated = findRepeatedBracketSeriesDisplay(text);
         if (!isEmpty(repeated)) return repeated;
         if (BARE_STRUCTURED_HEADER.matcher(text).find()) return findNestedCollectionDisplay(text);
         String fileDisplay = findLeadingFileDisplay(text);
         if (!isEmpty(fileDisplay)) return fileDisplay;
         return "";
+    }
+
+    private static String findMakuDisplay(String text) {
+        Matcher bracket = BRACKET_TOKEN.matcher(stripFileNoise(text));
+        while (bracket.find()) {
+            Matcher maku = MAKU_BRACKET.matcher(cleanupEdge(bracket.group(1)));
+            if (!maku.matches()) continue;
+            String display = normalizeEpisodeToken(maku.group(1));
+            Matcher edition = MAKU_EDITION.matcher(text);
+            if (!edition.find()) return display;
+            String detail = cleanupEdge(edition.group(1));
+            return display + " " + (isEmpty(detail) ? "特別版" : normalizeFullWidthDigits(detail));
+        }
+        return "";
+    }
+
+    private static String findDayReleaseDisplay(String text) {
+        Matcher matcher = DAY_RELEASE_CONTENT.matcher(stripFileNoise(text));
+        if (!matcher.find()) return "";
+        String value = normalizeDisplayText(matcher.group(1).replace('\u3000', ' '));
+        int index = value.indexOf("スペシャルDVD");
+        if (index >= 0) return normalizeDisplayText(value.substring(index));
+        String normalizedVs = value.replace("ＶＳ", "VS");
+        if (normalizedVs.contains("VS")) {
+            index = normalizedVs.indexOf("エピック");
+            if (index >= 0) return "VS " + normalizeDisplayText(normalizedVs.substring(index).replaceAll("\\s+特別限定版$", ""));
+            index = normalizedVs.indexOf("銀幕");
+            if (index >= 0) return "VS " + cleanupEdge(normalizedVs.substring(index)).replaceAll("[！!]+$", "");
+            return "VS";
+        }
+        index = value.indexOf("ファイナルライブツアー");
+        if (index >= 0) return normalizeFullWidthDigits(value.substring(index).replace("ファイナルライブツアー", "ファイナルライブ"));
+        index = value.indexOf("銀幕版");
+        if (index >= 0) return normalizeDisplayText(value.substring(index));
+        if (value.contains("特別幕")) return "特別幕";
+        if (value.contains("特别幕")) return "特别幕";
+        return "";
+    }
+
+    private static String normalizeFullWidthDigits(String value) {
+        StringBuilder builder = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char current = value.charAt(i);
+            builder.append(current >= '０' && current <= '９' ? (char) ('0' + current - '０') : current);
+        }
+        return builder.toString();
     }
 
     private static String findRepeatedBracketSeriesDisplay(String text) {
