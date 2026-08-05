@@ -455,6 +455,28 @@ public class ExoAutomaticVideoConstraintPolicyTest {
         assertFalse(environment.recoveryBlocked());
     }
 
+    @Test
+    public void environmentReasonLabelJoinsMultipleReasons() {
+        ExoAutomaticVideoConstraintPolicy.Environment environment =
+                new ExoAutomaticVideoConstraintPolicy.Environment(
+                        ExoAutomaticVideoConstraintPolicy.Limit.unbounded(),
+                        0,
+                        0,
+                        0,
+                        false,
+                        PlaybackAutoContext.ThermalState.UNKNOWN,
+                        PlaybackAutoContext.PowerState.UNKNOWN,
+                        PlaybackAutoContext.NetworkCost.UNKNOWN,
+                        PlaybackAutoContext.DataSaverState.UNKNOWN,
+                        PlaybackAutoContext.DecodeMode.UNKNOWN,
+                        ExoAutomaticVideoConstraintPolicy.CostScope.UNKNOWN,
+                        List.of(
+                                ExoAutomaticVideoConstraintPolicy.Reason.THERMAL_CRITICAL,
+                                ExoAutomaticVideoConstraintPolicy.Reason.SOFTWARE_DECODER));
+
+        assertEquals("thermal-critical,software-decoder", environment.reasonLabel());
+    }
+
     private static ExoAutomaticVideoConstraintPolicy.Decision evaluate(
             ExoAutomaticVideoConstraintPolicy.State state,
             ExoAutomaticVideoConstraintPolicy.Environment environment,

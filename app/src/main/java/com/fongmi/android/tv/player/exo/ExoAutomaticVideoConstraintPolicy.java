@@ -509,7 +509,7 @@ final class ExoAutomaticVideoConstraintPolicy {
             if (reasons.isEmpty()) return "baseline";
             StringBuilder builder = new StringBuilder();
             for (Reason reason : reasons) {
-                if (!builder.isEmpty()) builder.append(',');
+                if (builder.length() > 0) builder.append(',');
                 builder.append(reason.label());
             }
             return builder.toString();
