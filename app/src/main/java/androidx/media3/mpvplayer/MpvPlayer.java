@@ -2693,10 +2693,8 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         PlaybackAutoContext.PathKind playerPath = classification == null
                 ? PlaybackAutoContext.PathKind.UNKNOWN : classification.playerPath();
         boolean progressive = !currentLikelyHls && !currentLikelyDash
-                && (protocol == PlaybackAutoContext.Protocol.PROGRESSIVE_HTTP
-                || protocol == PlaybackAutoContext.Protocol.UNKNOWN
-                && (playerPath == PlaybackAutoContext.PathKind.EXTERNAL_LOOPBACK
-                || playerPath == PlaybackAutoContext.PathKind.APP_INTERNAL_SERVICE));
+                && MpvPreloadCachePolicy.supportsForwardPreload(
+                protocol, playerPath);
         boolean enable = config.performanceOptionsPriority()
                 && PreloadSetting.isPreload(PlayerSetting.MPV)
                 && preloadCacheCapacityBytes > 0

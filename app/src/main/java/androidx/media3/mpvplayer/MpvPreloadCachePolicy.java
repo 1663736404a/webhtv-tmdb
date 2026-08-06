@@ -48,12 +48,27 @@ final class MpvPreloadCachePolicy {
     }
 
     private static boolean supportsForwardPreload(Request request) {
-        if (request.protocol() == PlaybackAutoContext.Protocol.PROGRESSIVE_HTTP) {
+        return supportsForwardPreload(request.protocol(), request.playerPath());
+    }
+
+    static boolean supportsForwardPreload(
+            PlaybackAutoContext.Protocol protocol,
+            PlaybackAutoContext.PathKind playerPath) {
+        PlaybackAutoContext.Protocol resolvedProtocol = protocol == null
+                ? PlaybackAutoContext.Protocol.UNKNOWN : protocol;
+        PlaybackAutoContext.PathKind resolvedPath = playerPath == null
+                ? PlaybackAutoContext.PathKind.UNKNOWN : playerPath;
+        if (resolvedProtocol == PlaybackAutoContext.Protocol.PROGRESSIVE_HTTP) {
             return true;
         }
-        if (request.protocol() != PlaybackAutoContext.Protocol.UNKNOWN) return false;
-        return request.playerPath() == PlaybackAutoContext.PathKind.EXTERNAL_LOOPBACK
-                || request.playerPath() == PlaybackAutoContext.PathKind.APP_INTERNAL_SERVICE;
+        if (resolvedProtocol != PlaybackAutoContext.Protocol.UNKNOWN) return false;
+        // Match Exo/IJK: an opaque HTTP(S) URL is still a cacheable network
+        // source. File extensions and MIME hints improve diagnostics, but must
+        // never be a prerequisite for forward buffering.
+        return resolvedPath == PlaybackAutoContext.PathKind.REMOTE
+                || resolvedPath == PlaybackAutoContext.PathKind.LAN_PRIVATE
+                || resolvedPath == PlaybackAutoContext.PathKind.EXTERNAL_LOOPBACK
+                || resolvedPath == PlaybackAutoContext.PathKind.APP_INTERNAL_SERVICE;
     }
 
     private static Decision hold(Request request, Reason reason) {

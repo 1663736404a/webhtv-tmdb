@@ -70,7 +70,31 @@ public class MpvPreloadCachePolicyTest {
     }
 
     @Test
-    public void unknownNonLoopbackResourceRemainsConservative() {
+    public void knownDurationOpaqueRemoteHttpIsEligibleVod() {
+        MpvPreloadCachePolicy.Decision decision = resolve(
+                true, true, 30, 64 * MIB, 600, 256 * MIB,
+                0, 1_440_000,
+                PlaybackAutoContext.Protocol.UNKNOWN,
+                PlaybackAutoContext.StreamKind.UNKNOWN,
+                PlaybackAutoContext.PathKind.REMOTE);
+
+        assertTrue(decision.apply());
+        assertEquals(600, decision.targetSeconds());
+        assertEquals(256 * MIB, decision.targetBytes());
+    }
+
+    @Test
+    public void knownDurationOpaqueLanHttpIsEligibleVod() {
+        assertTrue(resolve(
+                false, true, 30, 64 * MIB, 600, 256 * MIB,
+                0, 1_440_000,
+                PlaybackAutoContext.Protocol.UNKNOWN,
+                PlaybackAutoContext.StreamKind.UNKNOWN,
+                PlaybackAutoContext.PathKind.LAN_PRIVATE).apply());
+    }
+
+    @Test
+    public void unknownPathResourceRemainsConservative() {
         assertFalse(resolve(
                 false, true, 30, 64 * MIB, 600, 256 * MIB,
                 0, 1_440_000,
