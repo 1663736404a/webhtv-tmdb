@@ -856,8 +856,7 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
     private String pausePreloadText() {
         return switch (PreloadSetting.getPausePreloadPolicy()) {
             case PreloadSetting.PAUSE_PRELOAD_ALWAYS -> "始终";
-            case PreloadSetting.PAUSE_PRELOAD_UNMETERED -> "仅非计费网络";
-            default -> "关闭";
+            default -> "仅 WiFi";
         };
     }
 

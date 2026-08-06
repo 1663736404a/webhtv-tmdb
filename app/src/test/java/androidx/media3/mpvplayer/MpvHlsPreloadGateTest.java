@@ -88,4 +88,22 @@ public class MpvHlsPreloadGateTest {
         assertTrue(replacement > original);
         assertTrue(gate.allows(replacement));
     }
+
+    @Test
+    public void pausedModeAllowsPreloadPastAStalledForegroundRequest() {
+        MpvHlsPreloadGate gate = new MpvHlsPreloadGate();
+        assertTrue(gate.setForegroundBlocking(false));
+        long pausedGeneration = gate.acquire();
+
+        assertFalse(gate.foregroundStarted());
+        assertEquals(1, gate.foregroundRequests());
+        assertTrue(gate.allows(pausedGeneration));
+        assertEquals(pausedGeneration, gate.acquire());
+
+        assertTrue(gate.setForegroundBlocking(true));
+        assertFalse(gate.allows(pausedGeneration));
+        assertEquals(-1, gate.acquire());
+        gate.foregroundEnded();
+        assertTrue(gate.acquire() > pausedGeneration);
+    }
 }

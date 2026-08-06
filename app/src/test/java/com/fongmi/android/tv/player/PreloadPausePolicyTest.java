@@ -13,39 +13,27 @@ public class PreloadPausePolicyTest {
     public void activePlaybackAlwaysAllowsPreload() {
         assertTrue(PreloadPausePolicy.evaluate(
                 true,
-                PreloadSetting.PAUSE_PRELOAD_OFF,
+                PreloadSetting.PAUSE_PRELOAD_WIFI,
                 PlaybackAutoContext.NetworkSnapshot.unknown()).allowed());
     }
 
     @Test
-    public void disabledPolicyStopsPausedPreload() {
-        assertFalse(PreloadPausePolicy.evaluate(
-                false,
-                PreloadSetting.PAUSE_PRELOAD_OFF,
-                unmetered()).allowed());
-    }
-
-    @Test
-    public void unmeteredPolicyRequiresCompleteSafeEvidence() {
+    public void wifiPolicyRequiresValidatedWifi() {
         assertTrue(PreloadPausePolicy.evaluate(
                 false,
-                PreloadSetting.PAUSE_PRELOAD_UNMETERED,
-                unmetered()).allowed());
+                PreloadSetting.PAUSE_PRELOAD_WIFI,
+                wifi()).allowed());
         assertFalse(PreloadPausePolicy.evaluate(
                 false,
-                PreloadSetting.PAUSE_PRELOAD_UNMETERED,
-                snapshot(true, true, true, false, PlaybackAutoContext.DataSaverState.DISABLED)).allowed());
+                PreloadSetting.PAUSE_PRELOAD_WIFI,
+                snapshot(true, true, PlaybackAutoContext.NetworkTransport.CELLULAR)).allowed());
         assertFalse(PreloadPausePolicy.evaluate(
                 false,
-                PreloadSetting.PAUSE_PRELOAD_UNMETERED,
-                snapshot(true, false, false, false, PlaybackAutoContext.DataSaverState.DISABLED)).allowed());
+                PreloadSetting.PAUSE_PRELOAD_WIFI,
+                snapshot(true, false, PlaybackAutoContext.NetworkTransport.WIFI)).allowed());
         assertFalse(PreloadPausePolicy.evaluate(
                 false,
-                PreloadSetting.PAUSE_PRELOAD_UNMETERED,
-                snapshot(true, true, false, false, PlaybackAutoContext.DataSaverState.ENABLED)).allowed());
-        assertFalse(PreloadPausePolicy.evaluate(
-                false,
-                PreloadSetting.PAUSE_PRELOAD_UNMETERED,
+                PreloadSetting.PAUSE_PRELOAD_WIFI,
                 PlaybackAutoContext.NetworkSnapshot.unknown()).allowed());
     }
 
@@ -57,22 +45,20 @@ public class PreloadPausePolicyTest {
                 PlaybackAutoContext.NetworkSnapshot.unknown()).allowed());
     }
 
-    private static PlaybackAutoContext.NetworkSnapshot unmetered() {
-        return snapshot(true, true, false, false, PlaybackAutoContext.DataSaverState.DISABLED);
+    private static PlaybackAutoContext.NetworkSnapshot wifi() {
+        return snapshot(true, true, PlaybackAutoContext.NetworkTransport.WIFI);
     }
 
     private static PlaybackAutoContext.NetworkSnapshot snapshot(
             Boolean available,
             Boolean validated,
-            Boolean metered,
-            Boolean roaming,
-            PlaybackAutoContext.DataSaverState dataSaver) {
+            PlaybackAutoContext.NetworkTransport transport) {
         return new PlaybackAutoContext.NetworkSnapshot(
                 available,
                 validated,
-                metered,
-                roaming,
-                PlaybackAutoContext.NetworkTransport.WIFI,
-                dataSaver);
+                null,
+                null,
+                transport,
+                PlaybackAutoContext.DataSaverState.UNKNOWN);
     }
 }

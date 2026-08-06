@@ -33,7 +33,12 @@ public class PreloadDefaultsPolicyTest {
         assertEquals(PreloadSetting.WHOLE_MEDIA_AHEAD_SECONDS,
                 PreloadSetting.getPreloadAheadSecondsAt(6));
         assertEquals(300, PreloadSetting.DEFAULT_AHEAD_SECONDS);
-        assertEquals(PreloadSetting.PAUSE_PRELOAD_UNMETERED,
+        assertEquals(2, PreloadSetting.getPausePreloadOptionCount());
+        assertEquals(PreloadSetting.PAUSE_PRELOAD_ALWAYS,
+                PreloadSetting.getPausePreloadPolicyAt(0));
+        assertEquals(PreloadSetting.PAUSE_PRELOAD_WIFI,
+                PreloadSetting.getPausePreloadPolicyAt(1));
+        assertEquals(PreloadSetting.PAUSE_PRELOAD_ALWAYS,
                 PreloadSetting.DEFAULT_PAUSE_PRELOAD);
     }
 }

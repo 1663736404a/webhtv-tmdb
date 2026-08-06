@@ -213,6 +213,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
         automaticPreloadMode = automatic;
         automaticResourceAllowed = resourceAllowed;
         automaticTrafficAllowed = trafficAllowed;
+        preloadGate.setForegroundBlocking(!automatic || !playbackPaused);
         boolean allowed = desiredPreloadAllowed();
         MpvHlsPreloadGate.Transition transition = preloadGate.update(allowed);
         if (transition == MpvHlsPreloadGate.Transition.BLOCKED) {
@@ -232,7 +233,12 @@ public final class MpvHlsProxy extends NanoHTTPD {
     }
 
     public void setPlaybackPaused(boolean paused) {
+        boolean changed = playbackPaused != paused;
         playbackPaused = paused;
+        if (automaticPreloadMode && kernel == PlayerSetting.MPV) {
+            preloadGate.setForegroundBlocking(!paused);
+            if (changed && !paused) releasePreloadWork(false);
+        }
         boolean allowed = desiredPreloadAllowed();
         MpvHlsPreloadGate.Transition transition = preloadGate.update(allowed);
         if (transition == MpvHlsPreloadGate.Transition.BLOCKED) releasePreloadWork(true);
@@ -315,6 +321,21 @@ public final class MpvHlsProxy extends NanoHTTPD {
         SessionStats stats = sessionStats.get(sessionId);
         if (owner == null || stats == null || !stats.vod || stats.segments.isEmpty()) return;
         preloadSegments(owner, stats.segments, Math.max(0, positionMs) / 1000.0);
+    }
+
+    public void preloadWhilePaused(long positionMs) {
+        preloadWhilePaused(positionMs, 0);
+    }
+
+    void preloadWhilePaused(long positionMs, long selectedBitsPerSecond) {
+        if (!playbackPaused || !isPausePreloadAllowed()) return;
+        Session owner = sessions.get(sessionId);
+        SessionStats stats = sessionStats.get(sessionId);
+        if (owner == null || stats == null || !stats.vod) return;
+        List<HlsPlaylistRewriter.Segment> selected = automaticPreloadMode
+                ? stats.segmentsForVariant(selectedBitsPerSecond) : stats.segments;
+        if (selected.isEmpty()) return;
+        preloadSegments(owner, selected, Math.max(0, positionMs) / 1000.0);
     }
 
     private boolean shouldRequestManualPreload(long positionMs) {
@@ -625,6 +646,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
             if (!targetPlaylist && target.cacheable) {
                 Response cached = serveCached(owner, target.url, range, foreground);
                 if (cached != null) {
+                    recordCachedTarget(owner, target);
                     foregroundHandedOff = true;
                     SpiderDebug.log(TAG, "cache hit id=%s range=%s", id, range);
                     return cached;
@@ -735,7 +757,8 @@ public final class MpvHlsProxy extends NanoHTTPD {
             HlsPlaylistRewriter.Variant targetVariant = context.variant();
             String rewrittenUrl = proxyItemUrl(
                     targetUrl, session, cacheable, targetVariant,
-                    context.role());
+                    context.role(), context.startSeconds(),
+                    context.durationSeconds());
             return new HlsPlaylistRewriter.MappedUri(targetUrl, rewrittenUrl);
         });
         recordPlaylistDetails(session, playlistUrl, text, result, inheritedVariant);
@@ -750,11 +773,13 @@ public final class MpvHlsProxy extends NanoHTTPD {
             int session,
             boolean cacheable,
             @Nullable HlsPlaylistRewriter.Variant variant,
-            HlsPlaylistRewriter.UriRole role) {
+            HlsPlaylistRewriter.UriRole role,
+            double startSeconds,
+            double durationSeconds) {
         String id = Long.toString(nextId.incrementAndGet());
         targets.put(id, new Target(
                 session, targetUrl, System.currentTimeMillis(), cacheable,
-                variant, role));
+                variant, role, startSeconds, durationSeconds));
         return baseUrl() + "/mpv/item?s=" + session + "&id=" + id;
     }
 
@@ -762,7 +787,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
         String id = Long.toString(nextId.incrementAndGet());
         targets.put(id, new Target(
                 session, targetUrl, System.currentTimeMillis(), true, null,
-                HlsPlaylistRewriter.UriRole.OTHER));
+                HlsPlaylistRewriter.UriRole.OTHER, 0, 0));
         return baseUrl() + "/mpv/dash-item/" + id + "/media.m4s";
     }
 
@@ -825,14 +850,19 @@ public final class MpvHlsProxy extends NanoHTTPD {
         refreshCacheCoordinator();
         if (!shouldWriteThroughCache(target, status, range, contentRange, contentLength)) return source;
         File file = cacheFile(session, target.url);
-        if (file.isFile() && file.length() >= MIN_CACHE_FILE_BYTES) return source;
+        if (file.isFile() && file.length() >= MIN_CACHE_FILE_BYTES) {
+            recordCachedTarget(session, target);
+            return source;
+        }
         String key = file.getName();
         MpvHlsCacheCoordinator.ReservationDecision decision = cacheCoordinator.tryReserve(
                 key, file, contentLength, configuredCacheLimitBytes(), MpvHlsCacheCoordinator.WriterType.FOREGROUND);
         if (!decision.granted()) return source;
         MpvHlsCacheCoordinator.WriteReservation reservation = decision.reservation();
         try {
-            return new CacheWritingInputStream(source, new FileOutputStream(reservation.tempFile()), reservation, mime);
+            return new CacheWritingInputStream(
+                    source, new FileOutputStream(reservation.tempFile()),
+                    reservation, mime, session, target);
         } catch (Throwable e) {
             reservation.fail(e);
             logCacheFailure("foreground-open", e);
@@ -863,17 +893,21 @@ public final class MpvHlsProxy extends NanoHTTPD {
         ExecutorService executor = getPreloadExecutor();
         int remainingSubmissions = resolvePreloadSubmissionBudget(preloading.size());
         if (remainingSubmissions <= 0) return;
-        double seconds = 0;
-        double targetSeconds = preloadWindowSeconds();
+        double submittedSeconds = 0;
+        double batchSeconds = Math.max(0, PreloadSetting.getPreloadTimeSeconds(kernel));
+        double aheadSeconds = preloadAheadWindowSeconds();
+        double windowEndSeconds = Double.isInfinite(aheadSeconds)
+                ? Double.POSITIVE_INFINITY : startSeconds + aheadSeconds;
         for (HlsPlaylistRewriter.Segment segment : segments) {
             if (!preloadGate.allows(preloadGeneration)) break;
             if (segment.endSeconds() <= startSeconds) continue;
             if (segment.startSeconds() <= startSeconds && segment.endSeconds() > startSeconds) continue;
             if (segment.byteRange()) continue;
-            if (seconds >= targetSeconds) break;
-            seconds += Math.max(0, segment.durationSeconds());
-            if (preloadSegment(session, segment, preloadGeneration, executor)
-                    && --remainingSubmissions <= 0) break;
+            if (segment.startSeconds() >= windowEndSeconds) break;
+            if (submittedSeconds >= batchSeconds) break;
+            if (!preloadSegment(session, segment, preloadGeneration, executor)) continue;
+            submittedSeconds += Math.max(0, segment.durationSeconds());
+            if (--remainingSubmissions <= 0) break;
         }
     }
 
@@ -1041,6 +1075,16 @@ public final class MpvHlsProxy extends NanoHTTPD {
                 secondsToMilliseconds(segment.endSeconds()));
     }
 
+    private void recordCachedTarget(Session session, Target target) {
+        if (target == null
+                || target.role() != HlsPlaylistRewriter.UriRole.MEDIA_SEGMENT
+                || target.durationSeconds() <= 0) return;
+        diskBufferStore.recordCompleted(
+                session.mediaKey(),
+                secondsToMilliseconds(target.startSeconds()),
+                secondsToMilliseconds(target.endSeconds()));
+    }
+
     private File cacheFile(Session session, String url) {
         return new File(cacheDir(), Util.md5(url + "\n" + session.headers) + CACHE_FILE_SUFFIX);
     }
@@ -1067,16 +1111,16 @@ public final class MpvHlsProxy extends NanoHTTPD {
                 ? Math.max(0, PreloadSetting.getPreloadSizeBytes(kernel)) : 0;
     }
 
-    private double preloadWindowSeconds() {
-        if (automaticPreloadMode) return PreloadSetting.getPreloadTimeSeconds(kernel);
+    private double preloadAheadWindowSeconds() {
         int seconds = PreloadSetting.getPreloadAheadSeconds(kernel);
         return seconds == PreloadSetting.WHOLE_MEDIA_AHEAD_SECONDS
                 ? Double.POSITIVE_INFINITY : Math.max(0, seconds);
     }
 
     private boolean desiredPreloadAllowed() {
-        return isPausePreloadAllowed()
-                && (!automaticPreloadMode || automaticResourceAllowed && automaticTrafficAllowed);
+        if (!isPausePreloadAllowed()) return false;
+        if (!automaticPreloadMode) return true;
+        return automaticResourceAllowed && (playbackPaused || automaticTrafficAllowed);
     }
 
     private boolean isPausePreloadAllowed() {
@@ -1442,6 +1486,10 @@ public final class MpvHlsProxy extends NanoHTTPD {
         return milliseconds >= Long.MAX_VALUE ? Long.MAX_VALUE : Math.round(milliseconds);
     }
 
+    private static double finiteNonNegative(double value) {
+        return Double.isFinite(value) ? Math.max(0, value) : 0;
+    }
+
     private void logCacheFailure(String action, Throwable error) {
         String type = error == null ? "unknown" : error.getClass().getSimpleName();
         MpvHlsCacheCoordinator.CapacitySnapshot snapshot = cacheCoordinator.snapshot(configuredCacheLimitBytes());
@@ -1460,11 +1508,19 @@ public final class MpvHlsProxy extends NanoHTTPD {
             long createdAtMs,
             boolean cacheable,
             @Nullable HlsPlaylistRewriter.Variant variant,
-            HlsPlaylistRewriter.UriRole role) {
+            HlsPlaylistRewriter.UriRole role,
+            double startSeconds,
+            double durationSeconds) {
 
         private Target {
             role = role == null
                     ? HlsPlaylistRewriter.UriRole.OTHER : role;
+            startSeconds = finiteNonNegative(startSeconds);
+            durationSeconds = finiteNonNegative(durationSeconds);
+        }
+
+        private double endSeconds() {
+            return startSeconds + durationSeconds;
         }
     }
 
@@ -1628,18 +1684,22 @@ public final class MpvHlsProxy extends NanoHTTPD {
         private final MpvHlsCacheCoordinator.WriteReservation reservation;
         private final long expectedLength;
         private final String mime;
+        private final Session session;
+        private final Target target;
         private OutputStream cache;
         private long written;
         private boolean completed;
 
         CacheWritingInputStream(InputStream in, OutputStream cache,
                                 MpvHlsCacheCoordinator.WriteReservation reservation,
-                                String mime) {
+                                String mime, Session session, Target target) {
             super(in);
             this.cache = cache;
             this.reservation = reservation;
             this.expectedLength = reservation.expectedBytes();
             this.mime = mime;
+            this.session = session;
+            this.target = target;
         }
 
         @Override
@@ -1727,6 +1787,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
                     return;
                 }
                 if (reservation.commit(mime)) {
+                    recordCachedTarget(session, target);
                     SpiderDebug.log(TAG, "cache-write action=foreground-commit bytes=%d", written);
                 }
             } catch (Throwable e) {

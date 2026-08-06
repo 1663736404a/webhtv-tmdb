@@ -326,11 +326,10 @@ public class SettingPlayerFragment extends BaseFragment implements UaListener, B
 
     private void onPreloadPause(View view) {
         String[] items = {
-                getString(R.string.player_preload_pause_off),
-                getString(R.string.player_preload_pause_unmetered),
-                getString(R.string.player_preload_pause_always)};
-        ChoiceDialog.showSingle(this, R.string.player_preload_pause, items, PreloadSetting.getPausePreloadPolicy(), which -> {
-            PreloadSetting.putPausePreloadPolicy(which);
+                getString(R.string.player_preload_pause_always),
+                getString(R.string.player_preload_pause_wifi)};
+        ChoiceDialog.showSingle(this, R.string.player_preload_pause, items, PreloadSetting.getPausePreloadPolicyIndex(), which -> {
+            PreloadSetting.putPausePreloadPolicy(PreloadSetting.getPausePreloadPolicyAt(which));
             PlaybackPerformanceSetting.markCustom();
             setPreloadText();
             setPerformanceText();
@@ -387,8 +386,7 @@ public class SettingPlayerFragment extends BaseFragment implements UaListener, B
     private String getPreloadPauseText() {
         return getString(switch (PreloadSetting.getPausePreloadPolicy()) {
             case PreloadSetting.PAUSE_PRELOAD_ALWAYS -> R.string.player_preload_pause_always;
-            case PreloadSetting.PAUSE_PRELOAD_UNMETERED -> R.string.player_preload_pause_unmetered;
-            default -> R.string.player_preload_pause_off;
+            default -> R.string.player_preload_pause_wifi;
         });
     }
 

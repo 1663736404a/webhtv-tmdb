@@ -989,8 +989,7 @@
     <string name="player_preload_ahead_value">%1$d 分钟</string>
     <string name="player_preload_ahead_whole">整部影片</string>
     <string name="player_preload_pause">暂停时继续预载</string>
-    <string name="player_preload_pause_off">关闭</string>
-    <string name="player_preload_pause_unmetered">仅非计费网络</string>
+    <string name="player_preload_pause_wifi">仅 WiFi</string>
     <string name="player_preload_pause_always">始终</string>
     <string name="player_auto_play">自动播放</string>
     <string name="player_auto_change">自动换源</string>

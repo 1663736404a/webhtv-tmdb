@@ -991,8 +991,7 @@
     <string name="player_preload_ahead_value">%1$d min</string>
     <string name="player_preload_ahead_whole">Entire media</string>
     <string name="player_preload_pause">Continue preload while paused</string>
-    <string name="player_preload_pause_off">Off</string>
-    <string name="player_preload_pause_unmetered">Unmetered network only</string>
+    <string name="player_preload_pause_wifi">Wi-Fi only</string>
     <string name="player_preload_pause_always">Always</string>
     <string name="player_auto_play">Auto play</string>
     <string name="player_auto_change">Auto source change</string>

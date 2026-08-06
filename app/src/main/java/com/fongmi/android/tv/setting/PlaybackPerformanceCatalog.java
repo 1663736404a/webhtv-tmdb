@@ -176,7 +176,7 @@ public final class PlaybackPerformanceCatalog {
         options.add(option(PRELOAD_SIZE, PRELOAD_SECTION, "磁盘预载配额", "作用：限制当前内核最多使用多少磁盘空间保存预载数据，范围128MB～32GB。它与内存缓冲上限完全独立；配额越大只代表允许保存更多，不代表会立即占满。"));
         options.add(option(PRELOAD_TIME, PRELOAD_SECTION, "单次预载时长", "作用：限制每个后台任务一次向前准备多少媒体时长。自动档通常10～30秒；数值越大，单次连接和写盘持续越久，但不会改变总磁盘配额或向前目标。"));
         options.add(option(PRELOAD_AHEAD, PRELOAD_SECTION, "向前预载目标", "作用：指定希望从当前播放位置向前保留多少可连续播放的数据，可选1～60分钟或整部影片。达到高水位后停止，消耗到低水位再补充，并始终受磁盘配额和系统保护限制。"));
-        options.add(option(PRELOAD_PAUSE, PRELOAD_SECTION, "暂停时继续预载", "作用：决定暂停播放后是否继续填充磁盘预载。默认仅非计费网络；移动流量敏感可关闭，固定宽带可选始终。存储不足、过热或前台播放风险仍会强制停止。"));
+        options.add(option(PRELOAD_PAUSE, PRELOAD_SECTION, "暂停时继续预载", "作用：决定暂停后是否继续向前准备数据。默认“始终”；担心移动流量可选“仅 WiFi”。HLS会继续填充磁盘预载，MPV普通直链会临时扩大内存预读时长；存储、内存、过热或资源压力仍会限制实际长度。"));
     }
 
     private static String profileDescription(

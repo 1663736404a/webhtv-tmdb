@@ -605,7 +605,7 @@
                     android:singleLine="true"
                     android:textColor="@color/white"
                     android:textSize="16sp"
-                    tools:text="仅非计费网络" />
+                    tools:text="始终" />
 
             </androidx.appcompat.widget.LinearLayoutCompat>
 

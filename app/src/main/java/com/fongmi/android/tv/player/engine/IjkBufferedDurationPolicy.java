@@ -18,4 +18,23 @@ final class IjkBufferedDurationPolicy {
         if (hasVideoTrack) return video;
         return audio > 0 && video > 0 ? Math.min(audio, video) : 0;
     }
+
+    static long bufferedPosition(
+            long positionMs,
+            long durationMs,
+            int bufferingPercent,
+            long nativeBufferedDurationMs) {
+        long position = Math.max(0, positionMs);
+        if (durationMs <= 0) return position;
+        int percent = Math.clamp(bufferingPercent, 0, 100);
+        long percentEnd = durationMs / 100 * percent
+                + durationMs % 100 * percent / 100;
+        long nativeEnd = saturatedAdd(position, Math.max(0, nativeBufferedDurationMs));
+        return Math.min(durationMs, Math.max(position, Math.max(percentEnd, nativeEnd)));
+    }
+
+    private static long saturatedAdd(long first, long second) {
+        return second > 0 && first > Long.MAX_VALUE - second
+                ? Long.MAX_VALUE : first + second;
+    }
 }

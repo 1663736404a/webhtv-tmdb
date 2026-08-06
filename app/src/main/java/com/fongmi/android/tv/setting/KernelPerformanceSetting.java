@@ -5,6 +5,7 @@ import com.github.catvod.utils.Prefers;
 public final class KernelPerformanceSetting {
 
     private static final String KEY_MIGRATED = "perf_kernel_shared_migrated";
+    private static final String KEY_PAUSE_PRELOAD_MIGRATED = "perf_pause_preload_policy_v2_migrated";
 
     private KernelPerformanceSetting() {
     }
@@ -103,12 +104,15 @@ public final class KernelPerformanceSetting {
 
     public static int getPausePreloadPolicy(int kernel) {
         ensureMigrated();
-        return clamp(Prefers.getInt(key(kernel, "preload_pause"), PreloadSetting.DEFAULT_PAUSE_PRELOAD), PreloadSetting.PAUSE_PRELOAD_OFF, PreloadSetting.PAUSE_PRELOAD_ALWAYS);
+        ensurePausePreloadMigrated();
+        return PreloadSetting.normalizePausePreloadPolicy(
+                Prefers.getInt(key(kernel, "preload_pause"), PreloadSetting.DEFAULT_PAUSE_PRELOAD));
     }
 
     public static void putPausePreloadPolicy(int kernel, int value) {
         ensureMigrated();
-        Prefers.put(key(kernel, "preload_pause"), clamp(value, PreloadSetting.PAUSE_PRELOAD_OFF, PreloadSetting.PAUSE_PRELOAD_ALWAYS));
+        ensurePausePreloadMigrated();
+        Prefers.put(key(kernel, "preload_pause"), PreloadSetting.normalizePausePreloadPolicy(value));
     }
 
     public static boolean isAudioPassThrough(int kernel) {
@@ -303,6 +307,23 @@ public final class KernelPerformanceSetting {
             Prefers.put(key(kernel, "video_prefer"), videoPrefer);
         }
         Prefers.put(KEY_MIGRATED, true);
+    }
+
+    private static synchronized void ensurePausePreloadMigrated() {
+        if (Prefers.getBoolean(KEY_PAUSE_PRELOAD_MIGRATED)) return;
+        for (int kernel : new int[]{PlayerSetting.EXO, PlayerSetting.MPV, PlayerSetting.IJK}) {
+            String preferenceKey = key(kernel, "preload_pause");
+            int legacy = Prefers.getPrefers().contains(preferenceKey)
+                    ? Prefers.getInt(preferenceKey, PreloadSetting.DEFAULT_PAUSE_PRELOAD)
+                    : PreloadSetting.DEFAULT_PAUSE_PRELOAD;
+            // The previous default was value 1. Existing default installs move to
+            // the new "always" default; the removed "off" value falls back to WiFi.
+            int migrated = legacy == PreloadSetting.PAUSE_PRELOAD_LEGACY_OFF
+                    ? PreloadSetting.PAUSE_PRELOAD_WIFI
+                    : PreloadSetting.PAUSE_PRELOAD_ALWAYS;
+            Prefers.put(preferenceKey, migrated);
+        }
+        Prefers.put(KEY_PAUSE_PRELOAD_MIGRATED, true);
     }
 
     private static String key(int kernel, String suffix) {

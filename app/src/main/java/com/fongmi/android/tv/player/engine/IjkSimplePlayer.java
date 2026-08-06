@@ -159,9 +159,10 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         if (mediaItem != null) {
             long duration = duration();
             long position = position();
+            long buffered = bufferedPosition(position, duration);
             builder.setContentPositionMs(isPlayingInternal() ? PositionSupplier.getExtrapolating(position, playbackParameters.speed) : PositionSupplier.getConstant(position));
-            builder.setContentBufferedPositionMs(PositionSupplier.getConstant(bufferedPosition(duration)));
-            builder.setTotalBufferedDurationMs(PositionSupplier.getConstant(Math.max(0, bufferedPosition(duration) - position)));
+            builder.setContentBufferedPositionMs(PositionSupplier.getConstant(buffered));
+            builder.setTotalBufferedDurationMs(PositionSupplier.getConstant(Math.max(0, buffered - position)));
         }
         return builder.build();
     }
@@ -411,6 +412,7 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
             if (playWhenReady) ijk.start();
             else ijk.pause();
         }
+        if (!playWhenReady) requestPreload(Math.max(0, position()));
         return Futures.immediateVoidFuture();
     }
 
@@ -478,7 +480,7 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         if (playbackState == Player.STATE_READY || playbackState == Player.STATE_ENDED) {
             ijk.seekTo(positionMs);
         }
-        hlsProxy.preloadAround(positionMs);
+        requestPreload(positionMs);
         invalidateState();
         return Futures.immediateVoidFuture();
     }
@@ -523,7 +525,7 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         if (pendingSeekPositionMs != C.TIME_UNSET) {
             ijk.seekTo(pendingSeekPositionMs);
         }
-        hlsProxy.preloadAround(Math.max(0, position()));
+        requestPreload(Math.max(0, position()));
         if (playWhenReady) ijk.start();
         invalidateState();
         startStateRefresh();
@@ -702,9 +704,14 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
 
     private void refreshPlaybackState() {
         if (mediaItem == null || playbackState == Player.STATE_IDLE || playbackState == Player.STATE_ENDED || playerError != null) return;
-        hlsProxy.preloadAround(Math.max(0, position()));
+        requestPreload(Math.max(0, position()));
         invalidateState();
         startStateRefresh();
+    }
+
+    private void requestPreload(long positionMs) {
+        if (playWhenReady) hlsProxy.preloadAround(positionMs);
+        else hlsProxy.preloadWhilePaused(positionMs);
     }
 
     private void setVideoOutput(Object output) {
@@ -1001,9 +1008,10 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         pendingSeekRequestedAtMs = positionMs == C.TIME_UNSET ? C.TIME_UNSET : SystemClock.elapsedRealtime();
     }
 
-    private long bufferedPosition(long duration) {
-        if (duration == C.TIME_UNSET || duration <= 0) return position();
-        return Math.min(duration, duration * bufferingPercent / 100);
+    private long bufferedPosition(long position, long duration) {
+        return IjkBufferedDurationPolicy.bufferedPosition(
+                position, duration, bufferingPercent,
+                getNativeBufferedDurationSnapshot());
     }
 
     private boolean isPlayingInternal() {

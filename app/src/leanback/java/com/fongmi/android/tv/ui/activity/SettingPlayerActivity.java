@@ -327,8 +327,7 @@ public class SettingPlayerActivity extends BaseActivity implements UaListener, B
     private String getPreloadPauseText() {
         return getString(switch (PreloadSetting.getPausePreloadPolicy()) {
             case PreloadSetting.PAUSE_PRELOAD_ALWAYS -> R.string.player_preload_pause_always;
-            case PreloadSetting.PAUSE_PRELOAD_UNMETERED -> R.string.player_preload_pause_unmetered;
-            default -> R.string.player_preload_pause_off;
+            default -> R.string.player_preload_pause_wifi;
         });
     }
 
