@@ -40,6 +40,7 @@ import com.fongmi.android.tv.player.PlaybackAutoContext;
 import com.fongmi.android.tv.player.PlaybackRoute;
 import com.fongmi.android.tv.player.PlaybackResourceClassifier;
 import com.fongmi.android.tv.player.PlaybackTrace;
+import com.fongmi.android.tv.player.cache.PlaybackDiskBufferStore;
 import com.fongmi.android.tv.player.engine.PlayerCacheState;
 import com.fongmi.android.tv.player.iso.IsoSessionManager;
 import com.fongmi.android.tv.player.lut.MpvLutShader;
@@ -444,6 +445,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     @Override
     protected ListenableFuture<?> handleSetPlayWhenReady(boolean playWhenReady) {
         this.playWhenReady = playWhenReady;
+        hlsProxy.setPlaybackPaused(!playWhenReady);
         if (initialized && playbackState != Player.STATE_IDLE && playbackState != Player.STATE_ENDED) {
             safeSetPropertyBoolean("pause", !playWhenReady);
         }
@@ -1076,7 +1078,9 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
             applyCacheTimePolicy();
             if (currentIsoUri == null && shouldProxyHls(currentPlayableUri, currentLikelyHls)) {
                 String originalUri = currentPlayableUri;
-                currentPlayableUri = hlsProxy.proxy(originalUri, headers);
+                currentPlayableUri = hlsProxy.proxy(
+                        originalUri, headers,
+                        PlaybackDiskBufferStore.mediaKey(mediaItem));
                 if (shouldCollectDebugDetails()) PlaybackTrace.log("mpv", playbackTraceId, "hls proxy enabled original=%s proxy=%s", MpvDiagnosticsPolicy.sourceSummary(originalUri), MpvDiagnosticsPolicy.sourceSummary(currentPlayableUri));
             } else {
                 hlsProxy.clear();
@@ -1608,6 +1612,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
             }
             case MPVLib.MpvEvent.MPV_EVENT_PLAYBACK_RESTART -> {
                 playbackRestarted = true;
+                if (currentLikelyHls) hlsProxy.preloadAround(positionMs());
                 updateVideoSize("event=playback-restart");
                 refreshTracks();
                 refreshChapters();
@@ -2385,6 +2390,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         if (released || mediaItem == null || playbackState == Player.STATE_IDLE || playbackState == Player.STATE_ENDED || playerError != null) return;
         cachedPositionMs = positionMs();
         cachedDurationMs = durationMs();
+        if (currentLikelyHls) hlsProxy.preloadAround(cachedPositionMs);
         refreshCacheState();
         invalidateState();
         startStateRefresh();

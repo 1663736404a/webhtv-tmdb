@@ -9,6 +9,9 @@ import androidx.media3.exoplayer.hls.playlist.HlsAdsParser;
 import com.fongmi.android.tv.player.PlaybackAutoContext;
 import com.fongmi.android.tv.player.PlaybackRouteRegistry;
 import com.fongmi.android.tv.player.PlaybackResourceClassifier;
+import com.fongmi.android.tv.player.PlaybackSystemConditionMonitor;
+import com.fongmi.android.tv.player.PreloadPausePolicy;
+import com.fongmi.android.tv.player.cache.PlaybackDiskBufferStore;
 import com.fongmi.android.tv.player.mpv.MpvPreloadPolicy;
 import com.fongmi.android.tv.setting.PlayerSetting;
 import com.fongmi.android.tv.setting.PreloadSetting;
@@ -78,6 +81,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
     private static final int PREFIX_SCAN_LIMIT = 64 * 1024;
     private static final long SESSION_TTL_MS = TimeUnit.MINUTES.toMillis(3);
     private static final long MIN_CACHE_FILE_BYTES = 1;
+    private static final int MAX_PENDING_PRELOAD_SEGMENTS = 256;
     private static final Pattern DASH_BASE_URL = Pattern.compile("(<BaseURL\\b[^>]*>)(.*?)(</BaseURL>)", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
     private static final Pattern CONTENT_RANGE = Pattern.compile("bytes\\s+(\\d+)-(\\d+)/(\\d+|\\*)", Pattern.CASE_INSENSITIVE);
 
@@ -91,6 +95,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
     private final java.util.Set<String> preloading;
     private final MpvHlsPreloadGate preloadGate;
     private final MpvHlsUpstreamEstimator upstreamEstimator;
+    private final PlaybackDiskBufferStore diskBufferStore;
     private final AtomicInteger activePreloadTransfers;
     private ExecutorService preloadExecutor;
     private MpvHlsCacheCoordinator.ClientLease cacheClient;
@@ -101,6 +106,9 @@ public final class MpvHlsProxy extends NanoHTTPD {
     private volatile boolean automaticPreloadMode;
     private volatile boolean automaticResourceAllowed = true;
     private volatile boolean automaticTrafficAllowed;
+    private volatile boolean playbackPaused;
+    private volatile long lastManualPreloadPositionMs = Long.MIN_VALUE;
+    private volatile long lastManualPreloadAtMs;
 
     public MpvHlsProxy() {
         this(PlayerSetting.MPV);
@@ -122,15 +130,24 @@ public final class MpvHlsProxy extends NanoHTTPD {
         preloading = ConcurrentHashMap.newKeySet();
         preloadGate = new MpvHlsPreloadGate();
         upstreamEstimator = new MpvHlsUpstreamEstimator();
+        diskBufferStore = PlaybackDiskBufferStore.process();
         activePreloadTransfers = new AtomicInteger();
     }
 
     public synchronized String proxy(String url, Map<String, String> headers) throws IOException {
+        return proxy(url, headers, url);
+    }
+
+    public synchronized String proxy(
+            String url, Map<String, String> headers, String mediaKey) throws IOException {
         ensureStarted();
         refreshCacheCoordinator();
         int id = ++this.sessionId;
         upstreamEstimator.reset();
-        Session session = new Session(url, sanitize(headers), System.currentTimeMillis());
+        Session session = new Session(
+                url, sanitize(headers), System.currentTimeMillis(),
+                resolveMediaKey(mediaKey, url));
+        diskBufferStore.reset(session.mediaKey());
         sessions.put(id, session);
         SessionStats stats = new SessionStats();
         stats.classification = PlaybackResourceClassifier.classify(
@@ -149,11 +166,19 @@ public final class MpvHlsProxy extends NanoHTTPD {
     }
 
     public synchronized String proxyDash(String url, Map<String, String> headers) throws IOException {
+        return proxyDash(url, headers, url);
+    }
+
+    public synchronized String proxyDash(
+            String url, Map<String, String> headers, String mediaKey) throws IOException {
         ensureStarted();
         refreshCacheCoordinator();
         int id = ++this.sessionId;
         upstreamEstimator.reset();
-        Session session = new Session(url, sanitize(headers), System.currentTimeMillis());
+        Session session = new Session(
+                url, sanitize(headers), System.currentTimeMillis(),
+                resolveMediaKey(mediaKey, url));
+        diskBufferStore.reset(session.mediaKey());
         sessions.put(id, session);
         SessionStats stats = new SessionStats();
         stats.classification = PlaybackResourceClassifier.classify(
@@ -175,6 +200,8 @@ public final class MpvHlsProxy extends NanoHTTPD {
         sessionStats.clear();
         targets.clear();
         upstreamEstimator.reset();
+        lastManualPreloadPositionMs = Long.MIN_VALUE;
+        lastManualPreloadAtMs = 0;
         cancelPreloads();
     }
 
@@ -186,7 +213,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
         automaticPreloadMode = automatic;
         automaticResourceAllowed = resourceAllowed;
         automaticTrafficAllowed = trafficAllowed;
-        boolean allowed = !automatic || resourceAllowed && trafficAllowed;
+        boolean allowed = desiredPreloadAllowed();
         MpvHlsPreloadGate.Transition transition = preloadGate.update(allowed);
         if (transition == MpvHlsPreloadGate.Transition.BLOCKED) {
             releasePreloadWork(true);
@@ -202,6 +229,20 @@ public final class MpvHlsProxy extends NanoHTTPD {
                     preloading.size());
         }
         return transition.changed();
+    }
+
+    public void setPlaybackPaused(boolean paused) {
+        playbackPaused = paused;
+        boolean allowed = desiredPreloadAllowed();
+        MpvHlsPreloadGate.Transition transition = preloadGate.update(allowed);
+        if (transition == MpvHlsPreloadGate.Transition.BLOCKED) releasePreloadWork(true);
+        if (transition.changed()) {
+            SpiderDebug.log(TAG, "preload-pause paused=%s policy=%d state=%s action=%s",
+                    paused,
+                    PreloadSetting.getPausePreloadPolicy(kernel),
+                    allowed ? "allowed" : "blocked",
+                    transition.label());
+        }
     }
 
     public synchronized void release() {
@@ -268,11 +309,26 @@ public final class MpvHlsProxy extends NanoHTTPD {
         return stats.variantSnapshot();
     }
 
-    void preloadAround(long positionMs) {
+    public void preloadAround(long positionMs) {
+        if (automaticPreloadMode || !shouldRequestManualPreload(positionMs)) return;
         Session owner = sessions.get(sessionId);
         SessionStats stats = sessionStats.get(sessionId);
         if (owner == null || stats == null || !stats.vod || stats.segments.isEmpty()) return;
         preloadSegments(owner, stats.segments, Math.max(0, positionMs) / 1000.0);
+    }
+
+    private boolean shouldRequestManualPreload(long positionMs) {
+        long position = Math.max(0, positionMs);
+        long now = SystemClock.elapsedRealtime();
+        long previousPosition = lastManualPreloadPositionMs;
+        if (previousPosition != Long.MIN_VALUE
+                && Math.abs(position - previousPosition) < TimeUnit.SECONDS.toMillis(10)
+                && now - lastManualPreloadAtMs < TimeUnit.SECONDS.toMillis(10)) {
+            return false;
+        }
+        lastManualPreloadPositionMs = position;
+        lastManualPreloadAtMs = now;
+        return true;
     }
 
     void requestAutomaticPreload(long positionMs, long selectedBitsPerSecond) {
@@ -305,7 +361,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
         MpvHlsUpstreamEstimator.Snapshot throughput =
                 upstreamEstimator.snapshot(nowElapsedMs);
         MpvHlsCacheCoordinator.PreloadCapacitySnapshot preloadCapacity =
-                cacheCoordinator.preloadSnapshot(configuredCacheLimitBytes());
+                cacheCoordinator.preloadSnapshot(configuredPreloadLimitBytes());
         MpvHlsCacheCoordinator.CapacitySnapshot capacity =
                 preloadCapacity.capacity();
         boolean storageKnown = capacity.policy().state()
@@ -794,39 +850,55 @@ public final class MpvHlsProxy extends NanoHTTPD {
         return status == 206 && isCompleteRangeResponse(range, contentRange, contentLength);
     }
 
-    private void preloadSegments(Session session, List<HlsPlaylistRewriter.Segment> segments, double startSeconds) {
+    private synchronized void preloadSegments(Session session, List<HlsPlaylistRewriter.Segment> segments, double startSeconds) {
         refreshCacheCoordinator();
         long preloadGeneration = preloadGate.acquire();
         if (preloadGeneration < 0
                 || automaticPreloadMode && activePreloadTransfers.get() > 0
                 || !PreloadSetting.isPreload(kernel)
-                || !isCacheEnabled()
-                || !cacheCoordinator.canStartPreload(configuredCacheLimitBytes())
+                || !isPausePreloadAllowed()
+                || configuredPreloadLimitBytes() <= 0
+                || !cacheCoordinator.canStartPreload(configuredPreloadLimitBytes())
                 || segments.isEmpty()) return;
+        ExecutorService executor = getPreloadExecutor();
+        int remainingSubmissions = resolvePreloadSubmissionBudget(preloading.size());
+        if (remainingSubmissions <= 0) return;
         double seconds = 0;
+        double targetSeconds = preloadWindowSeconds();
         for (HlsPlaylistRewriter.Segment segment : segments) {
             if (!preloadGate.allows(preloadGeneration)) break;
             if (segment.endSeconds() <= startSeconds) continue;
             if (segment.startSeconds() <= startSeconds && segment.endSeconds() > startSeconds) continue;
             if (segment.byteRange()) continue;
-            if (seconds >= PreloadSetting.getPreloadTimeSeconds(kernel)) break;
+            if (seconds >= targetSeconds) break;
             seconds += Math.max(0, segment.durationSeconds());
-            preloadSegment(session, segment.uri(), preloadGeneration);
+            if (preloadSegment(session, segment, preloadGeneration, executor)
+                    && --remainingSubmissions <= 0) break;
         }
     }
 
-    private void preloadSegment(Session session, String url, long preloadGeneration) {
-        if (!preloadGate.allows(preloadGeneration) || !isHttpUrl(url)) return;
+    private boolean preloadSegment(
+            Session session,
+            HlsPlaylistRewriter.Segment segment,
+            long preloadGeneration,
+            ExecutorService executor) {
+        String url = segment.uri();
+        if (!preloadGate.allows(preloadGeneration) || !isHttpUrl(url)) return false;
         File file = cacheFile(session, url);
-        if (file.isFile() && file.length() > 0) return;
+        if (file.isFile() && file.length() > 0) {
+            recordCachedSegment(session, segment);
+            return false;
+        }
         String key = file.getName();
-        if (cacheCoordinator.isKeyBusyOrCached(key, file)) return;
-        if (!preloading.add(key)) return;
+        if (cacheCoordinator.isKeyBusyOrCached(key, file)) return false;
+        if (!preloading.add(key)) return false;
         try {
-            getPreloadExecutor().execute(() -> {
+            executor.execute(() -> {
                 activePreloadTransfers.incrementAndGet();
                 try {
-                    prefetchToCache(session, url, file, preloadGeneration);
+                    if (prefetchToCache(session, url, file, preloadGeneration)) {
+                        recordCachedSegment(session, segment);
+                    }
                 } catch (Throwable e) {
                     SpiderDebug.log(TAG, "preload failed errorType=%s action=stop-cache-write", e.getClass().getSimpleName());
                 } finally {
@@ -834,9 +906,11 @@ public final class MpvHlsProxy extends NanoHTTPD {
                     preloading.remove(key);
                 }
             });
+            return true;
         } catch (Throwable error) {
             preloading.remove(key);
             SpiderDebug.log(TAG, "preload submit failed errorType=%s action=stop-cache-write", error.getClass().getSimpleName());
+            return false;
         }
     }
 
@@ -846,6 +920,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
                 PreloadSetting.getPreloadThreads(kernel));
         if (preloadExecutor != null && preloadThreads == threads) return preloadExecutor;
         releasePreloadExecutor();
+        preloading.clear();
         preloadThreads = threads;
         return preloadExecutor = Executors.newFixedThreadPool(threads);
     }
@@ -867,36 +942,37 @@ public final class MpvHlsProxy extends NanoHTTPD {
         preloadExecutor = null;
     }
 
-    private void prefetchToCache(
+    private boolean prefetchToCache(
             Session session,
             String url,
             File file,
             long preloadGeneration) throws IOException {
         refreshCacheCoordinator();
         if (!preloadGate.allows(preloadGeneration)
-                || !isCacheEnabled()
-                || !cacheCoordinator.canStartPreload(configuredCacheLimitBytes())
-                || (file.isFile() && file.length() > 0)) return;
+                || !isPausePreloadAllowed()
+                || configuredPreloadLimitBytes() <= 0
+                || !cacheCoordinator.canStartPreload(configuredPreloadLimitBytes())
+                || (file.isFile() && file.length() > 0)) return false;
         try (okhttp3.Response response = fetch(session, url, null, true)) {
-            if (!preloadGate.allows(preloadGeneration)) return;
+            if (!preloadGate.allows(preloadGeneration)) return false;
             ResponseBody body = response.body();
             if (!response.isSuccessful() || body == null || isPlaylistUrl(url, body.contentType())
                     || MpvHlsSegmentContentPolicy.shouldProbePngPrefix(
-                    body.contentType() == null ? null : body.contentType().toString(), true)) return;
+                    body.contentType() == null ? null : body.contentType().toString(), true)) return false;
             long contentLength = body.contentLength();
-            if (contentLength < MIN_CACHE_FILE_BYTES || contentLength > configuredCacheLimitBytes()) return;
+            if (contentLength < MIN_CACHE_FILE_BYTES || contentLength > configuredPreloadLimitBytes()) return false;
             String key = file.getName();
             MpvHlsCacheCoordinator.ReservationDecision decision = cacheCoordinator.tryReserve(
-                    key, file, contentLength, configuredCacheLimitBytes(), MpvHlsCacheCoordinator.WriterType.PREFETCH);
-            if (!decision.granted()) return;
-            writeCacheFile(body.byteStream(), decision.reservation(), contentLength,
+                    key, file, contentLength, configuredPreloadLimitBytes(), MpvHlsCacheCoordinator.WriterType.PREFETCH);
+            if (!decision.granted()) return false;
+            return writeCacheFile(body.byteStream(), decision.reservation(), contentLength,
                     mediaMimeFromUrl(url, body.contentType()), preloadGeneration);
         }
     }
 
-    private void writeCacheFile(InputStream input, MpvHlsCacheCoordinator.WriteReservation reservation,
-                                long expectedLength, String mime,
-                                long preloadGeneration) throws IOException {
+    private boolean writeCacheFile(InputStream input, MpvHlsCacheCoordinator.WriteReservation reservation,
+                                   long expectedLength, String mime,
+                                   long preloadGeneration) throws IOException {
         long written = 0;
         OutputStream output;
         try {
@@ -904,31 +980,31 @@ public final class MpvHlsProxy extends NanoHTTPD {
         } catch (Throwable error) {
             reservation.fail(error);
             logCacheFailure("prefetch-open", error);
-            return;
+            return false;
         }
         try (InputStream in = input; OutputStream out = output) {
             byte[] buffer = new byte[64 * 1024];
             int read;
             while ((read = in.read(buffer)) != -1) {
-                if (!preloadGate.allows(preloadGeneration)) {
+                if (!preloadGate.allows(preloadGeneration) || !isPausePreloadAllowed()) {
                     reservation.abort();
-                    return;
+                    return false;
                 }
                 if (!reservation.canWrite(read)) {
                     reservation.abort();
-                    return;
+                    return false;
                 }
                 try {
                     out.write(buffer, 0, read);
                 } catch (Throwable error) {
                     reservation.fail(error);
                     logCacheFailure("prefetch-write", error);
-                    return;
+                    return false;
                 }
                 written += read;
                 if (!reservation.recordWritten(read)) {
                     reservation.abort();
-                    return;
+                    return false;
                 }
             }
         } catch (Throwable error) {
@@ -938,7 +1014,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
         }
         if (expectedLength > 0 && written != expectedLength) {
             reservation.abort();
-            return;
+            return false;
         }
         try {
             boolean committed = preloadGate.commitIfAllowed(
@@ -949,10 +1025,20 @@ public final class MpvHlsProxy extends NanoHTTPD {
             } else {
                 reservation.abort();
             }
+            return committed;
         } catch (Throwable error) {
             reservation.fail(error);
             logCacheFailure("prefetch-commit", error);
+            return false;
         }
+    }
+
+    private void recordCachedSegment(
+            Session session, HlsPlaylistRewriter.Segment segment) {
+        diskBufferStore.recordCompleted(
+                session.mediaKey(),
+                secondsToMilliseconds(segment.startSeconds()),
+                secondsToMilliseconds(segment.endSeconds()));
     }
 
     private File cacheFile(Session session, String url) {
@@ -973,8 +1059,31 @@ public final class MpvHlsProxy extends NanoHTTPD {
 
     private long configuredCacheLimitBytes() {
         long playCache = Math.max(0, PlayerSetting.getPlayCacheSize(kernel));
-        long preloadCache = PreloadSetting.isPreload(kernel) ? Math.max(0, PreloadSetting.getPreloadSizeBytes(kernel)) : playCache;
-        return Math.max(0, Math.min(playCache, preloadCache));
+        return Math.max(playCache, configuredPreloadLimitBytes());
+    }
+
+    private long configuredPreloadLimitBytes() {
+        return PreloadSetting.isPreload(kernel)
+                ? Math.max(0, PreloadSetting.getPreloadSizeBytes(kernel)) : 0;
+    }
+
+    private double preloadWindowSeconds() {
+        if (automaticPreloadMode) return PreloadSetting.getPreloadTimeSeconds(kernel);
+        int seconds = PreloadSetting.getPreloadAheadSeconds(kernel);
+        return seconds == PreloadSetting.WHOLE_MEDIA_AHEAD_SECONDS
+                ? Double.POSITIVE_INFINITY : Math.max(0, seconds);
+    }
+
+    private boolean desiredPreloadAllowed() {
+        return isPausePreloadAllowed()
+                && (!automaticPreloadMode || automaticResourceAllowed && automaticTrafficAllowed);
+    }
+
+    private boolean isPausePreloadAllowed() {
+        return PreloadPausePolicy.evaluate(
+                !playbackPaused,
+                PreloadSetting.getPausePreloadPolicy(kernel),
+                PlaybackSystemConditionMonitor.process().currentNetworkSnapshot()).allowed();
     }
 
     private void pruneCache() {
@@ -1323,6 +1432,16 @@ public final class MpvHlsProxy extends NanoHTTPD {
         return value.substring(0, 120) + "...";
     }
 
+    private static String resolveMediaKey(String mediaKey, String url) {
+        return mediaKey == null || mediaKey.isBlank() ? (url == null ? "" : url) : mediaKey;
+    }
+
+    private static long secondsToMilliseconds(double seconds) {
+        if (!Double.isFinite(seconds) || seconds <= 0) return 0;
+        double milliseconds = seconds * 1000d;
+        return milliseconds >= Long.MAX_VALUE ? Long.MAX_VALUE : Math.round(milliseconds);
+    }
+
     private void logCacheFailure(String action, Throwable error) {
         String type = error == null ? "unknown" : error.getClass().getSimpleName();
         MpvHlsCacheCoordinator.CapacitySnapshot snapshot = cacheCoordinator.snapshot(configuredCacheLimitBytes());
@@ -1331,7 +1450,8 @@ public final class MpvHlsProxy extends NanoHTTPD {
                 snapshot.policy().effectiveCapacityBytes(), snapshot.circuitOpen());
     }
 
-    private record Session(String url, Map<String, String> headers, long createdAtMs) {
+    private record Session(
+            String url, Map<String, String> headers, long createdAtMs, String mediaKey) {
     }
 
     private record Target(
@@ -1991,6 +2111,10 @@ public final class MpvHlsProxy extends NanoHTTPD {
             return List.of();
         }
         return List.copyOf(direct);
+    }
+
+    static int resolvePreloadSubmissionBudget(int pendingTasks) {
+        return Math.max(0, MAX_PENDING_PRELOAD_SEGMENTS - Math.max(0, pendingTasks));
     }
 
     /**

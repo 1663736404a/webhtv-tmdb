@@ -91,6 +91,26 @@ public final class KernelPerformanceSetting {
         Prefers.put(key(kernel, "preload_time"), clamp(value, PreloadSetting.MIN_TIME_SECONDS, PreloadSetting.MAX_TIME_SECONDS));
     }
 
+    public static int getPreloadAheadSeconds(int kernel) {
+        ensureMigrated();
+        return Prefers.getInt(key(kernel, "preload_ahead"), PreloadSetting.DEFAULT_AHEAD_SECONDS);
+    }
+
+    public static void putPreloadAheadSeconds(int kernel, int value) {
+        ensureMigrated();
+        Prefers.put(key(kernel, "preload_ahead"), value);
+    }
+
+    public static int getPausePreloadPolicy(int kernel) {
+        ensureMigrated();
+        return clamp(Prefers.getInt(key(kernel, "preload_pause"), PreloadSetting.DEFAULT_PAUSE_PRELOAD), PreloadSetting.PAUSE_PRELOAD_OFF, PreloadSetting.PAUSE_PRELOAD_ALWAYS);
+    }
+
+    public static void putPausePreloadPolicy(int kernel, int value) {
+        ensureMigrated();
+        Prefers.put(key(kernel, "preload_pause"), clamp(value, PreloadSetting.PAUSE_PRELOAD_OFF, PreloadSetting.PAUSE_PRELOAD_ALWAYS));
+    }
+
     public static boolean isAudioPassThrough(int kernel) {
         ensureMigrated();
         return Prefers.getBoolean(key(kernel, "audio_pass_through"), true);
@@ -145,6 +165,8 @@ public final class KernelPerformanceSetting {
             putPreloadThreads(kernel, preloadThreadsForPreset(profile));
             putPreloadSizeMb(kernel, PreloadSetting.MIN_SIZE_MB);
             putPreloadTimeSeconds(kernel, preloadTimeForPreset(profile));
+            putPreloadAheadSeconds(kernel, PreloadSetting.DEFAULT_AHEAD_SECONDS);
+            putPausePreloadPolicy(kernel, PreloadSetting.DEFAULT_PAUSE_PRELOAD);
             putAudioPassThrough(kernel, false);
             putPreferAac(kernel, true);
             putAudioPrefer(kernel, false);
@@ -161,6 +183,8 @@ public final class KernelPerformanceSetting {
             putPreloadThreads(kernel, preloadThreadsForPreset(profile));
             putPreloadSizeMb(kernel, 512);
             putPreloadTimeSeconds(kernel, preloadTimeForPreset(profile));
+            putPreloadAheadSeconds(kernel, PreloadSetting.DEFAULT_AHEAD_SECONDS);
+            putPausePreloadPolicy(kernel, PreloadSetting.DEFAULT_PAUSE_PRELOAD);
             putAudioPassThrough(kernel, false);
             putPreferAac(kernel, false);
             putAudioPrefer(kernel, false);
@@ -178,6 +202,8 @@ public final class KernelPerformanceSetting {
         }
         putPreloadThreads(kernel, preloadThreadsForPreset(profile));
         putPreloadTimeSeconds(kernel, preloadTimeForPreset(profile));
+        putPreloadAheadSeconds(kernel, PreloadSetting.DEFAULT_AHEAD_SECONDS);
+        putPausePreloadPolicy(kernel, PreloadSetting.DEFAULT_PAUSE_PRELOAD);
     }
 
     static int preloadThreadsForPreset(int profile) {
@@ -285,7 +311,7 @@ public final class KernelPerformanceSetting {
     }
 
     private static int closestPreloadSize(int value) {
-        int[] options = {128, 256, 512, 1024, 2048, 4096};
+        int[] options = {128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768};
         int closest = options[0];
         int distance = Math.abs(value - closest);
         for (int option : options) {

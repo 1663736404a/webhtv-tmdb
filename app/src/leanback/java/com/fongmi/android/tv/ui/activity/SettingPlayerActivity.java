@@ -113,6 +113,8 @@ public class SettingPlayerActivity extends BaseActivity implements UaListener, B
         mBinding.preloadThread.setOnClickListener(this::setPreloadThread);
         mBinding.preloadSize.setOnClickListener(this::setPreloadSize);
         mBinding.preloadTime.setOnClickListener(this::setPreloadTime);
+        mBinding.preloadAhead.setOnClickListener(this::setPreloadAhead);
+        mBinding.preloadPause.setOnClickListener(this::setPreloadPause);
         mBinding.autoPlay.setOnClickListener(this::setAutoPlay);
         mBinding.autoChange.setOnClickListener(this::setAutoChange);
         mBinding.render.setOnClickListener(this::setRender);
@@ -286,15 +288,48 @@ public class SettingPlayerActivity extends BaseActivity implements UaListener, B
         setPerformanceText();
     }
 
+    private void setPreloadAhead(View view) {
+        PreloadSetting.putPreloadAheadSeconds(PreloadSetting.getNextPreloadAheadSeconds());
+        PlaybackPerformanceSetting.markCustom();
+        setPreloadText();
+        setPerformanceText();
+    }
+
+    private void setPreloadPause(View view) {
+        PreloadSetting.putPausePreloadPolicy(PreloadSetting.getNextPausePreloadPolicy());
+        PlaybackPerformanceSetting.markCustom();
+        setPreloadText();
+        setPerformanceText();
+    }
+
     private void setPreloadText() {
         boolean preload = PreloadSetting.isPreload();
         mBinding.preloadText.setText(getSwitch(preload));
         mBinding.preloadThread.setVisibility(preload ? View.VISIBLE : View.GONE);
         mBinding.preloadSize.setVisibility(preload ? View.VISIBLE : View.GONE);
         mBinding.preloadTime.setVisibility(preload ? View.VISIBLE : View.GONE);
+        mBinding.preloadAhead.setVisibility(preload ? View.VISIBLE : View.GONE);
+        mBinding.preloadPause.setVisibility(preload ? View.VISIBLE : View.GONE);
         mBinding.preloadThreadText.setText(getString(R.string.player_preload_threads_value, PreloadSetting.getPreloadThreads()));
         mBinding.preloadSizeText.setText(FileUtil.byteCountToDisplaySize(PreloadSetting.getPreloadSizeBytes()));
         mBinding.preloadTimeText.setText(getString(R.string.player_preload_time_value, PreloadSetting.getPreloadTimeSeconds()));
+        mBinding.preloadAheadText.setText(getPreloadAheadText());
+        mBinding.preloadPauseText.setText(getPreloadPauseText());
+    }
+
+    private String getPreloadAheadText() {
+        int seconds = PreloadSetting.getPreloadAheadSeconds();
+        return seconds == PreloadSetting.WHOLE_MEDIA_AHEAD_SECONDS
+                ? getString(R.string.player_preload_ahead_whole)
+                : getString(R.string.player_preload_ahead_value, seconds / 60);
+    }
+
+    private String getPreloadPauseText() {
+        return getString(switch (PreloadSetting.getPausePreloadPolicy()) {
+            case PreloadSetting.PAUSE_PRELOAD_ALWAYS -> R.string.player_preload_pause_always;
+            case PreloadSetting.PAUSE_PRELOAD_UNMETERED -> R.string.player_preload_pause_unmetered;
+            default -> R.string.player_preload_pause_off;
+        });
     }
 
     private void setAutoPlay(View view) {
@@ -358,6 +393,8 @@ public class SettingPlayerActivity extends BaseActivity implements UaListener, B
         mBinding.preloadThread.setVisibility(View.GONE);
         mBinding.preloadSize.setVisibility(View.GONE);
         mBinding.preloadTime.setVisibility(View.GONE);
+        mBinding.preloadAhead.setVisibility(View.GONE);
+        mBinding.preloadPause.setVisibility(View.GONE);
         mBinding.tunnel.setVisibility(View.GONE);
         mBinding.audioDecode.setVisibility(View.GONE);
         mBinding.audioPassThrough.setVisibility(View.GONE);

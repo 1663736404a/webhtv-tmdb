@@ -54,6 +54,15 @@ public class MpvHlsPreloadSelectionTest {
         assertSame(direct, selected.get(0));
     }
 
+    @Test
+    public void preloadQueueBudgetCapsPendingSegments() {
+        assertEquals(256, MpvHlsProxy.resolvePreloadSubmissionBudget(-1));
+        assertEquals(256, MpvHlsProxy.resolvePreloadSubmissionBudget(0));
+        assertEquals(1, MpvHlsProxy.resolvePreloadSubmissionBudget(255));
+        assertEquals(0, MpvHlsProxy.resolvePreloadSubmissionBudget(256));
+        assertEquals(0, MpvHlsProxy.resolvePreloadSubmissionBudget(1_000));
+    }
+
     private static HlsPlaylistRewriter.Segment segment(String uri) {
         return new HlsPlaylistRewriter.Segment(uri, 6, 0, false);
     }

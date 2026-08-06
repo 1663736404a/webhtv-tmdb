@@ -151,6 +151,10 @@ public final class PlaybackSystemConditionMonitor {
         }
     }
 
+    public PlaybackAutoContext.NetworkSnapshot currentNetworkSnapshot() {
+        return readNetwork(coordinator.activeSession(), connectivityManager);
+    }
+
     private void requestSample(PlaybackAutoContext.SystemConditionTrigger trigger) {
         PlaybackAutoContext.SessionToken session = coordinator.activeSession();
         if (!session.active()) return;

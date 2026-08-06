@@ -100,6 +100,7 @@ final class PreloadLifecycleTracker {
         CANCELLED_SEEK("cancelled-seek"),
         NO_RANGE("no-range"),
         PAUSED_AUTO("paused-auto"),
+        PAUSED_USER("paused-user"),
         PAUSED_MEMORY("paused-memory"),
         PAUSED_STORAGE("paused-storage"),
         SKIPPED("skipped");

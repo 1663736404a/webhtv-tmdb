@@ -317,14 +317,69 @@ public class PlaybackPerformanceSetting {
         return getProfileName();
     }
 
+    public static String getForwardBufferText() {
+        ensureInitialized();
+        return forwardBufferText(
+                PlayerSetting.getPlayer(),
+                getProfile(),
+                PlayerSetting.getBuffer());
+    }
+
+    public static String getMemoryBufferText() {
+        ensureInitialized();
+        if (PlayerSetting.getPlayer() == PlayerSetting.IJK) {
+            return ijkMemoryBufferText(
+                    getProfile(),
+                    IjkPerformanceSetting.getBufferMb());
+        }
+        return memoryBufferText(
+                PlayerSetting.getPlayer(),
+                getProfile(),
+                PlayerSetting.getBufferBytesOption());
+    }
+
+    public static String getPlayedDataRetentionText() {
+        ensureInitialized();
+        return playedDataRetentionText(
+                PlayerSetting.getPlayer(),
+                getProfile(),
+                PlayerSetting.getBackBufferOption());
+    }
+
+    public static String getPlaybackDiskCacheText() {
+        ensureInitialized();
+        return playbackDiskCacheText(PlayerSetting.getPlayCacheOption());
+    }
+
+    public static String getExoStartBufferText() {
+        ensureInitialized();
+        return isAuto(PlayerSetting.EXO)
+                ? "自动 · 0.5～8秒"
+                : secondsText(ExoPerformanceSetting.getStartBufferMs());
+    }
+
+    public static String getExoRebufferText() {
+        ensureInitialized();
+        return isAuto(PlayerSetting.EXO)
+                ? "自动 · 1～15秒"
+                : secondsText(ExoPerformanceSetting.getRebufferMs());
+    }
+
+    public static String getExoPrioritizeTimeText() {
+        ensureInitialized();
+        return isAuto(PlayerSetting.EXO)
+                ? "自动 · 按资源"
+                : onOff(ExoPerformanceSetting.isPrioritizeTime());
+    }
+
     public static String getDetail() {
         ensureInitialized();
         return "配置：" + getProfileName()
                 + "\n渲染：" + (PlayerSetting.getRender() == PlayerSetting.RENDER_SURFACE ? "SurfaceView" : "TextureView")
                 + "\n轨道限制：" + onOff(isTrackLimitEnabled()) + "，自适应降级：" + onOff(isAdaptiveDowngradeEnabled())
-                + "\n缓冲：" + PlayerSetting.getBuffer() + "/10，容量：" + bufferBytesText() + "，回退：" + backBufferText()
+                + "\n前向缓冲目标：" + getForwardBufferText() + "，内存缓冲上限：" + getMemoryBufferText() + "，已播放数据保留：" + getPlayedDataRetentionText()
                 + bufferWatermarksText()
-                + "\n播放缓存：" + playCacheText()
+                + playbackDiskCacheDetailText()
                 + preloadDetailText()
                 + "\nMediaCodec异步：" + onOff(isCodecAsyncQueueingEnabled()) + "，动态调度：" + onOff(isDynamicSchedulingEnabled())
                 + "\n解码耗时推进：" + onOff(isVideoDurationProgressEnabled()) + "，输入丢帧阈值：" + onOff(isLateDropInputEnabled())
@@ -685,26 +740,63 @@ public class PlaybackPerformanceSetting {
         return value ? "开" : "关";
     }
 
-    private static String bufferBytesText() {
-        return switch (PlayerSetting.getBufferBytesOption()) {
+    static String forwardBufferText(int kernel, int profile, int level) {
+        int normalized = Math.clamp(level, 1, 10);
+        if (kernel == PlayerSetting.EXO) {
+            if (profile == PROFILE_AUTO) return "自动 · 网络30～60秒";
+            if (profile == PROFILE_LIGHTWEIGHT || profile == PROFILE_COMPATIBLE) return "15～30秒";
+            if (profile == PROFILE_RECOMMENDED) return "30～60秒";
+            int minBufferMs = 15_000 + (normalized - 1) * 15_000 / 9;
+            return secondsRangeText(minBufferMs, minBufferMs * 2);
+        }
+        if (kernel == PlayerSetting.MPV) {
+            int targetSeconds = Math.min(60, Math.max(15, normalized * 3));
+            return (profile == PROFILE_AUTO ? "自动 · " : "") + "目标" + targetSeconds + "秒";
+        }
+        return "由读包内存和水位控制";
+    }
+
+    static String memoryBufferText(int kernel, int profile, int option) {
+        if (profile == PROFILE_AUTO) {
+            if (kernel == PlayerSetting.EXO) return "自动 · 16～192MB";
+            if (kernel == PlayerSetting.MPV) return "自动 · 24～192MB";
+        }
+        return switch (Math.clamp(option, 0, 3)) {
             case 1 -> "64MB";
             case 2 -> "128MB";
             case 3 -> "256MB";
-            default -> "自动";
+            default -> kernel == PlayerSetting.MPV
+                    ? "默认64MB" : "设备自适应 · 最高256MB";
         };
     }
 
-    private static String backBufferText() {
-        return switch (PlayerSetting.getBackBufferOption()) {
+    static String ijkMemoryBufferText(int profile, int bufferMb) {
+        return profile == PROFILE_AUTO
+                ? "自动 · 读包4～15MB"
+                : "读包" + Math.max(0, bufferMb) + "MB";
+    }
+
+    static String playedDataRetentionText(int kernel, int profile, int option) {
+        if (kernel == PlayerSetting.IJK) return "无独立保留";
+        if (kernel == PlayerSetting.MPV) {
+            if (profile == PROFILE_AUTO) return "自动 · 0～64MB";
+            return switch (Math.clamp(option, 0, 3)) {
+                case 1 -> "少量 · 至少16MB";
+                case 2 -> "中等 · 至少32MB";
+                case 3 -> "与前向内存相同";
+                default -> "关闭";
+            };
+        }
+        return switch (Math.clamp(option, 0, 3)) {
             case 1 -> "15秒";
             case 2 -> "30秒";
             case 3 -> "60秒";
-            default -> "关";
+            default -> "关闭";
         };
     }
 
-    private static String playCacheText() {
-        return switch (PlayerSetting.getPlayCacheOption()) {
+    static String playbackDiskCacheText(int option) {
+        return switch (Math.clamp(option, 0, 4)) {
             case 1 -> "256MB";
             case 2 -> "512MB";
             case 3 -> "1GB";
@@ -715,20 +807,38 @@ public class PlaybackPerformanceSetting {
 
     private static String bufferWatermarksText() {
         return switch (PlayerSetting.getPlayer()) {
-            case PlayerSetting.EXO -> "\n起播阈值：" + secondsText(ExoPerformanceSetting.getStartBufferMs()) + "，重缓冲恢复：" + secondsText(ExoPerformanceSetting.getRebufferMs());
+            case PlayerSetting.EXO -> "\n起播阈值：" + getExoStartBufferText() + "，重缓冲恢复：" + getExoRebufferText();
             case PlayerSetting.MPV -> "\n参数优先级：" + MpvPerformanceSetting.getOptionPriorityText() + "，重缓冲恢复：" + secondsText(MpvPerformanceSetting.getRebufferMs());
             default -> "";
         };
     }
 
+    private static String playbackDiskCacheDetailText() {
+        return PlayerSetting.getPlayer() == PlayerSetting.EXO
+                ? "" : "\nHLS 磁盘缓存上限：" + getPlaybackDiskCacheText();
+    }
+
     private static String preloadDetailText() {
         if (!isAuto()) {
-            return "\n预载：" + onOff(PreloadSetting.isPreload()) + "，线程：" + PreloadSetting.getPreloadThreads() + "，容量：" + PreloadSetting.getPreloadSizeMb() + "MB，时间：" + PreloadSetting.getPreloadTimeSeconds() + "秒";
+            return "\n磁盘预载：" + onOff(PreloadSetting.isPreload()) + "，并发：" + PreloadSetting.getPreloadThreads() + "，磁盘配额：" + PreloadSetting.getPreloadSizeMb() + "MB，单次时长：" + PreloadSetting.getPreloadTimeSeconds() + "秒，向前目标：" + preloadAheadText();
         }
-        return "\n预载：自动，线程：0～2，容量：" + PreloadSetting.getPreloadSizeMb() + "MB，单次时间：10～30秒（外部代理安全时最多40秒）";
+        return "\n磁盘预载：自动，并发：0～2，磁盘配额：" + PreloadSetting.getPreloadSizeMb() + "MB，单次时长：10～30秒，向前目标：" + preloadAheadText();
+    }
+
+    private static String preloadAheadText() {
+        int seconds = PreloadSetting.getPreloadAheadSeconds();
+        return seconds == PreloadSetting.WHOLE_MEDIA_AHEAD_SECONDS
+                ? "整部" : seconds / 60 + "分钟";
     }
 
     private static String secondsText(int milliseconds) {
         return milliseconds % 1000 == 0 ? milliseconds / 1000 + "秒" : String.format(java.util.Locale.US, "%.1f秒", milliseconds / 1000f);
+    }
+
+    private static String secondsRangeText(int minimumMs, int maximumMs) {
+        if (minimumMs % 1000 == 0 && maximumMs % 1000 == 0) {
+            return minimumMs / 1000 + "～" + maximumMs / 1000 + "秒";
+        }
+        return secondsText(minimumMs) + "～" + secondsText(maximumMs);
     }
 }

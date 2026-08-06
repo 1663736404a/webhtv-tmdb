@@ -15,6 +15,7 @@ import androidx.media3.ui.DefaultTimeBar;
 import androidx.media3.ui.TimeBar;
 
 import com.fongmi.android.tv.R;
+import com.fongmi.android.tv.player.cache.PlaybackDiskBufferStore;
 
 import java.util.Formatter;
 import java.util.Locale;
@@ -24,6 +25,7 @@ public class CustomSeekView extends FrameLayout implements Player.Listener, Time
 
     private static final int MAX_UPDATE_INTERVAL_MS = 1000;
     private static final int MIN_UPDATE_INTERVAL_MS = 200;
+    private static final long DISK_RANGE_GAP_TOLERANCE_MS = 2000;
 
     private final StringBuilder timeBuilder = new StringBuilder();
     private final Formatter timeFormatter = new Formatter(timeBuilder, Locale.getDefault());
@@ -58,8 +60,9 @@ public class CustomSeekView extends FrameLayout implements Player.Listener, Time
     }
 
     public void setPlayer(Player player) {
+        if (this.player != null) this.player.removeListener(this);
         this.player = player;
-        player.addListener(this);
+        if (player != null) player.addListener(this);
         if (attached) updateTimeline();
     }
 
@@ -82,7 +85,7 @@ public class CustomSeekView extends FrameLayout implements Player.Listener, Time
         removeCallbacks(runnable);
         if (!attached || player == null) return;
         long position = player.getCurrentPosition();
-        long buffered = player.getBufferedPosition();
+        long buffered = effectiveBufferedPosition();
         long duration = player.getDuration();
         if (duration < 0) duration = 0;
         if (duration != currentDuration) {
@@ -107,6 +110,16 @@ public class CustomSeekView extends FrameLayout implements Player.Listener, Time
         } else {
             postDelayed(runnable, MAX_UPDATE_INTERVAL_MS);
         }
+    }
+
+    private long effectiveBufferedPosition() {
+        long buffered = Math.max(0, player.getBufferedPosition());
+        String mediaKey = PlaybackDiskBufferStore.mediaKey(player.getCurrentMediaItem());
+        long diskBuffered = PlaybackDiskBufferStore.process().contiguousEnd(
+                mediaKey, buffered, DISK_RANGE_GAP_TOLERANCE_MS);
+        long effective = Math.max(buffered, diskBuffered);
+        long duration = player.getDuration();
+        return duration > 0 ? Math.min(effective, duration) : effective;
     }
 
     private void resetView() {

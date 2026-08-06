@@ -508,15 +508,17 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
             case PlaybackPerformanceCatalog.ADAPTIVE_DOWNGRADE -> onOff(PlaybackPerformanceSetting.isAdaptiveDowngradeEnabled());
             case PlaybackPerformanceCatalog.BANDWIDTH_METER -> onOff(PlaybackPerformanceSetting.isBandwidthMeterEnabled());
             case PlaybackPerformanceCatalog.TUNNEL -> onOff(PlayerSetting.isTunnel());
-            case PlaybackPerformanceCatalog.BUFFER_TIME -> PlayerSetting.getBuffer() + "/10";
-            case PlaybackPerformanceCatalog.BUFFER_BYTES -> bufferBytesText();
-            case PlaybackPerformanceCatalog.BACK_BUFFER -> backBufferText();
-            case PlaybackPerformanceCatalog.PLAY_CACHE -> playCacheText();
+            case PlaybackPerformanceCatalog.BUFFER_TIME -> PlaybackPerformanceSetting.getForwardBufferText();
+            case PlaybackPerformanceCatalog.BUFFER_BYTES -> PlaybackPerformanceSetting.getMemoryBufferText();
+            case PlaybackPerformanceCatalog.BACK_BUFFER -> PlaybackPerformanceSetting.getPlayedDataRetentionText();
+            case PlaybackPerformanceCatalog.PLAY_CACHE -> PlaybackPerformanceSetting.getPlaybackDiskCacheText();
             case PlaybackPerformanceCatalog.LOAD_SELECTED_TRACKS -> onOff(PlaybackPerformanceSetting.isLoadOnlySelectedTracksEnabled());
-            case PlaybackPerformanceCatalog.PRELOAD -> PlaybackPerformanceSetting.isAuto() ? "自动" : onOff(PreloadSetting.isPreload());
+            case PlaybackPerformanceCatalog.PRELOAD -> PlaybackPerformanceSetting.isAuto() ? "自动 · 按资源" : onOff(PreloadSetting.isPreload());
             case PlaybackPerformanceCatalog.PRELOAD_THREADS -> PlaybackPerformanceSetting.isAuto() ? "自动 · 0～2 条" : PreloadSetting.getPreloadThreads() + " 条";
             case PlaybackPerformanceCatalog.PRELOAD_SIZE -> FileUtil.byteCountToDisplaySize(PreloadSetting.getPreloadSizeBytes());
-            case PlaybackPerformanceCatalog.PRELOAD_TIME -> PlaybackPerformanceSetting.isAuto() ? "自动 · 10～30 秒" : PreloadSetting.getPreloadTimeSeconds() + " 秒";
+            case PlaybackPerformanceCatalog.PRELOAD_TIME -> PlaybackPerformanceSetting.isAuto() ? "自动 · 单次10～30秒" : "单次" + PreloadSetting.getPreloadTimeSeconds() + "秒";
+            case PlaybackPerformanceCatalog.PRELOAD_AHEAD -> preloadAheadText();
+            case PlaybackPerformanceCatalog.PRELOAD_PAUSE -> pausePreloadText();
             case PlaybackPerformanceCatalog.CODEC_ASYNC -> ExoPerformanceSetting.getCodecQueueText();
             case PlaybackPerformanceCatalog.DYNAMIC_SCHEDULING -> onOff(PlaybackPerformanceSetting.isDynamicSchedulingEnabled());
             case PlaybackPerformanceCatalog.DURATION_PROGRESS -> ExoPerformanceSetting.getCodecQueueMode() == ExoPerformanceSetting.CODEC_QUEUE_SYNC ? "同步队列不可用" : onOff(PlaybackPerformanceSetting.isVideoDurationProgressEnabled());
@@ -541,9 +543,11 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
             case PlaybackPerformanceCatalog.MPV_SOFT_TUNE -> MpvPerformanceSetting.getSoftTuneText();
             case PlaybackPerformanceCatalog.MPV_VERBOSE_LOG -> MpvPerformanceSetting.isVerboseLog() ? "详细" : "正常";
             case PlaybackPerformanceCatalog.IJK_SCENE -> IjkPerformanceSetting.getSceneText();
-            case PlaybackPerformanceCatalog.IJK_BUFFER -> IjkPerformanceSetting.getBufferMb() + "MB";
+            case PlaybackPerformanceCatalog.IJK_BUFFER -> PlaybackPerformanceSetting.isAuto(PlayerSetting.IJK)
+                    ? "自动 · 4～15MB" : IjkPerformanceSetting.getBufferMb() + "MB";
             case PlaybackPerformanceCatalog.IJK_PACKET_BUFFERING -> onOff(IjkPerformanceSetting.isPacketBuffering());
-            case PlaybackPerformanceCatalog.IJK_WATER -> IjkPerformanceSetting.getWaterText();
+            case PlaybackPerformanceCatalog.IJK_WATER -> PlaybackPerformanceSetting.isAuto(PlayerSetting.IJK)
+                    ? "自动 · 0.1～5秒" : IjkPerformanceSetting.getWaterText();
             case PlaybackPerformanceCatalog.IJK_PICTURE_QUEUE -> PlaybackPerformanceSetting.isAuto(PlayerSetting.IJK)
                     ? "自动 · 3帧" : IjkPerformanceSetting.getPictureQueue() + "帧";
             case PlaybackPerformanceCatalog.IJK_FRAME_DROP -> IjkPerformanceSetting.getDropText();
@@ -554,9 +558,9 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
             case PlaybackPerformanceCatalog.IJK_RTSP_TRANSPORT -> IjkPerformanceSetting.getRtspTransportText();
             case PlaybackPerformanceCatalog.IJK_RECONNECT -> onOff(IjkPerformanceSetting.isReconnect());
             case PlaybackPerformanceCatalog.EXO_FRAME_RATE -> ExoPerformanceSetting.getFrameRateText();
-            case PlaybackPerformanceCatalog.EXO_START_BUFFER -> formatSeconds(ExoPerformanceSetting.getStartBufferMs());
-            case PlaybackPerformanceCatalog.EXO_REBUFFER -> PlaybackPerformanceSetting.isAuto() ? "自动 · " + formatSeconds(ExoPerformanceSetting.getRebufferMs()) + "（2～15秒）" : formatSeconds(ExoPerformanceSetting.getRebufferMs());
-            case PlaybackPerformanceCatalog.EXO_PRIORITIZE_TIME -> onOff(ExoPerformanceSetting.isPrioritizeTime());
+            case PlaybackPerformanceCatalog.EXO_START_BUFFER -> PlaybackPerformanceSetting.getExoStartBufferText();
+            case PlaybackPerformanceCatalog.EXO_REBUFFER -> PlaybackPerformanceSetting.getExoRebufferText();
+            case PlaybackPerformanceCatalog.EXO_PRIORITIZE_TIME -> PlaybackPerformanceSetting.getExoPrioritizeTimeText();
             case PlaybackPerformanceCatalog.EXO_NETWORK_PROTECTION -> ExoPerformanceSetting.getNetworkProtectionText();
             default -> "";
         };
@@ -587,6 +591,8 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
             case PlaybackPerformanceCatalog.PRELOAD_THREADS -> this::cyclePreloadThreads;
             case PlaybackPerformanceCatalog.PRELOAD_SIZE -> this::cyclePreloadSize;
             case PlaybackPerformanceCatalog.PRELOAD_TIME -> this::cyclePreloadTime;
+            case PlaybackPerformanceCatalog.PRELOAD_AHEAD -> this::cyclePreloadAhead;
+            case PlaybackPerformanceCatalog.PRELOAD_PAUSE -> this::cyclePausePreload;
             case PlaybackPerformanceCatalog.CODEC_ASYNC -> () -> {
                 ExoPerformanceSetting.putCodecQueueMode((ExoPerformanceSetting.getCodecQueueMode() + 1) % 3);
                 refresh();
@@ -829,6 +835,32 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
         refresh();
     }
 
+    private void cyclePreloadAhead() {
+        PreloadSetting.putPreloadAheadSeconds(PreloadSetting.getNextPreloadAheadSeconds());
+        PlaybackPerformanceSetting.markCustom();
+        refresh();
+    }
+
+    private void cyclePausePreload() {
+        PreloadSetting.putPausePreloadPolicy(PreloadSetting.getNextPausePreloadPolicy());
+        PlaybackPerformanceSetting.markCustom();
+        refresh();
+    }
+
+    private String preloadAheadText() {
+        int seconds = PreloadSetting.getPreloadAheadSeconds();
+        return seconds == PreloadSetting.WHOLE_MEDIA_AHEAD_SECONDS
+                ? "整部影片" : seconds / 60 + " 分钟";
+    }
+
+    private String pausePreloadText() {
+        return switch (PreloadSetting.getPausePreloadPolicy()) {
+            case PreloadSetting.PAUSE_PRELOAD_ALWAYS -> "始终";
+            case PreloadSetting.PAUSE_PRELOAD_UNMETERED -> "仅非计费网络";
+            default -> "关闭";
+        };
+    }
+
     private String renderText() {
         return PlayerSetting.getRender() == PlayerSetting.RENDER_SURFACE ? "SurfaceView" : "TextureView";
     }
@@ -840,34 +872,6 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
 
     private boolean isMpvVulkanAvailable() {
         return MPVLib.isVulkanRendererAvailable(App.get());
-    }
-
-    private String bufferBytesText() {
-        return switch (PlayerSetting.getBufferBytesOption()) {
-            case 1 -> "64MB";
-            case 2 -> "128MB";
-            case 3 -> "256MB";
-            default -> "自动";
-        };
-    }
-
-    private String backBufferText() {
-        return switch (PlayerSetting.getBackBufferOption()) {
-            case 1 -> "15秒";
-            case 2 -> "30秒";
-            case 3 -> "60秒";
-            default -> "关闭";
-        };
-    }
-
-    private String playCacheText() {
-        return switch (PlayerSetting.getPlayCacheOption()) {
-            case 1 -> "256MB";
-            case 2 -> "512MB";
-            case 3 -> "1GB";
-            case 4 -> "2GB";
-            default -> "128MB";
-        };
     }
 
     private String onOff(boolean value) {

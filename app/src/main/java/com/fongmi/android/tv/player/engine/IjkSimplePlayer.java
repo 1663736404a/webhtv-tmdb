@@ -28,6 +28,7 @@ import androidx.media3.common.util.UnstableApi;
 import androidx.media3.mpvplayer.MpvHlsProxy;
 
 import com.fongmi.android.tv.App;
+import com.fongmi.android.tv.player.cache.PlaybackDiskBufferStore;
 import com.fongmi.android.tv.player.exo.ExoUtil;
 import com.fongmi.android.tv.player.PlaybackResourceClassifier;
 import com.fongmi.android.tv.player.PlaybackRoute;
@@ -405,6 +406,7 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
     @Override
     protected ListenableFuture<?> handleSetPlayWhenReady(boolean playWhenReady) {
         this.playWhenReady = playWhenReady;
+        hlsProxy.setPlaybackPaused(!playWhenReady);
         if (playbackState == Player.STATE_READY) {
             if (playWhenReady) ijk.start();
             else ijk.pause();
@@ -476,6 +478,7 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         if (playbackState == Player.STATE_READY || playbackState == Player.STATE_ENDED) {
             ijk.seekTo(positionMs);
         }
+        hlsProxy.preloadAround(positionMs);
         invalidateState();
         return Futures.immediateVoidFuture();
     }
@@ -520,6 +523,7 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         if (pendingSeekPositionMs != C.TIME_UNSET) {
             ijk.seekTo(pendingSeekPositionMs);
         }
+        hlsProxy.preloadAround(Math.max(0, position()));
         if (playWhenReady) ijk.start();
         invalidateState();
         startStateRefresh();
@@ -616,10 +620,14 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
             boolean dash = isLikelyDash(mediaItem, playableUrl);
             currentDash = dash;
             if (dash) {
-                playableUrl = hlsProxy.proxyDash(playableUrl, headers);
+                playableUrl = hlsProxy.proxyDash(
+                        playableUrl, headers,
+                        PlaybackDiskBufferStore.mediaKey(mediaItem));
                 SpiderDebug.log("ijk", "proxy action=enabled mode=dash");
             } else if (shouldProxyHls(mediaItem, playableUrl)) {
-                playableUrl = hlsProxy.proxy(playableUrl, headers);
+                playableUrl = hlsProxy.proxy(
+                        playableUrl, headers,
+                        PlaybackDiskBufferStore.mediaKey(mediaItem));
                 SpiderDebug.log("ijk", "proxy action=enabled mode=hls");
             }
             SpiderDebug.log("ijk",
@@ -694,6 +702,7 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
 
     private void refreshPlaybackState() {
         if (mediaItem == null || playbackState == Player.STATE_IDLE || playbackState == Player.STATE_ENDED || playerError != null) return;
+        hlsProxy.preloadAround(Math.max(0, position()));
         invalidateState();
         startStateRefresh();
     }
