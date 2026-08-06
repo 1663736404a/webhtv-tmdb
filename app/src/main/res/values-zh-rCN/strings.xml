@@ -1082,7 +1082,7 @@
     <string name="error_play_stage_decoder">音视频解码失败，请尝试切换软硬解或播放器</string>
     <string name="error_play_stage_output">音视频输出失败，请重新进入播放或切换解码方式</string>
     <string name="error_play_stage_drm">DRM 鉴权或受保护媒体处理失败，请更换线路或播放器</string>
-    <string name="error_play_stage_unknown">播放失败，当前证据不足，暂时无法确定具体阶段</string>
+    <string name="error_play_stage_unknown">播放失败，请重试或切换播放器</string>
     <string name="error_play_flag">暂无线路数据</string>
     <string name="error_play_timeout">连接超时</string>
     <string name="error_play_tvbus">错误代码：<xliff:g name="name">%s</xliff:g></string>

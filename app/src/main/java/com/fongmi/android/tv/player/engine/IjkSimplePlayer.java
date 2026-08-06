@@ -2,6 +2,7 @@ package com.fongmi.android.tv.player.engine;
 
 import android.media.AudioManager;
 import android.net.Uri;
+import android.os.Bundle;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.os.SystemClock;
@@ -111,6 +112,10 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
     private volatile IjkDecodePressurePolicy.Config automaticDecodeControlConfig;
     private volatile IjkDecodePressurePolicy.Config appliedDecodeControlConfig;
     private IjkPlayerEngine.ErrorSnapshot lastErrorSnapshot;
+    private volatile IjkPlayerEngine.OpenStage openStage;
+    private volatile int lastHttpStatus;
+    private volatile long lastNativeOffset;
+    private volatile boolean longUrlProxied;
     private boolean prepared;
     private boolean newlyRenderedFirstFrame;
     private boolean renderedFirstFrameSeen;
@@ -121,6 +126,7 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         this.decode = decode;
         ijk = new IjkMediaPlayer();
         ijk.setListener(this);
+        ijk.setOnNativeInvokeListener(this::onNativeInvoke);
         hlsProxy = new MpvHlsProxy(PlayerSetting.IJK);
         stateRefreshRunnable = this::refreshPlaybackState;
         playbackParameters = PlaybackParameters.DEFAULT;
@@ -136,6 +142,7 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         automaticDecodeControlConfig = IjkDecodePressurePolicy.automaticInitialConfig();
         appliedDecodeControlConfig = IjkDecodePressurePolicy.automaticInitialConfig();
         lastErrorSnapshot = IjkPlayerEngine.ErrorSnapshot.none();
+        resetOpenDiagnostics();
     }
 
     @Override
@@ -523,6 +530,7 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
     @Override
     public void onPrepared(IMediaPlayer mp) {
         prepared = true;
+        advanceOpenStage(IjkPlayerEngine.OpenStage.PREPARED);
         playbackState = Player.STATE_READY;
         loading = false;
         playerError = null;
@@ -548,16 +556,33 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
     @Override
     public boolean onError(IMediaPlayer mp, int what, int extra) {
         lastErrorSnapshot = new IjkPlayerEngine.ErrorSnapshot(
-                what, extra, prepared);
+                what,
+                extra,
+                prepared,
+                openStage,
+                lastHttpStatus,
+                lastNativeOffset,
+                longUrlProxied);
         setPendingSeek(C.TIME_UNSET);
         playbackState = Player.STATE_IDLE;
         loading = false;
         stopStateRefresh();
         playerError = new PlaybackException(
-                "IJK playback failed", null, errorCode(what));
+                "IJK playback failed stage=" + openStage.label(),
+                null,
+                IjkErrorMappingPolicy.resolve(
+                        what, extra, prepared, openStage, lastHttpStatus));
         SpiderDebug.log("ijk",
-                "error what=%d extra=%d mapped=%d decode=%d prepared=%s action=notify",
-                what, extra, playerError.errorCode, decode, prepared);
+                "error what=%d extra=%d mapped=%d decode=%d prepared=%s stage=%s http=%d offset=%d longProxy=%s action=notify",
+                what,
+                extra,
+                playerError.errorCode,
+                decode,
+                prepared,
+                openStage.label(),
+                lastHttpStatus,
+                lastNativeOffset,
+                longUrlProxied);
         prepared = false;
         invalidateState();
         return true;
@@ -565,6 +590,13 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
 
     @Override
     public void onInfo(IMediaPlayer mp, int what, int extra) {
+        if (what == IMediaPlayer.MEDIA_INFO_OPEN_INPUT) {
+            advanceOpenStage(IjkPlayerEngine.OpenStage.INPUT_OPENED);
+        } else if (what == IMediaPlayer.MEDIA_INFO_FIND_STREAM_INFO) {
+            advanceOpenStage(IjkPlayerEngine.OpenStage.STREAM_INFO);
+        } else if (what == IMediaPlayer.MEDIA_INFO_COMPONENT_OPEN) {
+            advanceOpenStage(IjkPlayerEngine.OpenStage.COMPONENT_OPENED);
+        }
         if (what == IMediaPlayer.MEDIA_INFO_BUFFERING_START) {
             loading = true;
             playbackState = Player.STATE_BUFFERING;
@@ -579,8 +611,55 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
                 && !renderedFirstFrameSeen) {
             renderedFirstFrameSeen = true;
             newlyRenderedFirstFrame = true;
+            advanceOpenStage(IjkPlayerEngine.OpenStage.FIRST_FRAME);
+        }
+        if (SpiderDebug.isEnabled()
+                && (what == IMediaPlayer.MEDIA_INFO_OPEN_INPUT
+                || what == IMediaPlayer.MEDIA_INFO_FIND_STREAM_INFO
+                || what == IMediaPlayer.MEDIA_INFO_COMPONENT_OPEN)) {
+            SpiderDebug.log("ijk",
+                    "open stage=%s info=%d extra=%d http=%d longProxy=%s",
+                    openStage.label(), what, extra, lastHttpStatus,
+                    longUrlProxied);
         }
         invalidateState();
+    }
+
+    private boolean onNativeInvoke(int event, Bundle bundle) {
+        int httpStatus = bundleNumber(bundle,
+                IjkMediaPlayer.OnNativeInvokeListener.ARG_HTTP_CODE, 0);
+        int nativeError = bundleNumber(bundle,
+                IjkMediaPlayer.OnNativeInvokeListener.ARG_ERROR, 0);
+        int retry = bundleNumber(bundle,
+                IjkMediaPlayer.OnNativeInvokeListener.ARG_RETRY_COUNTER, 0);
+        long offset = bundleLong(bundle,
+                IjkMediaPlayer.OnNativeInvokeListener.ARG_OFFSET, -1);
+        if (event == IjkMediaPlayer.OnNativeInvokeListener.EVENT_WILL_HTTP_OPEN) {
+            advanceOpenStage(IjkPlayerEngine.OpenStage.HTTP_OPENING);
+        } else if (event
+                == IjkMediaPlayer.OnNativeInvokeListener.EVENT_DID_HTTP_OPEN) {
+            if (httpStatus > 0) lastHttpStatus = httpStatus;
+            advanceOpenStage(IjkPlayerEngine.OpenStage.HTTP_OPENED);
+        } else if (event
+                == IjkMediaPlayer.OnNativeInvokeListener.EVENT_DID_HTTP_SEEK) {
+            if (httpStatus > 0) lastHttpStatus = httpStatus;
+            if (offset >= 0) lastNativeOffset = offset;
+        } else if (event
+                == IjkMediaPlayer.OnNativeInvokeListener.EVENT_WILL_HTTP_SEEK
+                && offset >= 0) {
+            lastNativeOffset = offset;
+        }
+        if (SpiderDebug.isEnabled()) {
+            SpiderDebug.log("ijk",
+                    "native event=%d stage=%s http=%d error=%d offset=%d retry=%d",
+                    event,
+                    openStage.label(),
+                    httpStatus,
+                    nativeError,
+                    offset,
+                    retry);
+        }
+        return false;
     }
 
     @Override
@@ -616,6 +695,7 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
             newlyRenderedFirstFrame = false;
             renderedFirstFrameSeen = false;
             lastErrorSnapshot = IjkPlayerEngine.ErrorSnapshot.none();
+            resetOpenDiagnostics();
             ijk.reset();
             hlsProxy.clear();
             invalidateResourceObservation();
@@ -637,6 +717,19 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
                         playableUrl, headers,
                         PlaybackDiskBufferStore.mediaKey(mediaItem));
                 SpiderDebug.log("ijk", "proxy action=enabled mode=hls");
+            } else {
+                IjkLongUrlPolicy.Decision longUrl =
+                        IjkLongUrlPolicy.evaluate(playableUrl);
+                if (longUrl.proxyRequired()) {
+                    playableUrl = hlsProxy.proxyFile(
+                            playableUrl,
+                            headers,
+                            PlaybackDiskBufferStore.mediaKey(mediaItem));
+                    longUrlProxied = true;
+                    SpiderDebug.log("ijk",
+                            "proxy action=enabled mode=file-long-url nativeBytes=%d",
+                            longUrl.nativeBytes());
+                }
             }
             SpiderDebug.log("ijk",
                     "open dash=%s decode=%d mime=%s headers=%d",
@@ -648,6 +741,7 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
             configureOptions(sourceUri, dash);
             bindVideoOutput();
             ijk.setDataSource(App.get(), Uri.parse(playableUrl), headers);
+            advanceOpenStage(IjkPlayerEngine.OpenStage.SOURCE_SET);
             ijk.setAudioStreamType(AudioManager.STREAM_MUSIC);
             ijk.setScreenOnWhilePlaying(true);
             ijk.setLooping(repeatOne);
@@ -661,8 +755,19 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
                     e,
                     PlaybackException.ERROR_CODE_IO_UNSPECIFIED);
             SpiderDebug.log("ijk",
-                    "open failed errorType=%s action=notify",
-                    e.getClass().getSimpleName());
+                    "open failed errorType=%s stage=%s http=%d longProxy=%s action=notify",
+                    e.getClass().getSimpleName(),
+                    openStage.label(),
+                    lastHttpStatus,
+                    longUrlProxied);
+            lastErrorSnapshot = new IjkPlayerEngine.ErrorSnapshot(
+                    IMediaPlayer.MEDIA_ERROR_IO,
+                    0,
+                    prepared,
+                    openStage,
+                    lastHttpStatus,
+                    lastNativeOffset,
+                    longUrlProxied);
             playbackState = Player.STATE_IDLE;
             loading = false;
             prepared = false;
@@ -691,6 +796,7 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         newlyRenderedFirstFrame = false;
         renderedFirstFrameSeen = false;
         lastErrorSnapshot = IjkPlayerEngine.ErrorSnapshot.none();
+        resetOpenDiagnostics();
         if (resetState) playbackState = Player.STATE_IDLE;
         stopStateRefresh();
     }
@@ -1214,14 +1320,28 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         return TextUtils.isEmpty(value) ? null : MimeTypes.BASE_TYPE_VIDEO + "/" + value;
     }
 
-    private int errorCode(int what) {
-        return switch (what) {
-            case IMediaPlayer.MEDIA_ERROR_IO -> PlaybackException.ERROR_CODE_IO_UNSPECIFIED;
-            case IMediaPlayer.MEDIA_ERROR_MALFORMED -> PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED;
-            case IMediaPlayer.MEDIA_ERROR_UNSUPPORTED -> PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED;
-            case IMediaPlayer.MEDIA_ERROR_TIMED_OUT -> PlaybackException.ERROR_CODE_TIMEOUT;
-            default -> PlaybackException.ERROR_CODE_UNSPECIFIED;
-        };
+    private synchronized void resetOpenDiagnostics() {
+        openStage = IjkPlayerEngine.OpenStage.NONE;
+        lastHttpStatus = 0;
+        lastNativeOffset = -1;
+        longUrlProxied = false;
+    }
+
+    private synchronized void advanceOpenStage(
+            IjkPlayerEngine.OpenStage stage) {
+        if (stage != null && stage.ordinal() > openStage.ordinal()) {
+            openStage = stage;
+        }
+    }
+
+    private static int bundleNumber(Bundle bundle, String key, int fallback) {
+        Object value = bundle == null ? null : bundle.get(key);
+        return value instanceof Number number ? number.intValue() : fallback;
+    }
+
+    private static long bundleLong(Bundle bundle, String key, long fallback) {
+        Object value = bundle == null ? null : bundle.get(key);
+        return value instanceof Number number ? number.longValue() : fallback;
     }
 
 }

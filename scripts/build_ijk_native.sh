@@ -13,6 +13,7 @@ IJK_PATCH="$ROOT_DIR/third_party/patches/ijk-vod-buffer-capacity.patch"
 IJK_LINK_PATCH="$ROOT_DIR/third_party/patches/ijk-ffmpeg4-link.patch"
 IJK_BUFFER_PATCH="$ROOT_DIR/third_party/patches/ijk-vod-buffer-capacity-ff4.patch"
 IJK_CORE_PATCH="$ROOT_DIR/third_party/patches/ijk-ffmpeg4-ndk28-core.patch"
+IJK_ERROR_PATCH="$ROOT_DIR/third_party/patches/ijk-error-propagation.patch"
 FFMPEG_PATCH="$ROOT_DIR/third_party/patches/ijk-ffmpeg4-ndk28.patch"
 ABI="arm64-v8a"
 INSTALL=0
@@ -113,6 +114,8 @@ git -C "$SOURCE_DIR" apply --check "$IJK_BUFFER_PATCH"
 git -C "$SOURCE_DIR" apply "$IJK_BUFFER_PATCH"
 git -C "$SOURCE_DIR" apply --check "$IJK_CORE_PATCH"
 git -C "$SOURCE_DIR" apply "$IJK_CORE_PATCH"
+git -C "$SOURCE_DIR" apply --check "$IJK_ERROR_PATCH"
+git -C "$SOURCE_DIR" apply "$IJK_ERROR_PATCH"
 
 # Keep the newer Android/NDK build fixes, but restore the proven FFmpeg 4.0
 # configuration used by WebHTV's IJK ABI.

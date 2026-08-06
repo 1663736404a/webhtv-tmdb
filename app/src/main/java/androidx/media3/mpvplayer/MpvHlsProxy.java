@@ -195,6 +195,37 @@ public final class MpvHlsProxy extends NanoHTTPD {
         return proxyUrl;
     }
 
+    public synchronized String proxyFile(
+            String url, Map<String, String> headers, String mediaKey) throws IOException {
+        ensureStarted();
+        refreshCacheCoordinator();
+        int id = ++this.sessionId;
+        upstreamEstimator.reset();
+        Session session = new Session(
+                url, sanitize(headers), System.currentTimeMillis(),
+                resolveMediaKey(mediaKey, url));
+        diskBufferStore.reset(session.mediaKey());
+        sessions.put(id, session);
+        String targetId = Long.toString(nextId.incrementAndGet());
+        String proxyUrl = baseUrl() + "/mpv/item?s=" + id + "&id=" + targetId;
+        targets.put(targetId, new Target(
+                id, url, session.createdAtMs(), false, null,
+                HlsPlaylistRewriter.UriRole.OTHER, 0, 0));
+        SessionStats stats = new SessionStats();
+        stats.vod = true;
+        stats.classification = PlaybackResourceClassifier.classify(
+                proxyUrl, url, null, null, Map.of(), null);
+        sessionStats.put(id, stats);
+        pruneExpiredSessions(session.createdAtMs());
+        SpiderDebug.log(TAG,
+                "file enabled session=%d sourceBytes=%d headers=%s proxy=%s",
+                id,
+                url == null ? 0 : url.getBytes(StandardCharsets.UTF_8).length,
+                session.headers().keySet(),
+                proxyUrl);
+        return proxyUrl;
+    }
+
     public synchronized void clear() {
         sessions.clear();
         sessionStats.clear();

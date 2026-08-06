@@ -1085,7 +1085,7 @@
     <string name="error_play_stage_decoder">Audio/video decoding failed. Try another decode mode or player.</string>
     <string name="error_play_stage_output">Audio/video output failed. Reopen playback or try another decode mode.</string>
     <string name="error_play_stage_drm">DRM authorization or protected-media handling failed. Choose another line or player.</string>
-    <string name="error_play_stage_unknown">Playback failed, but there is not enough evidence to identify the failing stage.</string>
+    <string name="error_play_stage_unknown">Playback failed. Retry or switch player.</string>
     <string name="error_play_flag">No flag data</string>
     <string name="error_play_timeout">Timed out</string>
     <string name="error_play_tvbus">Error code: <xliff:g name="name">%s</xliff:g></string>

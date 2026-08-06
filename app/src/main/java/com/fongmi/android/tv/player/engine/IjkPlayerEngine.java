@@ -267,10 +267,40 @@ public class IjkPlayerEngine implements PlayerEngine {
         };
     }
 
-    public record ErrorSnapshot(int what, int extra, boolean prepared) {
+    public enum OpenStage {
+        NONE("none"),
+        SOURCE_SET("source-set"),
+        HTTP_OPENING("http-opening"),
+        HTTP_OPENED("http-opened"),
+        INPUT_OPENED("input-opened"),
+        STREAM_INFO("stream-info"),
+        COMPONENT_OPENED("component-opened"),
+        PREPARED("prepared"),
+        FIRST_FRAME("first-frame");
+
+        private final String label;
+
+        OpenStage(String label) {
+            this.label = label;
+        }
+
+        public String label() {
+            return label;
+        }
+    }
+
+    public record ErrorSnapshot(
+            int what,
+            int extra,
+            boolean prepared,
+            OpenStage stage,
+            int httpStatus,
+            long nativeOffset,
+            boolean longUrlProxied) {
 
         public static ErrorSnapshot none() {
-            return new ErrorSnapshot(0, 0, false);
+            return new ErrorSnapshot(
+                    0, 0, false, OpenStage.NONE, 0, -1, false);
         }
     }
 

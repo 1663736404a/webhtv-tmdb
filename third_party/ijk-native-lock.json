@@ -6,7 +6,8 @@
       "third_party/patches/ijk-vod-buffer-capacity.patch",
       "third_party/patches/ijk-ffmpeg4-link.patch",
       "third_party/patches/ijk-vod-buffer-capacity-ff4.patch",
-      "third_party/patches/ijk-ffmpeg4-ndk28-core.patch"
+      "third_party/patches/ijk-ffmpeg4-ndk28-core.patch",
+      "third_party/patches/ijk-error-propagation.patch"
     ],
     "ffmpeg_patches": [
       "third_party/patches/ijk-ffmpeg4-ndk28.patch"
