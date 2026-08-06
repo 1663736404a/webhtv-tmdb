@@ -140,11 +140,11 @@ public final class PlaybackPerformanceCatalog {
 
     private static void addIjk(List<PlaybackPerformanceOption> options) {
         options.add(option(IJK_SCENE, BASIC, "场景模式", "怎么选：不确定就选“自动”（默认）；普通影视选“点播”；直播经常缓冲选“直播稳定”；只有网络很好且必须追求低延迟时选“直播低延迟”。代价：稳定模式延迟更高，低延迟模式更容易卡顿。"));
-        options.add(option(IJK_BUFFER, BUFFER, "读包内存上限", "作用：限制IJK native读包队列占用的内存，不是磁盘缓存。自动档会在4/8/15MB之间按码率、场景和内存压力调整；手动档普通和大码率视频选15MB，内存紧张选8MB，极低内存才选4MB。"));
+        options.add(option(IJK_BUFFER, BUFFER, "读包内存上限", "作用：限制IJK native前向读包队列占用的内存，不是磁盘缓存。自动档按码率、场景和内存压力使用4～15MB；自定义可选64/128/256MB，播放或暂停时都会继续读到该上限，容量越大越抗网络抖动，但会增加native内存占用。"));
         options.add(option(IJK_PACKET_BUFFERING, BUFFER, "数据包队列", "作用：决定数据不足时是否等待内存中的数据包队列恢复。点播和稳定直播保持开启；只为降低直播延迟才关闭。代价：开启会增加延迟，关闭在网络抖动时更容易卡顿或花屏。"));
         options.add(option(IJK_WATER, BUFFER, "起播与恢复水位", "作用：控制IJK内存队列达到多少数据后开始或恢复播放，不代表磁盘缓存长度。自动档会按点播、直播、低延迟和分片时长在0.1～5秒内调整；手动档网络抖动可选稳定，低延迟直播才选低。"));
         options.add(option(IJK_PICTURE_QUEUE, BUFFER, "画面队列", "自动档固定3帧，避免高分辨率盲目扩大 native/图形内存；手动档可选3/5/8帧，渲染偶发抖动可尝试5帧。代价：队列越大，内存和直播延迟越高。"));
-        options.add(option(PLAY_CACHE, BUFFER, "HLS 磁盘缓存上限", "作用：限制IJK经HLS代理写入磁盘的数据量。频繁回看或拖动可增大；它与4/8/15MB读包内存完全独立，不会直接扩大IJK的内存缓冲。"));
+        options.add(option(PLAY_CACHE, BUFFER, "HLS 磁盘缓存上限", "作用：限制IJK经HLS代理写入磁盘的数据量。频繁回看或拖动可增大；它与读包内存上限完全独立，不会直接扩大IJK的内存缓冲。"));
         addPreload(options, true);
         options.add(option(IJK_FRAME_DROP, DECODE, "丢帧策略", "怎么选：普通播放选“标准”（默认）；低性能设备持续落后时选“积极”；设备性能充足且必须保留每帧才关闭。代价：越积极越能追上进度，但画面跳帧越明显。"));
         options.add(option(IJK_SOFT_TUNE, DECODE, "软解降负载", "自动档仅在确认实际软解、持续FPS压力和热状态后从关闭分级到温和/积极；手动档可固定选择。代价：越积极越省CPU，但细节和连续性损失越大，参数变化需要重建。"));

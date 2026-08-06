@@ -94,6 +94,7 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
     private VideoSize videoSize;
     private int playbackState;
     private int bufferingPercent;
+    private long bufferingPositionMs;
     private int decode;
     private long pendingSeekPositionMs;
     private long pendingSeekRequestedAtMs;
@@ -369,6 +370,8 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         selectedAudioFormat = null;
         playerError = null;
         prepared = false;
+        bufferingPercent = 0;
+        bufferingPositionMs = 0;
         newlyRenderedFirstFrame = false;
         renderedFirstFrameSeen = false;
         lastErrorSnapshot = IjkPlayerEngine.ErrorSnapshot.none();
@@ -476,6 +479,8 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
     @Override
     protected ListenableFuture<?> handleSeek(int mediaItemIndex, long positionMs, int seekCommand) {
         if (positionMs == C.TIME_UNSET) positionMs = 0;
+        bufferingPercent = 0;
+        bufferingPositionMs = Math.max(0, positionMs);
         setPendingSeek(positionMs > 0 ? positionMs : C.TIME_UNSET);
         if (playbackState == Player.STATE_READY || playbackState == Player.STATE_ENDED) {
             ijk.seekTo(positionMs);
@@ -586,6 +591,7 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
 
     @Override
     public void onBufferingUpdate(IMediaPlayer mp, long positionMs) {
+        bufferingPositionMs = Math.max(0, positionMs);
         invalidateState();
     }
 
@@ -676,6 +682,7 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
         currentDash = false;
         loading = false;
         bufferingPercent = 0;
+        bufferingPositionMs = 0;
         currentTracks = Tracks.EMPTY;
         selectedVideoFormat = null;
         selectedAudioFormat = null;
@@ -796,6 +803,7 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
                         url,
                         IjkPerformanceSetting.getScene(),
                         IjkPerformanceSetting.getBufferMb(),
+                        PlayerSetting.getBufferBytes(PlayerSetting.IJK),
                         IjkPerformanceSetting.getFirstWaterMs(),
                         IjkPerformanceSetting.getNextWaterMs(),
                         IjkPerformanceSetting.getLastWaterMs());
@@ -807,9 +815,10 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
                 IjkPerformanceSetting.getPictureQueue(),
                 configuredSoftTuneMode());
         SpiderDebug.log("ijk-buffer",
-                "action=prepare mode=%s bufferMb=%d firstMs=%d nextMs=%d lastMs=%d realtime=%s infbuf=%s",
+                "action=prepare mode=%s bufferMb=%d maxBufferBytes=%d firstMs=%d nextMs=%d lastMs=%d realtime=%s infbuf=%s",
                 automatic ? "automatic" : "fixed",
                 appliedInputBufferConfig.bufferMb(),
+                inputBuffer.maxBufferBytes(),
                 appliedInputBufferConfig.firstWaterMs(),
                 appliedInputBufferConfig.nextWaterMs(),
                 appliedInputBufferConfig.lastWaterMs(),
@@ -1011,7 +1020,7 @@ class IjkSimplePlayer extends SimpleBasePlayer implements IMediaPlayer.Listener 
     private long bufferedPosition(long position, long duration) {
         return IjkBufferedDurationPolicy.bufferedPosition(
                 position, duration, bufferingPercent,
-                getNativeBufferedDurationSnapshot());
+                getNativeBufferedDurationSnapshot(), bufferingPositionMs);
     }
 
     private boolean isPlayingInternal() {

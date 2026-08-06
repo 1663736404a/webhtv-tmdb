@@ -543,8 +543,7 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
             case PlaybackPerformanceCatalog.MPV_SOFT_TUNE -> MpvPerformanceSetting.getSoftTuneText();
             case PlaybackPerformanceCatalog.MPV_VERBOSE_LOG -> MpvPerformanceSetting.isVerboseLog() ? "详细" : "正常";
             case PlaybackPerformanceCatalog.IJK_SCENE -> IjkPerformanceSetting.getSceneText();
-            case PlaybackPerformanceCatalog.IJK_BUFFER -> PlaybackPerformanceSetting.isAuto(PlayerSetting.IJK)
-                    ? "自动 · 4～15MB" : IjkPerformanceSetting.getBufferMb() + "MB";
+            case PlaybackPerformanceCatalog.IJK_BUFFER -> ijkBufferText();
             case PlaybackPerformanceCatalog.IJK_PACKET_BUFFERING -> onOff(IjkPerformanceSetting.isPacketBuffering());
             case PlaybackPerformanceCatalog.IJK_WATER -> PlaybackPerformanceSetting.isAuto(PlayerSetting.IJK)
                     ? "自动 · 0.1～5秒" : IjkPerformanceSetting.getWaterText();
@@ -661,9 +660,7 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                 refresh();
             };
             case PlaybackPerformanceCatalog.IJK_BUFFER -> () -> {
-                int current = IjkPerformanceSetting.getBufferMb();
-                IjkPerformanceSetting.putBufferMb(current == 4 ? 8 : current == 8 ? 15 : 4);
-                refresh();
+                cycleBufferBytes();
             };
             case PlaybackPerformanceCatalog.IJK_PACKET_BUFFERING -> () -> {
                 IjkPerformanceSetting.putPacketBuffering(!IjkPerformanceSetting.isPacketBuffering());
@@ -851,6 +848,15 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
         int seconds = PreloadSetting.getPreloadAheadSeconds();
         return seconds == PreloadSetting.WHOLE_MEDIA_AHEAD_SECONDS
                 ? "整部影片" : seconds / 60 + " 分钟";
+    }
+
+    private String ijkBufferText() {
+        long configuredBytes = PlayerSetting.getBufferBytes(PlayerSetting.IJK);
+        if (configuredBytes > 0) {
+            return FileUtil.byteCountToDisplaySize(configuredBytes);
+        }
+        return PlaybackPerformanceSetting.isAuto(PlayerSetting.IJK)
+                ? "自动 · 4～15MB" : IjkPerformanceSetting.getBufferMb() + "MB";
     }
 
     private String pausePreloadText() {

@@ -27,7 +27,7 @@ public class IjkInputBufferPolicyTest {
 
         for (int scene : scenes) {
             for (String url : urls) {
-                IjkInputBufferPolicy.Decision decision = IjkInputBufferPolicy.resolve(url, scene, 15);
+                IjkInputBufferPolicy.Decision decision = IjkInputBufferPolicy.resolve(url, scene, 15, 256L * 1024 * 1024);
                 assertTrue("scene=" + scene + " url=" + url, decision.realtime());
                 assertFalse("scene=" + scene + " url=" + url, decision.infiniteBuffer());
                 assertEquals(15L * 1024 * 1024, decision.maxBufferBytes());
@@ -45,9 +45,22 @@ public class IjkInputBufferPolicyTest {
     }
 
     @Test
+    public void vodUsesConfiguredMemoryCapacity() {
+        IjkInputBufferPolicy.Decision decision = IjkInputBufferPolicy.resolve(
+                "https://example.com/movie.mp4",
+                IjkPerformanceSetting.SCENE_VOD,
+                15,
+                256L * 1024 * 1024);
+
+        assertFalse(decision.realtime());
+        assertEquals(256L * 1024 * 1024, decision.maxBufferBytes());
+        assertFalse(decision.infiniteBuffer());
+    }
+
+    @Test
     public void nonRealtimeAndHttpHlsRemainFiniteWithoutExpandingLiveDetection() {
         for (String url : new String[]{null, "", "https://example.com/live.m3u8", "file:///video.mp4"}) {
-            IjkInputBufferPolicy.Decision decision = IjkInputBufferPolicy.resolve(url, IjkPerformanceSetting.SCENE_LIVE_STABLE, 15);
+            IjkInputBufferPolicy.Decision decision = IjkInputBufferPolicy.resolve(url, IjkPerformanceSetting.SCENE_LIVE_STABLE, 15, 0);
             assertFalse(decision.realtime());
             assertFalse(decision.infiniteBuffer());
             assertEquals(15L * 1024 * 1024, decision.maxBufferBytes());
@@ -56,8 +69,8 @@ public class IjkInputBufferPolicyTest {
 
     @Test
     public void invalidSceneIsClampedWithoutEnablingInfiniteBuffer() {
-        IjkInputBufferPolicy.Decision below = IjkInputBufferPolicy.resolve("RTSP://example.com/live", Integer.MIN_VALUE, 15);
-        IjkInputBufferPolicy.Decision above = IjkInputBufferPolicy.resolve("RTMP://example.com/live", Integer.MAX_VALUE, 15);
+        IjkInputBufferPolicy.Decision below = IjkInputBufferPolicy.resolve("RTSP://example.com/live", Integer.MIN_VALUE, 15, 0);
+        IjkInputBufferPolicy.Decision above = IjkInputBufferPolicy.resolve("RTMP://example.com/live", Integer.MAX_VALUE, 15, 0);
 
         assertEquals(IjkPerformanceSetting.SCENE_AUTO, below.scene());
         assertEquals(IjkPerformanceSetting.SCENE_LIVE_LOW_LATENCY, above.scene());
@@ -68,7 +81,7 @@ public class IjkInputBufferPolicyTest {
     }
 
     private void assertDecision(int configuredMb, int expectedMb, long expectedBytes) {
-        IjkInputBufferPolicy.Decision decision = IjkInputBufferPolicy.resolve("rtsp://example.com/live", IjkPerformanceSetting.SCENE_AUTO, configuredMb);
+        IjkInputBufferPolicy.Decision decision = IjkInputBufferPolicy.resolve("rtsp://example.com/live", IjkPerformanceSetting.SCENE_AUTO, configuredMb, 0);
         assertEquals(expectedMb, decision.bufferMb());
         assertEquals(expectedBytes, decision.maxBufferBytes());
         assertFalse(decision.infiniteBuffer());

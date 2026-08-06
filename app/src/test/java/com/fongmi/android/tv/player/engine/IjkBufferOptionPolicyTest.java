@@ -20,7 +20,7 @@ public class IjkBufferOptionPolicyTest {
                 IjkBufferOptionPolicy.resolve(
                         true, staged, "https://example.invalid/live.m3u8",
                         IjkPerformanceSetting.SCENE_AUTO,
-                        15, 500, 2_000, 5_000);
+                        15, 0, 500, 2_000, 5_000);
 
         assertEquals(staged, decision.config());
         assertEquals(4L * IjkBufferPolicy.MIB, decision.maxBufferBytes());
@@ -34,11 +34,12 @@ public class IjkBufferOptionPolicyTest {
                         false, IjkBufferPolicy.safeInitialConfig(),
                         "https://example.invalid/movie.mp4",
                         IjkPerformanceSetting.SCENE_VOD,
-                        15, 500, 2_000, 5_000);
+                        15, 256L * IjkBufferPolicy.MIB,
+                        500, 2_000, 5_000);
 
         assertEquals(new IjkBufferPolicy.Config(
                 15, 500, 2_000, 5_000), decision.config());
-        assertEquals(15L * IjkBufferPolicy.MIB, decision.maxBufferBytes());
+        assertEquals(256L * IjkBufferPolicy.MIB, decision.maxBufferBytes());
         assertFalse(decision.infiniteBuffer());
     }
 
@@ -48,7 +49,8 @@ public class IjkBufferOptionPolicyTest {
                 IjkBufferOptionPolicy.resolve(
                         true, null, "rtsp://example.invalid/live",
                         IjkPerformanceSetting.SCENE_AUTO,
-                        15, 500, 2_000, 5_000);
+                        15, 256L * IjkBufferPolicy.MIB,
+                        500, 2_000, 5_000);
 
         assertTrue(decision.realtime());
         assertEquals(IjkBufferPolicy.safeInitialConfig(), decision.config());

@@ -33,16 +33,22 @@ public class IjkBufferedDurationPolicyTest {
     @Test
     public void bufferedPositionUsesNativeQueueWhenItIsAheadOfPercent() {
         assertEquals(35_000, IjkBufferedDurationPolicy.bufferedPosition(
-                20_000, 100_000, 25, 15_000));
+                20_000, 100_000, 25, 15_000, 0));
         assertEquals(50_000, IjkBufferedDurationPolicy.bufferedPosition(
-                20_000, 100_000, 50, 15_000));
+                20_000, 100_000, 50, 15_000, 0));
+    }
+
+    @Test
+    public void bufferedPositionUsesPreciseNativeEndpointBeforePercentChanges() {
+        assertEquals(42_500, IjkBufferedDurationPolicy.bufferedPosition(
+                20_000, 7_200_000, 0, 4_000, 42_500));
     }
 
     @Test
     public void bufferedPositionStaysBounded() {
         assertEquals(100_000, IjkBufferedDurationPolicy.bufferedPosition(
-                90_000, 100_000, 100, 30_000));
+                90_000, 100_000, 100, 30_000, 130_000));
         assertEquals(12_000, IjkBufferedDurationPolicy.bufferedPosition(
-                12_000, -1, 100, 30_000));
+                12_000, -1, 100, 30_000, 90_000));
     }
 }

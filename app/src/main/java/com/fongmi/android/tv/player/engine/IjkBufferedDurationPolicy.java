@@ -23,14 +23,17 @@ final class IjkBufferedDurationPolicy {
             long positionMs,
             long durationMs,
             int bufferingPercent,
-            long nativeBufferedDurationMs) {
+            long nativeBufferedDurationMs,
+            long nativeBufferedPositionMs) {
         long position = Math.max(0, positionMs);
         if (durationMs <= 0) return position;
         int percent = Math.clamp(bufferingPercent, 0, 100);
         long percentEnd = durationMs / 100 * percent
                 + durationMs % 100 * percent / 100;
         long nativeEnd = saturatedAdd(position, Math.max(0, nativeBufferedDurationMs));
-        return Math.min(durationMs, Math.max(position, Math.max(percentEnd, nativeEnd)));
+        long reportedEnd = Math.max(position, nativeBufferedPositionMs);
+        return Math.min(durationMs, Math.max(
+                Math.max(position, reportedEnd), Math.max(percentEnd, nativeEnd)));
     }
 
     private static long saturatedAdd(long first, long second) {

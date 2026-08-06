@@ -77,8 +77,9 @@ WebHome 主页、扩展、模板、示例和 AI skills 统一放在 [webhome-dev
 ### 环境要求
 
 - JDK 21。不要使用 JDK 17；当前 `sourceCompatibility` / `targetCompatibility` 均为 Java 21。
+- Python 3.10。Chaquo 运行时和构建时 Python 均固定为 3.10，仅安装 Python 3.11/3.12/3.13 会失败。
 - Android SDK Platform 37 和 Build Tools 37.0.0。当前 `compileSdk=37`、`minSdk=24`、`targetSdk=28`。
-- Android NDK 28.2.13676358。普通 Gradle 打包会直接使用仓库内置的 MPV native assets 和 `libplayer.so`。`scripts/build_mpv_player_jni.sh` 只重建 JNI 桥接库 `libplayer.so`，不会重编 `libmpv.so`、FFmpeg 或 libplacebo。
+- Android NDK 28.2.13676358 仅用于重建 MPV/IJK/JNI/DVD native。普通 Gradle 打包直接使用仓库已提交二进制，不要求安装 NDK。`scripts/build_mpv_player_jni.sh` 只重建 JNI 桥接库 `libplayer.so`，不会重编 `libmpv.so`、FFmpeg 或 libplacebo。
 - 使用仓库内置 Gradle Wrapper：Gradle 9.5.1，Android Gradle Plugin 9.2.1。
 - 能访问 Maven Central、Google Maven、Gradle Plugin Portal 和 JitPack。仓库内已带定制 Media3、nextlib 和本地 AAR，但普通 Android 依赖仍需要联网下载。
 
@@ -107,14 +108,13 @@ export ANDROID_HOME="$HOME/Library/Android/sdk"
 
 Linux 常见路径是 `$HOME/Android/Sdk`，Windows 使用 Android Studio 打开项目或创建 `local.properties`，内容类似 `sdk.dir=C\:\\Users\\你的用户名\\AppData\\Local\\Android\\Sdk`。
 
-如 SDK 未安装 API 37/Build Tools/NDK，可用 Android Studio SDK Manager 安装，或使用命令行工具：
+如 SDK 未安装 API 37、Build Tools 或 Platform Tools，可用 Android Studio SDK Manager 安装，或使用命令行工具：
 
 ```bash
 "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
   "platform-tools" \
   "platforms;android-37.0" \
-  "build-tools;37.0.0" \
-  "ndk;28.2.13676358"
+  "build-tools;37.0.0"
 yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses
 ```
 
@@ -131,7 +131,7 @@ bash gradlew :app:assembleMobileArm64_v8aDebug :app:assembleLeanbackArmeabi_v7aD
 
 ```bash
 git fetch origin
-git switch feature/android-mpv-player
+git switch beta
 bash gradlew clean
 bash gradlew :app:assembleMobileArm64_v8aDebug
 ```
@@ -265,23 +265,23 @@ app/src/main/jniLibs/armeabi-v7a/
 ```bash
 export ANDROID_HOME="$HOME/Library/Android/sdk" # Linux 通常为 $HOME/Android/Sdk
 "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-  "ndk;27.2.12479018" \
-  "ndk;21.4.7075529"
+  "ndk;28.2.13676358"
 
 # macOS
-brew install git yasm
+xcode-select -p >/dev/null 2>&1 || xcode-select --install
+brew install openjdk@21 git python@3.10 pkg-config
 
-# Ubuntu
+# Ubuntu 24.04+
 sudo apt-get update
-sudo apt-get install -y git make yasm python3
+sudo apt-get install -y openjdk-21-jdk git python3.10 python3.10-venv build-essential perl pkg-config file
 ```
 
 重建并安装 arm64 IJK，然后打快速 Release：
 
 ```bash
 export ANDROID_HOME="$HOME/Library/Android/sdk"
-export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
-scripts/build_ijk_native.sh --abi arm64-v8a --install
+export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358"
+bash scripts/build_ijk_native.sh --abi arm64-v8a --install
 bash gradlew :app:assembleMobileArm64_v8aRelease -PfastRelease=true
 ```
 
@@ -289,12 +289,12 @@ Ubuntu 下重建 32 位 IJK：
 
 ```bash
 export ANDROID_HOME="$HOME/Android/Sdk"
-export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/21.4.7075529"
-scripts/build_ijk_native.sh --abi armeabi-v7a --install
+export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358"
+bash scripts/build_ijk_native.sh --abi armeabi-v7a --install
 bash gradlew :app:assembleLeanbackArmeabi_v7aRelease -PfastRelease=true
 ```
 
-脚本会拉取锁定的 IJK/FFmpeg 4.0 源码、编译 OpenSSL/FFmpeg/IJK、检查三项输出并按 `--install` 写入对应 ABI 目录。32 位 native 重建推荐 Ubuntu；只需打包 App 时不必安装这两套额外 NDK，也不要运行该脚本。
+脚本会拉取锁定的 IJK/FFmpeg 4.0 与 OpenSSL `openssl-3.2` 源码、应用补丁、检查三项输出并按 `--install` 写入对应 ABI 目录。arm64 与 armeabi-v7a 均已在 macOS 使用 NDK 28.2.13676358 重建成功，并和 MPV/JNI/DVD 共用这一版 NDK；32 位不再需要 NDK 21。只需打包 App 时不必运行该脚本，两套 ARM ABI 也不需要 `yasm`。完整命令和 API 21、`pkg-config` 隔离说明见 `webhome-devkit/docs/应用完整开发文档.md`。
 
 ### APK 输出路径
 
@@ -382,6 +382,7 @@ bash gradlew :app:assembleMobileArm64_v8aDebug :app:assembleLeanbackArm64_v8aDeb
 ### 常见构建失败
 
 - `Unsupported class file major version`、`invalid source release: 21`：当前终端没有使用 JDK 21。
+- `Chaquopy ... is not a valid Python 3.10 command`：安装主机 Python 3.10，并确保当前终端能执行 `python3.10 --version`。
 - `SDK location not found`：缺少 `local.properties`，或 `sdk.dir` 指向错误。
 - `failed to find target with hash string 'android-37'`：未安装 Android SDK Platform 37。
 - `NDK clang++ not found under .../ndk/28.2.13676358`：未安装 NDK 28.2.13676358，或 `ANDROID_NDK_HOME` 指向错误。

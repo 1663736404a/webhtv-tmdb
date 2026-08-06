@@ -2,24 +2,23 @@ package androidx.media3.mpvplayer;
 
 import com.fongmi.android.tv.player.PlaybackAutoContext;
 
-/** Pure policy for temporarily extending MPV's in-memory cache while paused. */
-final class MpvPausePreloadCachePolicy {
+/** Pure policy for extending MPV's forward cache during playback and allowed pauses. */
+final class MpvPreloadCachePolicy {
 
     private static final int MAX_TARGET_SECONDS = 24 * 60 * 60;
 
-    private MpvPausePreloadCachePolicy() {
+    private MpvPreloadCachePolicy() {
     }
 
     static Decision resolve(Request request) {
         Request current = request == null ? Request.inactive() : request;
-        if (!current.paused()) return hold(current, Reason.PLAYING);
         if (!current.preloadConfigured()) return hold(current, Reason.PRELOAD_DISABLED);
-        if (!current.pauseAllowed()) return hold(current, Reason.PAUSE_POLICY);
+        if (current.paused() && !current.pauseAllowed()) {
+            return hold(current, Reason.PAUSE_POLICY);
+        }
         if (!current.performanceOptionsPriority()) return hold(current, Reason.CONFIG_PRIORITY);
         if (!current.cacheEnabled()) return hold(current, Reason.CACHE_DISABLED);
-        if (current.protocol() != PlaybackAutoContext.Protocol.PROGRESSIVE_HTTP) {
-            return hold(current, Reason.NOT_PROGRESSIVE);
-        }
+        if (!supportsForwardPreload(current)) return hold(current, Reason.NOT_PROGRESSIVE);
         if (current.streamKind() == PlaybackAutoContext.StreamKind.LIVE
                 || current.streamKind() == PlaybackAutoContext.StreamKind.LOW_LATENCY_LIVE) {
             return hold(current, Reason.LIVE_STREAM);
@@ -39,12 +38,27 @@ final class MpvPausePreloadCachePolicy {
             if (remainingMs > 0) targetSeconds = Math.min(targetSeconds, ceilSeconds(remainingMs));
         }
         targetSeconds = Math.clamp(targetSeconds, 0, MAX_TARGET_SECONDS);
-        if (targetSeconds <= current.baselineSeconds()) return hold(current, Reason.ALREADY_AHEAD);
-        return new Decision(true, targetSeconds, Reason.EXTEND_CACHE, current);
+        if (targetSeconds <= current.baselineSeconds()) {
+            return hold(current, Reason.ALREADY_AHEAD);
+        }
+        long targetBytes = Math.max(
+                current.baselineBytes(), current.preloadCapacityBytes());
+        return new Decision(true, targetSeconds, targetBytes,
+                Reason.EXTEND_CACHE, current);
+    }
+
+    private static boolean supportsForwardPreload(Request request) {
+        if (request.protocol() == PlaybackAutoContext.Protocol.PROGRESSIVE_HTTP) {
+            return true;
+        }
+        if (request.protocol() != PlaybackAutoContext.Protocol.UNKNOWN) return false;
+        return request.playerPath() == PlaybackAutoContext.PathKind.EXTERNAL_LOOPBACK
+                || request.playerPath() == PlaybackAutoContext.PathKind.APP_INTERNAL_SERVICE;
     }
 
     private static Decision hold(Request request, Reason reason) {
-        return new Decision(false, request.baselineSeconds(), reason, request);
+        return new Decision(false, request.baselineSeconds(),
+                request.baselineBytes(), reason, request);
     }
 
     private static int ceilSeconds(long milliseconds) {
@@ -61,8 +75,11 @@ final class MpvPausePreloadCachePolicy {
             boolean cacheEnabled,
             PlaybackAutoContext.Protocol protocol,
             PlaybackAutoContext.StreamKind streamKind,
+            PlaybackAutoContext.PathKind playerPath,
             int baselineSeconds,
+            long baselineBytes,
             int aheadSeconds,
+            long preloadCapacityBytes,
             long positionMs,
             long durationMs) {
 
@@ -70,8 +87,12 @@ final class MpvPausePreloadCachePolicy {
             protocol = protocol == null ? PlaybackAutoContext.Protocol.UNKNOWN : protocol;
             streamKind = streamKind == null
                     ? PlaybackAutoContext.StreamKind.UNKNOWN : streamKind;
+            playerPath = playerPath == null
+                    ? PlaybackAutoContext.PathKind.UNKNOWN : playerPath;
             baselineSeconds = Math.max(0, baselineSeconds);
+            baselineBytes = Math.max(0, baselineBytes);
             aheadSeconds = Math.max(0, aheadSeconds);
+            preloadCapacityBytes = Math.max(0, preloadCapacityBytes);
             positionMs = Math.max(0, positionMs);
             durationMs = Math.max(0, durationMs);
         }
@@ -80,21 +101,27 @@ final class MpvPausePreloadCachePolicy {
             return new Request(false, false, false, false, false,
                     PlaybackAutoContext.Protocol.UNKNOWN,
                     PlaybackAutoContext.StreamKind.UNKNOWN,
-                    0, 0, 0, 0);
+                    PlaybackAutoContext.PathKind.UNKNOWN,
+                    0, 0, 0, 0, 0, 0);
         }
     }
 
-    record Decision(boolean apply, int targetSeconds, Reason reason, Request request) {
+    record Decision(
+            boolean apply,
+            int targetSeconds,
+            long targetBytes,
+            Reason reason,
+            Request request) {
 
         Decision {
             targetSeconds = Math.max(0, targetSeconds);
+            targetBytes = Math.max(0, targetBytes);
             reason = reason == null ? Reason.PRELOAD_DISABLED : reason;
             request = request == null ? Request.inactive() : request;
         }
     }
 
     enum Reason {
-        PLAYING,
         PRELOAD_DISABLED,
         PAUSE_POLICY,
         CONFIG_PRIORITY,
