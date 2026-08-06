@@ -478,6 +478,7 @@ public abstract class PlaybackActivity extends BaseActivity implements MediaCont
         if (!bound) return;
         bound = false;
         if (mService != null) mService.removePlayerCallback(mPlayerCallback);
+        getSeekView().setProgressPlayer(null);
         unbindService(this);
         mService = null;
     }
@@ -534,6 +535,7 @@ public abstract class PlaybackActivity extends BaseActivity implements MediaCont
         @Override
         public void onPlayerRebuild(Player player, boolean resetVideoSurface) {
             if (isOwner()) {
+                getSeekView().setProgressPlayer(player);
                 if (resetVideoSurface) resetVideoSurfaceForDecoderSwitch();
                 setRender();
                 applyResizeMode(requestedResizeMode);
@@ -677,6 +679,7 @@ public abstract class PlaybackActivity extends BaseActivity implements MediaCont
         mService.setPlaybackForeground(true);
         mService.setNavigationCallback(getNavigationCallback(), getPlaybackKey());
         mService.addPlayerCallback(mPlayerCallback);
+        getSeekView().setProgressPlayer(player().getPlayer());
         player().setLutAllowed(isLutAllowed());
         player().setDanmakuForeground(true);
         publishRenderTarget(getExoView().getVideoSurfaceView());
@@ -689,6 +692,7 @@ public abstract class PlaybackActivity extends BaseActivity implements MediaCont
     @Override
     public void onServiceDisconnected(ComponentName name) {
         if (SpiderDebug.isEnabled()) SpiderDebug.log("playback-lifecycle", "service disconnected name=%s %s", name, lifecycleState());
+        getSeekView().setProgressPlayer(null);
         mService = null;
     }
 
