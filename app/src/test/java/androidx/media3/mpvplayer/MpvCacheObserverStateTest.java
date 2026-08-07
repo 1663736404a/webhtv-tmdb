@@ -93,7 +93,7 @@ public class MpvCacheObserverStateTest {
     }
 
     @Test
-    public void pausedActiveCacheQueriesTimelineOncePerSecond() {
+    public void pausedEnabledCacheQueriesTimelineOncePerSecondEvenWhenIdle() {
         MpvCacheObserverState state = new MpvCacheObserverState();
         state.onFileLoaded(1_000);
 

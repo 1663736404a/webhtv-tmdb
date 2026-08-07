@@ -773,7 +773,16 @@ public final class MpvHlsProxy extends NanoHTTPD {
         try {
             String filtered = HlsAdsParser.process(text);
             if (!TextUtils.equals(filtered, text)) {
-                SpiderDebug.log(TAG, "adblock filtered session=%d bytes=%d->%d url=%s", session, text.length(), filtered.length(), shortUrl(url));
+                if (kernel == PlayerSetting.MPV) {
+                    SpiderDebug.log(TAG,
+                            "adblock bypassed session=%d bytes=%d candidateBytes=%d reason=mpv-ts-timestamp-integrity url=%s",
+                            session, text.length(), filtered.length(),
+                            shortUrl(url));
+                    return text;
+                }
+                SpiderDebug.log(TAG,
+                        "adblock filtered session=%d bytes=%d->%d url=%s",
+                        session, text.length(), filtered.length(), shortUrl(url));
             }
             return filtered;
         } catch (Throwable e) {
@@ -807,7 +816,8 @@ public final class MpvHlsProxy extends NanoHTTPD {
             HlsPlaylistRewriter.UriRole role,
             double startSeconds,
             double durationSeconds) {
-        String id = Long.toString(nextId.incrementAndGet());
+        String id = MpvHlsTargetIdentity.stableId(
+                session, targetUrl, cacheable, variant, role);
         targets.put(id, new Target(
                 session, targetUrl, System.currentTimeMillis(), cacheable,
                 variant, role, startSeconds, durationSeconds));
@@ -1021,17 +1031,32 @@ public final class MpvHlsProxy extends NanoHTTPD {
         try (okhttp3.Response response = fetch(session, url, null, true)) {
             if (!preloadGate.allows(preloadGeneration)) return false;
             ResponseBody body = response.body();
-            if (!response.isSuccessful() || body == null || isPlaylistUrl(url, body.contentType())
-                    || MpvHlsSegmentContentPolicy.shouldProbePngPrefix(
-                    body.contentType() == null ? null : body.contentType().toString(), true)) return false;
-            long contentLength = body.contentLength();
-            if (contentLength < MIN_CACHE_FILE_BYTES || contentLength > configuredPreloadLimitBytes()) return false;
+            if (!response.isSuccessful() || body == null
+                    || isPlaylistUrl(url, body.contentType())) return false;
+            long upstreamLength = body.contentLength();
+            if (upstreamLength < MIN_CACHE_FILE_BYTES) return false;
+            boolean stripPngPrefix = MpvHlsSegmentContentPolicy.shouldProbePngPrefix(
+                    body.contentType() == null ? null : body.contentType().toString(), true);
+            InputStream source = body.byteStream();
+            long cacheLength = upstreamLength;
+            String cacheMime = mediaMimeFromUrl(url, body.contentType());
+            if (stripPngPrefix) {
+                PngPrefixStrippingInputStream stripping =
+                        new PngPrefixStrippingInputStream(source, url);
+                int strippedBytes = stripping.initializeAndGetStrippedPrefixBytes();
+                cacheLength = MpvHlsSegmentContentPolicy.strippedContentLength(
+                        upstreamLength, strippedBytes);
+                if (cacheLength < MIN_CACHE_FILE_BYTES) return false;
+                source = stripping;
+                cacheMime = MIME_TS;
+            }
+            if (cacheLength > configuredPreloadLimitBytes()) return false;
             String key = file.getName();
             MpvHlsCacheCoordinator.ReservationDecision decision = cacheCoordinator.tryReserve(
-                    key, file, contentLength, configuredPreloadLimitBytes(), MpvHlsCacheCoordinator.WriterType.PREFETCH);
+                    key, file, cacheLength, configuredPreloadLimitBytes(), MpvHlsCacheCoordinator.WriterType.PREFETCH);
             if (!decision.granted()) return false;
-            return writeCacheFile(body.byteStream(), decision.reservation(), contentLength,
-                    mediaMimeFromUrl(url, body.contentType()), preloadGeneration);
+            return writeCacheFile(source, decision.reservation(), cacheLength,
+                    cacheMime, preloadGeneration);
         }
     }
 
@@ -2294,18 +2319,26 @@ public final class MpvHlsProxy extends NanoHTTPD {
         }
     }
 
-    private static final class PngPrefixStrippingInputStream extends InputStream {
+    static final class PngPrefixStrippingInputStream extends InputStream {
 
         private final InputStream upstream;
         private final String url;
+        private final boolean diagnostics;
         private byte[] prefix;
         private int prefixOffset;
         private int prefixLength;
+        private int strippedPrefixBytes;
         private boolean initialized;
 
         PngPrefixStrippingInputStream(InputStream upstream, String url) {
+            this(upstream, url, true);
+        }
+
+        PngPrefixStrippingInputStream(
+                InputStream upstream, String url, boolean diagnostics) {
             this.upstream = upstream;
             this.url = url;
+            this.diagnostics = diagnostics;
         }
 
         @Override
@@ -2332,6 +2365,11 @@ public final class MpvHlsProxy extends NanoHTTPD {
             upstream.close();
         }
 
+        int initializeAndGetStrippedPrefixBytes() throws IOException {
+            ensureInitialized();
+            return strippedPrefixBytes;
+        }
+
         private void ensureInitialized() throws IOException {
             if (initialized) return;
             initialized = true;
@@ -2340,9 +2378,15 @@ public final class MpvHlsProxy extends NanoHTTPD {
             int stripOffset = MpvHlsSegmentContentPolicy.findPngWrappedTransportStreamOffset(prefix, prefixLength);
             if (stripOffset > 0 && stripOffset < prefixLength) {
                 prefixOffset = stripOffset;
-                SpiderDebug.log(TAG, "strip png prefix offset=%d prefixBytes=%d url=%s", stripOffset, prefixLength, shortUrl(url));
+                strippedPrefixBytes = stripOffset;
+                if (diagnostics) {
+                    SpiderDebug.log(TAG,
+                            "strip png prefix offset=%d prefixBytes=%d url=%s",
+                            stripOffset, prefixLength, shortUrl(url));
+                }
             } else {
                 prefixOffset = 0;
+                strippedPrefixBytes = 0;
             }
         }
 

@@ -37,6 +37,13 @@ final class MpvHlsSegmentContentPolicy {
         return startsWith(data, safeLength, PNG_SIGNATURE);
     }
 
+    static long strippedContentLength(long contentLength, int strippedPrefixBytes) {
+        if (contentLength <= 0
+                || strippedPrefixBytes <= 0
+                || strippedPrefixBytes >= contentLength) return -1;
+        return contentLength - strippedPrefixBytes;
+    }
+
     private static boolean startsWith(byte[] data, int length, byte[] prefix) {
         if (data == null || length < prefix.length) return false;
         for (int i = 0; i < prefix.length; i++) if (data[i] != prefix[i]) return false;

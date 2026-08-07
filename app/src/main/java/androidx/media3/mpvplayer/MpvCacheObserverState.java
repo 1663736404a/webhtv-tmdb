@@ -81,9 +81,9 @@ final class MpvCacheObserverState {
     boolean shouldQueryPausedTimeline(
             boolean fileLoaded,
             boolean paused,
-            boolean cacheActive,
+            boolean cacheEnabled,
             long nowMs) {
-        if (!fileLoaded || !paused || !cacheActive) return false;
+        if (!fileLoaded || !paused || !cacheEnabled) return false;
         return lastPausedTimelineQueryAtMs < 0
                 || elapsed(nowMs, lastPausedTimelineQueryAtMs,
                 PAUSED_TIMELINE_QUERY_INTERVAL_MS);

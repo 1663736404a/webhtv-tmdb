@@ -2,8 +2,12 @@ package androidx.media3.mpvplayer;
 
 import org.junit.Test;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -43,6 +47,35 @@ public class MpvHlsSegmentContentPolicyTest {
         data[24 + 188] = 0;
 
         assertEquals(-1, MpvHlsSegmentContentPolicy.findPngWrappedTransportStreamOffset(data, data.length));
+    }
+
+    @Test
+    public void preloadStreamStripsWrapperAndUsesExactTransformedLength()
+            throws IOException {
+        byte[] data = wrappedTransportStream("\u0000\u001dO\u00dftEXtTS_RAW\u0000");
+        MpvHlsProxy.PngPrefixStrippingInputStream input =
+                new MpvHlsProxy.PngPrefixStrippingInputStream(
+                        new ByteArrayInputStream(data),
+                        "https://video.test/0.png", false);
+
+        int strippedBytes = input.initializeAndGetStrippedPrefixBytes();
+
+        assertEquals(39, strippedBytes);
+        assertEquals(data.length - strippedBytes,
+                MpvHlsSegmentContentPolicy.strippedContentLength(
+                        data.length, strippedBytes));
+        assertArrayEquals(Arrays.copyOfRange(data, strippedBytes, data.length),
+                input.readAllBytes());
+    }
+
+    @Test
+    public void invalidOrUnknownWrappedLengthIsNotReserved() {
+        assertEquals(-1,
+                MpvHlsSegmentContentPolicy.strippedContentLength(-1, 68));
+        assertEquals(-1,
+                MpvHlsSegmentContentPolicy.strippedContentLength(1_024, 0));
+        assertEquals(-1,
+                MpvHlsSegmentContentPolicy.strippedContentLength(68, 68));
     }
 
     private static byte[] wrappedTransportStream(String marker) {
