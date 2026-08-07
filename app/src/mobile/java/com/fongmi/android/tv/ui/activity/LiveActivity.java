@@ -1292,7 +1292,7 @@ public class LiveActivity extends PlaybackActivity implements CustomKeyDown.List
     @Override
     public void onLiveBackgroundPanel() {
         dismissLiveControlDialog();
-        moveTaskToBack(true);
+        Util.moveToBackground(this);
         setAudioOnly(true);
     }
 
@@ -1333,7 +1333,7 @@ public class LiveActivity extends PlaybackActivity implements CustomKeyDown.List
 
         @Override
         public void onAudio() {
-            moveTaskToBack(true);
+            Util.moveToBackground(LiveActivity.this);
             setAudioOnly(true);
         }
     };

@@ -4397,7 +4397,7 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         public void onAudio() {
             setAudioOnly(true);
             syncPiPForPlaybackMode();
-            moveTaskToBack(true);
+            Util.moveToBackground(VideoActivity.this);
         }
     };
 
