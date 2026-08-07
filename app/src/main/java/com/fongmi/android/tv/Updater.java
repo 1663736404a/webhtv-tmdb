@@ -142,10 +142,16 @@ public class Updater implements Download.Callback, UpdateListener {
 
     private Update getUpdate(String channel) {
         Update cnb = readUpdate(channel, Github.getCnbAsset(getManifestName(channel)), SOURCE_CNB);
+        // CNB is the primary distribution path.  A newer GitHub release must not
+        // silently move downloads to GitHub while CNB is reachable; GitHub is only
+        // a discovery/download fallback when the CNB manifest is unavailable.
+        if (cnb.hasManifest()) {
+            Update github = Update.CHANNEL_BETA.equals(channel) ? getGithubBetaUpdate(channel) : getGithubStableUpdate(channel);
+            attachDownloadFallback(cnb, cnb, github);
+            return cnb;
+        }
         Update github = Update.CHANNEL_BETA.equals(channel) ? getGithubBetaUpdate(channel) : getGithubStableUpdate(channel);
-        Update update = newer(cnb, github);
-        attachDownloadFallback(update, cnb, github);
-        return update;
+        return github.hasManifest() ? github : cnb;
     }
 
     private Update getGithubStableUpdate(String channel) {
@@ -225,13 +231,6 @@ public class Updater implements Download.Callback, UpdateListener {
             update.error = e.getMessage();
         }
         return update;
-    }
-
-    private Update newer(Update first, Update second) {
-        if (first == null || !first.hasManifest()) return second == null ? Update.empty(Update.CHANNEL_STABLE) : second;
-        if (second == null || !second.hasManifest()) return first;
-        if (second.code != first.code) return second.code > first.code ? second : first;
-        return compareName(second.name, first.name) > 0 ? second : first;
     }
 
     private void attachDownloadFallback(Update selected, Update cnb, Update github) {
