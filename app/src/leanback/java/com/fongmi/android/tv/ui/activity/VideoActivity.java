@@ -129,6 +129,7 @@ import com.fongmi.android.tv.ui.dialog.ControlDialog;
 import com.fongmi.android.tv.ui.dialog.DanmakuDialog;
 import com.fongmi.android.tv.ui.dialog.EpisodeListDialog;
 import com.fongmi.android.tv.ui.dialog.PanNetworkDiagnosticDialog;
+import com.fongmi.android.tv.ui.dialog.PlayerKernelDialog;
 import com.fongmi.android.tv.ui.dialog.QuickSearchDialog;
 import com.fongmi.android.tv.ui.dialog.SubtitleDialog;
 import com.fongmi.android.tv.ui.dialog.TitleDialog;
@@ -3226,9 +3227,13 @@ public class VideoActivity extends PlaybackActivity implements CustomKeyDownVod.
     }
 
     private void onPlayerKernel() {
+        PlayerKernelDialog.show(this, player().getPlayerType(), this::switchPlayerKernel);
+    }
+
+    private void switchPlayerKernel(int type) {
         mClock.setCallback(null);
         clearLyrics();
-        player().togglePlayer();
+        player().switchPlayer(type);
         setPlayerKernel();
         setDecode();
     }

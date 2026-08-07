@@ -29,6 +29,7 @@ import com.fongmi.android.tv.ui.dialog.LutDialog;
 import com.fongmi.android.tv.ui.dialog.MpvConfigDialog;
 import com.fongmi.android.tv.ui.dialog.PlaybackPerformanceDialog;
 import com.fongmi.android.tv.ui.dialog.PlayerButtonConfigDialog;
+import com.fongmi.android.tv.ui.dialog.PlayerKernelDialog;
 import com.fongmi.android.tv.ui.dialog.PlayerOsdDialog;
 import com.fongmi.android.tv.ui.dialog.SpeedDialog;
 import com.fongmi.android.tv.ui.dialog.UaDialog;
@@ -153,7 +154,7 @@ public class SettingPlayerFragment extends BaseFragment implements UaListener, B
     }
 
     private void onKernel(View view) {
-        ChoiceDialog.showSingle(this, R.string.player_kernel, kernel, PlayerSetting.getPlayer(), which -> {
+        PlayerKernelDialog.show(this, PlayerSetting.getPlayer(), which -> {
             mBinding.kernelText.setText(kernel[which]);
             PlayerSetting.putPlayer(which);
             setMpvRows();

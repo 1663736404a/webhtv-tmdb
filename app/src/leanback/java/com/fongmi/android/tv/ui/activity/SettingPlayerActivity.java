@@ -27,6 +27,7 @@ import com.fongmi.android.tv.ui.dialog.MpvConfigDialog;
 import com.fongmi.android.tv.ui.dialog.PlaybackPerformanceDialog;
 import com.fongmi.android.tv.ui.dialog.PlayerOsdDialog;
 import com.fongmi.android.tv.ui.dialog.PlayerButtonConfigDialog;
+import com.fongmi.android.tv.ui.dialog.PlayerKernelDialog;
 import com.fongmi.android.tv.ui.dialog.SpeedDialog;
 import com.fongmi.android.tv.ui.dialog.UaDialog;
 import com.fongmi.android.tv.utils.FileUtil;
@@ -151,11 +152,12 @@ public class SettingPlayerActivity extends BaseActivity implements UaListener, B
     }
 
     private void setKernel(View view) {
-        int index = PlayerSetting.nextPlayer(PlayerSetting.getPlayer());
-        mBinding.kernelText.setText(kernel[index]);
-        PlayerSetting.putPlayer(index);
-        setMpvRows();
-        setPerformanceText();
+        PlayerKernelDialog.show(this, PlayerSetting.getPlayer(), index -> {
+            mBinding.kernelText.setText(kernel[index]);
+            PlayerSetting.putPlayer(index);
+            setMpvRows();
+            setPerformanceText();
+        });
     }
 
     private void setScale(View view) {

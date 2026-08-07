@@ -139,6 +139,7 @@ import com.fongmi.android.tv.ui.dialog.EpisodeGridDialog;
 import com.fongmi.android.tv.ui.dialog.EpisodeListDialog;
 import com.fongmi.android.tv.ui.dialog.InfoDialog;
 import com.fongmi.android.tv.ui.dialog.LutPanelDialog;
+import com.fongmi.android.tv.ui.dialog.PlayerKernelDialog;
 import com.fongmi.android.tv.ui.dialog.QuickSearchDialog;
 import com.fongmi.android.tv.ui.dialog.ReceiveDialog;
 import com.fongmi.android.tv.ui.dialog.SubtitleDialog;
@@ -3795,21 +3796,26 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
     }
 
     private void onPlayerKernel() {
-        if (refreshAndSwitchPlayerKernel()) return;
+        if (playerKernelSwitchRefreshing) return;
+        PlayerKernelDialog.show(this, player().getPlayerType(), this::switchPlayerKernel);
+    }
+
+    private void switchPlayerKernel(int type) {
+        if (refreshAndSwitchPlayerKernel(type)) return;
         mClock.setCallback(null);
         clearLyrics();
-        player().togglePlayer();
+        player().switchPlayer(type);
         setPlayerKernel();
         setDecode();
         setR1Callback();
     }
 
-    private boolean refreshAndSwitchPlayerKernel() {
+    private boolean refreshAndSwitchPlayerKernel(int type) {
         if (playerKernelSwitchRefreshing) return true;
         Flag currentFlag = getFlag();
         Episode currentEpisode = getEpisode();
         if (currentFlag == null || currentEpisode == null || TextUtils.isEmpty(currentFlag.getFlag()) || TextUtils.isEmpty(currentEpisode.getUrl())) return false;
-        int nextType = PlayerSetting.nextPlayer(player().getPlayerType());
+        int nextType = PlayerSetting.sanitizePlayer(type);
         long position = getPlayerSwitchPosition();
         float speed = player().getSpeed();
         boolean repeat = player().isRepeatOne();
