@@ -17,12 +17,12 @@ public final class PlayerKernelDialog {
 
     public static void show(FragmentActivity activity, int selected, Listener listener) {
         int current = PlayerSetting.sanitizePlayer(selected);
-        ChoiceDialog.showSingle(activity, R.string.player_kernel, activity.getResources().getStringArray(R.array.select_player_kernel), current, which -> notifySelected(current, which, listener));
+        ChoiceDialog.showSingleNoCancel(activity, R.string.player_kernel, activity.getResources().getStringArray(R.array.select_player_kernel), current, which -> notifySelected(current, which, listener));
     }
 
     public static void show(Fragment fragment, int selected, Listener listener) {
         int current = PlayerSetting.sanitizePlayer(selected);
-        ChoiceDialog.showSingle(fragment, R.string.player_kernel, fragment.getResources().getStringArray(R.array.select_player_kernel), current, which -> notifySelected(current, which, listener));
+        ChoiceDialog.showSingleNoCancel(fragment, R.string.player_kernel, fragment.getResources().getStringArray(R.array.select_player_kernel), current, which -> notifySelected(current, which, listener));
     }
 
     private static void notifySelected(int current, int selected, Listener listener) {
