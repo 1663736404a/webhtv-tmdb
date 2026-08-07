@@ -43,7 +43,7 @@ third_party/mpv-native-lock.json
 | NDK | `28.2.13676358`（r28c），API 24 |
 | MPV | `94335ab87ab225ca3e36e0faeac831639d3e1d4e`（`0.41.0-878-g94335ab87`） |
 | MediaCodec/Vulkan 互操作 | `FongMi/mpv@fd679c812149fe1f3e246897b1015ae109da7c74`，通过 AImageReader/AHardwareBuffer 保持 GPU 链路 |
-| AImageReader帧同步 | `third_party/patches/mpv-aimagereader-transient-buffer.patch`，无buffer时在100ms总截止时间内重试；Vulkan通过临时`sync_fd` semaphore等待真实新帧，禁止假成功和旧纹理复用 |
+| AImageReader帧同步 | `third_party/patches/mpv-aimagereader-transient-buffer.patch`，无buffer时在100ms总截止时间内重试；Vulkan通过临时`sync_fd` semaphore等待真实新帧；seek/flush暂态最多保留4次上一张已同步帧，首帧和持续失败仍报错 |
 | Matroska代理Seek | `third_party/patches/mpv-matroska-segment-end.patch`，可Seek但HTTP总长度未知时使用MKV自身声明的Segment边界读取SeekHead/Cues |
 | FFmpeg | `8ae0b34901ba60a802f183ee75a250a9fc3e09a5`（n8.0.3） |
 | 本地代理Range兼容 | `third_party/patches/ffmpeg-webhtv-proxy-range.patch`，识别App内部代理验证后的206起点标记，不把第三方未知长度伪装成完整文件长度 |
@@ -156,13 +156,13 @@ scripts/build_mpv_native.sh --abi arm64-v8a --jobs 8 --work-dir /tmp/webhtv-mpv-
 3. 在独立 Python venv 中安装固定版本 Meson/Ninja及 MbedTLS 生成工具依赖。
 4. 下载构建框架和每个固定 commit，初始化 MbedTLS、libplacebo 子模块，并校验 Lua、libunibreak、curl、nghttp2 tar 包 SHA-256。
 5. 对固定 FFmpeg commit 应用 `third_party/patches/ffmpeg-webhtv-proxy-range.patch`，只接受App内部代理写入的精确Range起点标记，使缺少`Content-Range`的206响应仍能按请求偏移重连；它不会制造未知的资源总长度。
-6. 对固定 MPV commit 应用锁定的 FongMi Vulkan/MediaCodec 互操作提交，通过 AImageReader/AHardwareBuffer 将 MediaCodec 帧导入 Vulkan；随后应用 `third_party/patches/mpv-stream-cb-disc-controls.patch`、`third_party/patches/mpv-aimagereader-transient-buffer.patch` 和 `third_party/patches/mpv-matroska-segment-end.patch`。它们分别提供光盘时间轴控制、AImageReader有界获取与Vulkan acquire-fence同步，以及在可Seek代理总长度未知时使用Matroska自身Segment边界读取尾部索引。
+6. 对固定 MPV commit 应用锁定的 FongMi Vulkan/MediaCodec 互操作提交，通过 AImageReader/AHardwareBuffer 将 MediaCodec 帧导入 Vulkan；随后应用 `third_party/patches/mpv-stream-cb-disc-controls.patch`、`third_party/patches/mpv-aimagereader-transient-buffer.patch` 和 `third_party/patches/mpv-matroska-segment-end.patch`。它们分别提供光盘时间轴控制、AImageReader有界获取与Vulkan acquire-fence同步、seek/flush期间的有界上一帧保留，以及在可Seek代理总长度未知时使用Matroska自身Segment边界读取尾部索引。
 7. 按依赖顺序构建 MbedTLS、libunibreak、dav1d、FFmpeg、Expat、FreeType、fontconfig、FriBidi、HarfBuzz、libass、Lua、shaderc、libplacebo、nghttp2、curl 和 MPV。
 8. 把 FFmpeg 的文件名、ELF `SONAME` 和 `DT_NEEDED` 从 `libav*`/`libsw*` 等长修改为 `libmv*`/`libmw*`。
 9. 使用 NDK `llvm-strip --strip-unneeded` 处理最终库。
-10. 使用 NDK `llvm-readelf` 检查每个 SONAME、MPV 的完整依赖和 Vulkan 依赖，并检查 MPV/libplacebo/curl 版本字符串、HTTP/2标记、libass fontconfig 字符串、光盘控制、AImageReader有界获取与Vulkan fence导入、代理Range及Matroska Segment补丁标识；同时拒绝动态 `libfontconfig.so` 或 `libexpat.so` 依赖。
+10. 使用 NDK `llvm-readelf` 检查每个 SONAME、MPV 的完整依赖和 Vulkan 依赖，并检查 MPV/libplacebo/curl 版本字符串、HTTP/2标记、libass fontconfig 字符串、光盘控制、AImageReader有界获取、Vulkan fence导入和暂态上一帧保留、代理Range及Matroska Segment补丁标识；同时拒绝动态 `libfontconfig.so` 或 `libexpat.so` 依赖。
 
-`scripts/verify_mpv_native_assets.sh` 对已提交 assets 执行同类校验，Android Release Action 会在 Gradle 打包四个 APK 前以 `--require-elf` 模式调用它，并确认AImageReader有界获取与Vulkan fence同步、代理Range与Matroska Segment修复已进入两套原生资产，防止 lock、补丁、arm64/armv7 assets 或静态网络能力不一致的二进制进入 Release。
+`scripts/verify_mpv_native_assets.sh` 对已提交 assets 执行同类校验，Android Release Action 会在 Gradle 打包四个 APK 前以 `--require-elf` 模式调用它，并确认AImageReader有界获取、Vulkan fence同步与暂态上一帧保留、代理Range与Matroska Segment修复已进入两套原生资产，防止 lock、补丁、arm64/armv7 assets 或静态网络能力不一致的二进制进入 Release。
 
 未指定 `--install` 时，输出位于：
 

@@ -1,23 +1,27 @@
 diff --git a/video/out/hwdec/hwdec_aimagereader.c b/video/out/hwdec/hwdec_aimagereader.c
-index 4355e60c..35d2d31f 100644
+index 4355e60c7bcb64320c250d71721188c52b7a0e3f..7c24bc70295a497eb47bcfe902fc45719eb1f4d8 100644
 --- a/video/out/hwdec/hwdec_aimagereader.c
 +++ b/video/out/hwdec/hwdec_aimagereader.c
 @@ -34,0 +35 @@
 +#include "osdep/poll_wrapper.h"
-@@ -88 +89,4 @@ struct priv {
+@@ -88 +89,7 @@ struct priv {
 -    bool image_available;
 +    uint64_t image_sequence;
 +    unsigned int no_buffer_count;
 +    unsigned int acquire_timeout_count;
 +    unsigned int fence_wait_count;
-@@ -101,0 +106,3 @@ struct priv {
++    bool has_synchronized_frame;
++    unsigned int transient_hold_count;
++    unsigned int transient_hold_total;
+@@ -101,0 +109,4 @@ struct priv {
 +#define IMAGE_ACQUIRE_TIMEOUT_NS MP_TIME_MS_TO_NS(100)
 +#define TRANSIENT_LOG_INTERVAL 120
++#define TRANSIENT_HOLD_LIMIT 4
 +
-@@ -267 +274 @@ static void image_callback(void *context, AImageReader *reader)
+@@ -267 +278 @@ static void image_callback(void *context, AImageReader *reader)
 -    p->image_available = true;
 +    p->image_sequence++;
-@@ -271,0 +279,53 @@ static void image_callback(void *context, AImageReader *reader)
+@@ -271,0 +283,71 @@ static void image_callback(void *context, AImageReader *reader)
 +static uint64_t get_image_sequence(struct priv *p)
 +{
 +    mp_mutex_lock(&p->lock);
@@ -71,10 +75,35 @@ index 4355e60c..35d2d31f 100644
 +    return true;
 +}
 +
-@@ -395,0 +456,2 @@ static int mapper_map(struct ra_hwdec_mapper *mapper)
++static int hold_last_synchronized_frame(struct ra_hwdec_mapper *mapper,
++                                        const char *reason)
++{
++    struct priv *p = mapper->priv;
++    if (!p->has_synchronized_frame || !mapper->tex[0] ||
++        p->transient_hold_count >= TRANSIENT_HOLD_LIMIT)
++        return -1;
++
++    p->transient_hold_count++;
++    p->transient_hold_total++;
++    MP_VERBOSE(mapper,
++               "Holding last synchronized AImage frame reason=%s "
++               "hold=%u/%u total=%u\n",
++               reason, p->transient_hold_count, TRANSIENT_HOLD_LIMIT,
++               p->transient_hold_total);
++    return 0;
++}
++
+@@ -395,0 +478,2 @@ static int mapper_map(struct ra_hwdec_mapper *mapper)
 +    uint64_t image_sequence = get_image_sequence(p);
 +    int64_t acquire_deadline = mp_time_ns() + IMAGE_ACQUIRE_TIMEOUT_NS;
-@@ -412,11 +473,0 @@ static int mapper_map(struct ra_hwdec_mapper *mapper)
+@@ -402 +486,3 @@ static int mapper_map(struct ra_hwdec_mapper *mapper)
+-            aimagereader_vk_reuse(p->vk, mapper->src))
++            aimagereader_vk_reuse(p->vk, mapper->src)) {
++            p->has_synchronized_frame = true;
++            p->transient_hold_count = 0;
+@@ -403,0 +490 @@ static int mapper_map(struct ra_hwdec_mapper *mapper)
++        }
+@@ -412,11 +498,0 @@ static int mapper_map(struct ra_hwdec_mapper *mapper)
 -    bool image_available = false;
 -    mp_mutex_lock(&p->lock);
 -    if (!p->image_available) {
@@ -86,9 +115,9 @@ index 4355e60c..35d2d31f 100644
 -    p->image_available = false;
 -    mp_mutex_unlock(&p->lock);
 -
-@@ -425,0 +477 @@ static int mapper_map(struct ra_hwdec_mapper *mapper)
+@@ -425,0 +502 @@ static int mapper_map(struct ra_hwdec_mapper *mapper)
 +    for (;;) {
-@@ -427,4 +479,4 @@ static int mapper_map(struct ra_hwdec_mapper *mapper)
+@@ -427,4 +504,4 @@ static int mapper_map(struct ra_hwdec_mapper *mapper)
 -    if (p->backend == MAPPER_BACKEND_VULKAN) {
 -        ret = o->AImageReader_acquireLatestImageAsync(
 -            o->reader, &image, &acquire_fence);
@@ -97,7 +126,7 @@ index 4355e60c..35d2d31f 100644
 +            ret = o->AImageReader_acquireLatestImageAsync(
 +                o->reader, &image, &acquire_fence);
 +        } else
-@@ -432,8 +484,27 @@ static int mapper_map(struct ra_hwdec_mapper *mapper)
+@@ -432,8 +509,27 @@ static int mapper_map(struct ra_hwdec_mapper *mapper)
 -    {
 -        ret = o->AImageReader_acquireLatestImage(o->reader, &image);
 -    }
@@ -131,9 +160,9 @@ index 4355e60c..35d2d31f 100644
 +                        "(timeouts=%u, no-buffer=%u)\n",
 +                        p->acquire_timeout_count, p->no_buffer_count);
 +            }
-+            return -1;
++            return hold_last_synchronized_frame(mapper, "no-buffer");
 +        }
-@@ -444,14 +515,23 @@ static int mapper_map(struct ra_hwdec_mapper *mapper)
+@@ -444,14 +540,24 @@ static int mapper_map(struct ra_hwdec_mapper *mapper)
 -        struct pollfd fence = {
 -            .fd = acquire_fence,
 -            .events = POLLIN,
@@ -169,16 +198,24 @@ index 4355e60c..35d2d31f 100644
 +                            p->acquire_timeout_count, p->fence_wait_count);
 +                }
 +                o->AImage_delete(image);
-+                return -1;
++                return hold_last_synchronized_frame(
++                    mapper, "acquire-fence");
 +            }
-@@ -464,0 +545,2 @@ static int mapper_map(struct ra_hwdec_mapper *mapper)
+@@ -464,0 +571,2 @@ static int mapper_map(struct ra_hwdec_mapper *mapper)
 +        if (acquire_fence >= 0)
 +            close(acquire_fence);
-@@ -473 +555 @@ static int mapper_map(struct ra_hwdec_mapper *mapper)
+@@ -473 +581,5 @@ static int mapper_map(struct ra_hwdec_mapper *mapper)
 -            p->vk, image, hwbuf, mapper->src);
 +            p->vk, image, hwbuf, acquire_fence, mapper->src);
++        if (result == 0) {
++            p->has_synchronized_frame = true;
++            p->transient_hold_count = 0;
++        }
+@@ -506,0 +619,2 @@ static int mapper_map(struct ra_hwdec_mapper *mapper)
++    p->has_synchronized_frame = true;
++    p->transient_hold_count = 0;
 diff --git a/video/out/hwdec/hwdec_aimagereader_vk.c b/video/out/hwdec/hwdec_aimagereader_vk.c
-index 453dae08..c20c083d 100644
+index 453dae08647c8fbef971c4334f6ec926a3acfa55..c20c083d85ffce1d9386cd3c79ec03e970b4fd60 100644
 --- a/video/out/hwdec/hwdec_aimagereader_vk.c
 +++ b/video/out/hwdec/hwdec_aimagereader_vk.c
 @@ -14,0 +15 @@
@@ -363,7 +400,7 @@ index 453dae08..c20c083d 100644
 +        release_output_after_error(p, output, wait_for_output);
 +    return -1;
 diff --git a/video/out/hwdec/hwdec_aimagereader_vk.h b/video/out/hwdec/hwdec_aimagereader_vk.h
-index 192a7a9b..3dbf1eb3 100644
+index 192a7a9b3f1c363e5d478701477626a36552ea00..3dbf1eb32eb9b3954de9a044f71fe54a24fd37a0 100644
 --- a/video/out/hwdec/hwdec_aimagereader_vk.h
 +++ b/video/out/hwdec/hwdec_aimagereader_vk.h
 @@ -23,0 +24,2 @@ void aimagereader_vk_destroy(struct aimagereader_vk **state);
@@ -378,8 +415,8 @@ index 192a7a9b..3dbf1eb3 100644
 +                        AHardwareBuffer *buffer, int acquire_fence_fd,
 +                        struct mp_image *frame);
 diff --git a/video/out/vulkan/context.c b/video/out/vulkan/context.c
-index 6052504d..07a298fc 100644
+index dfda7443165785ec8314e5d19a2314c2873eef8e..107449fad9133ead7b1a4df300612de5ca438a72 100644
 --- a/video/out/vulkan/context.c
 +++ b/video/out/vulkan/context.c
-@@ -201,0 +202 @@ pl_vulkan mppl_create_vulkan(struct vulkan_opts *opts,
+@@ -201,0 +202 @@ void ra_vk_ctx_uninit(struct ra_ctx *ctx)
 +        "VK_KHR_external_semaphore_fd",

@@ -178,6 +178,7 @@ verify_abi() {
   contains_string "$directory/libmpv.so" "WebHTV stream_cb controls enabled"
   contains_string "$directory/libmpv.so" "Using Vulkan AHardwareBuffer GPU conversion"
   contains_string "$directory/libmpv.so" "AImageReader frame acquisition timed out"
+  contains_string "$directory/libmpv.so" "Holding last synchronized AImage frame"
   contains_string "$directory/libmpv.so" "Using Vulkan sync_fd for AImage acquire fences"
   contains_string "$directory/libmpv.so" "Using declared Matroska segment end for seek metadata."
   contains_string "$directory/libmvformat.so" "WebHTV proxy range offset accepted"

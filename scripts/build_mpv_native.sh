@@ -449,6 +449,7 @@ verify_directory() {
   grep -Fq "WebHTV stream_cb controls enabled" <<<"$version_strings" || die "MPV stream_cb disc controls patch missing from $directory/libmpv.so"
   grep -Fq "Using Vulkan AHardwareBuffer GPU conversion" <<<"$version_strings" || die "MPV Vulkan MediaCodec interop missing from $directory/libmpv.so"
   grep -Fq "AImageReader frame acquisition timed out" <<<"$version_strings" || die "MPV AImageReader bounded acquisition patch missing from $directory/libmpv.so"
+  grep -Fq "Holding last synchronized AImage frame" <<<"$version_strings" || die "MPV AImageReader transient frame hold patch missing from $directory/libmpv.so"
   grep -Fq "Using Vulkan sync_fd for AImage acquire fences" <<<"$version_strings" || die "MPV AImageReader Vulkan fence import missing from $directory/libmpv.so"
   grep -Fq "Using declared Matroska segment end for seek metadata." <<<"$version_strings" || die "MPV Matroska segment seek patch missing from $directory/libmpv.so"
   grep -Fq "WebHTV proxy range offset accepted" <<<"$format_strings" || die "FFmpeg proxy range patch missing from $directory/libmvformat.so"

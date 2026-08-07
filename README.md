@@ -199,7 +199,7 @@ bash gradlew :app:assembleMobileArm64_v8aDebug :app:assembleLeanbackArmeabi_v7aD
 - `libmpv.so`、FFmpeg（codec/device/filter/format/util/swresample/swscale）、静态链接进 MPV 的 libplacebo、curl、nghttp2、MbedTLS 和 `libc++_shared.so` 必须按同一 ABI、同一 lock 成套构建，不能再混用旧 `libmpv.so` 与新依赖作为正式方案。
 - 当前已提交 assets 使用 MPV `94335ab87ab225ca3e36e0faeac831639d3e1d4e`、FFmpeg n8.0.3 `8ae0b34901ba60a802f183ee75a250a9fc3e09a5`、libplacebo `a7a18af88ff0a17c04840dcb3246047bb6b46df3`（7.371.0）、curl 8.21.0、nghttp2 1.69.0 和 NDK r28c。curl 使用 MbedTLS，只启用 HTTP/HTTPS 与 HTTP/2，不包含 HTTP/3、ngtcp2、nghttp3 或 quiche。FFmpeg 8.1.2 组合在 vivo Android 15 播放初始化时可触发 `pthread_mutex_lock called on a destroyed mutex`，因此没有进入正式 lock。
 - MPV 原生构建额外锁定应用 `FongMi/mpv@fd679c812149fe1f3e246897b1015ae109da7c74` 的 Vulkan/MediaCodec 互操作实现，通过 AImageReader 和 Android Hardware Buffer 将 MediaCodec 输出留在 GPU 链路，设备扩展满足时可使 `hwdec-current=mediacodec` 与 `gpu-next/androidvk/Vulkan` 同时生效；能力不足时仍允许回退 `mediacodec-copy`。
-- 固定 MPV 源码还应用 `third_party/patches/mpv-aimagereader-transient-buffer.patch`：`NO_BUFFER_AVAILABLE` 会在单次映射的100ms总截止时间内按回调序列重试，只有取得真实图像并建立有效纹理同步后才返回成功；Vulkan设备优先把 acquire `sync_fd` 临时导入 semaphore 交给GPU等待，不支持时才使用有界CPU等待，超时会明确丢帧而不是复用旧纹理或伪造映射成功。
+- 固定 MPV 源码还应用 `third_party/patches/mpv-aimagereader-transient-buffer.patch`：`NO_BUFFER_AVAILABLE` 会在单次映射的100ms总截止时间内按回调序列重试；Vulkan设备优先把 acquire `sync_fd` 临时导入 semaphore 交给GPU等待，不支持时才使用有界CPU等待。seek/flush期间若已经有有效同步帧，最多短暂保留4次上一帧以避免GPU错误色块；首帧或持续失败仍返回错误，不会无限伪造映射成功。
 - curl 与 nghttp2 静态链接进 `libmpv.so`，APK 不新增独立网络 `.so`。它增强 MPV 直接远程 HTTP/HTTPS 输入；App 自己处理的本地 HLS 代理、`stream_cb` 和 FFmpeg/lavf 路径仍按各自实现工作，不能把启用 curl 理解为所有播放请求都强制走同一后端。
 - FFmpeg 文件名、ELF `SONAME` 和所有 `DT_NEEDED` 都要从 `libav*`/`libsw*` 等长改为 `libmv*`/`libmw*`，不能只重命名文件，否则会和 `nextlib-media3ext` 内置 FFmpeg 发生 Android linker 复用冲突。
 - 固定 MPV 源码会应用 `third_party/patches/mpv-stream-cb-disc-controls.patch`。该补丁扩展 `stream_cb` 光盘控制并接入 `demux_disc`；修改补丁或 `stream_cb.h` 后必须同时重建 `libmpv.so` 和 `libplayer.so`。AImageReader帧同步补丁只改变`libmpv.so`，修改后必须重建并同步提交两套ARM ABI的`libmpv.so`。
@@ -219,7 +219,7 @@ scripts/build_mpv_native.sh --abi all --install
 # 按需执行：scripts/build_mpv_player_jni.sh
 ```
 
-脚本读取 `third_party/mpv-native-lock.json`，自动下载固定 commit、应用 MPV 光盘控制和AImageReader暂态补丁、构建依赖、修改 ELF 依赖名、strip 并校验。当前 lock 与两套已提交 assets 一致，可复现正式 native 组合；libass 的 fontconfig/Expat 字体回退栈静态链接进 `libmpv.so`，不会向 APK 内置中文字体或增加独立 `.so`。普通 Gradle 和 GitHub Actions 不会调用该脚本，直接复用仓库已提交的 `.so`。Android Release Action 会在 Gradle 打包前运行 `scripts/verify_mpv_native_assets.sh --require-elf`，检查两套 assets 的文件集合、ABI、版本字符串、HTTP/2、fontconfig 字体提供器、光盘补丁、AImageReader暂态补丁标记、`SONAME` 和 `DT_NEEDED`，但不会现场重编 MPV。完整排查记录见本地 `plans/MPV原生依赖升级与Android崩溃排查记录.md`。
+脚本读取 `third_party/mpv-native-lock.json`，自动下载固定 commit、应用 MPV 光盘控制和AImageReader帧同步补丁、构建依赖、修改 ELF 依赖名、strip 并校验。当前 lock 与两套已提交 assets 一致，可复现正式 native 组合；libass 的 fontconfig/Expat 字体回退栈静态链接进 `libmpv.so`，不会向 APK 内置中文字体或增加独立 `.so`。普通 Gradle 和 GitHub Actions 不会调用该脚本，直接复用仓库已提交的 `.so`。Android Release Action 会在 Gradle 打包前运行 `scripts/verify_mpv_native_assets.sh --require-elf`，检查两套 assets 的文件集合、ABI、版本字符串、HTTP/2、fontconfig 字体提供器、光盘补丁、AImageReader帧同步与暂态保留标记、`SONAME` 和 `DT_NEEDED`，但不会现场重编 MPV。完整排查记录见本地 `plans/MPV原生依赖升级与Android崩溃排查记录.md`。
 
 只校验当前仓库已经提交的 MPV native assets：
 
