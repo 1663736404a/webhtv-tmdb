@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/build_media_deps.sh [--clean] [--with-nextlib]
+  scripts/build_media_deps.sh [--clean] [--with-nextlib] [--use-aliyun-mirrors]
 
 Builds the locked FongMi Media3 artifacts into third_party/maven so the app can
 depend on normal Maven coordinates instead of embedding external source trees.
@@ -14,6 +14,10 @@ Options:
   --with-nextlib   Also prepare the locked FongMi/nextlib source checkout.
                   The app normally consumes nextlib-media3ext from Maven Central;
                   local nextlib publishing needs Android NDK/CMake/FFmpeg setup.
+  --use-aliyun-mirrors
+                  Add temporary Aliyun Gradle/Google/Maven mirrors to the generated
+                  Media3 checkout. Useful when Plugin Portal or Google Maven is
+                  unavailable; the mirror changes are never included in the AARs.
 USAGE
 }
 
@@ -27,6 +31,7 @@ NEXTLIB_DIR="$SOURCE_DIR/nextlib"
 
 CLEAN=0
 WITH_NEXTLIB=0
+USE_ALIYUN_MIRRORS=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -35,6 +40,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     --with-nextlib)
       WITH_NEXTLIB=1
+      ;;
+    --use-aliyun-mirrors)
+      USE_ALIYUN_MIRRORS=1
       ;;
     --help|-h)
       usage
@@ -221,9 +229,23 @@ apply_media_patches() {
   for patch_file in "$patch_dir"/media3-*.patch; do
     [[ -f "$patch_file" ]] || continue
     echo "Applying Media3 patch $(basename "$patch_file")"
-    git -C "$MEDIA_DIR" apply --check --unidiff-zero "$patch_file"
-    git -C "$MEDIA_DIR" apply --unidiff-zero "$patch_file"
+    git -C "$MEDIA_DIR" apply --check "$patch_file"
+    git -C "$MEDIA_DIR" apply "$patch_file"
   done
+}
+
+apply_media_build_mirrors() {
+  if [[ "$USE_ALIYUN_MIRRORS" != "1" ]]; then
+    return 0
+  fi
+  local patch_file="$THIRD_PARTY_DIR/patches/gradle-media3-aliyun-mirrors.patch"
+  if [[ ! -f "$patch_file" ]]; then
+    echo "Missing Media3 Gradle mirror patch: $patch_file" >&2
+    exit 1
+  fi
+  echo "Applying temporary Media3 Gradle Aliyun mirrors"
+  git -C "$MEDIA_DIR" apply --check "$patch_file"
+  git -C "$MEDIA_DIR" apply "$patch_file"
 }
 
 prepare_android_env() {
@@ -287,6 +309,7 @@ publish_media() {
 
   clone_or_update "$media_repo" "$media_branch" "$media_commit" "$MEDIA_DIR"
   apply_media_patches
+  apply_media_build_mirrors
   patch_media_release_version "$media_version"
   patch_media_pom_workaround
   prepare_media_compile_sdk
@@ -317,8 +340,21 @@ publish_media() {
     tasks+=(":$module:publishReleasePublicationToMavenRepository")
   done
 
-  echo "Publishing FongMi/media $media_version to $LOCAL_MAVEN"
-  (cd "$MEDIA_DIR" && ./gradlew --no-daemon --console=plain -PmavenRepo="$LOCAL_MAVEN" -PreleaseVersion="$media_version" "${tasks[@]}")
+  local publish_repo
+  publish_repo="$(mktemp -d "$ROOT_DIR/.gradle/media-maven-publish.XXXXXX")"
+  echo "Publishing FongMi/media $media_version to staging repository $publish_repo"
+  if ! (cd "$MEDIA_DIR" && ./gradlew --no-daemon --console=plain \
+      -Pkotlin.compiler.execution.strategy=in-process \
+      -PmavenRepo="$publish_repo" \
+      -PreleaseVersion="$media_version" \
+      "${tasks[@]}"); then
+    echo "Media3 publishing failed; staged output retained at $publish_repo" >&2
+    return 1
+  fi
+  mkdir -p "$LOCAL_MAVEN"
+  cp -R "$publish_repo"/. "$LOCAL_MAVEN"/
+  rm -rf "$publish_repo"
+  echo "Installed complete Media3 publication into $LOCAL_MAVEN"
 }
 
 prepare_nextlib() {

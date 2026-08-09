@@ -45,9 +45,11 @@ public final class MPVLib {
     private static Boolean bundledVulkanEnabled;
     private static Boolean deviceVulkan13Capable;
     private static final long CONTEXT_RECREATE_COOLDOWN_MS = 350;
+    private static final long CONTEXT_SHUTDOWN_TIMEOUT_MS = 2000;
     private static long lastContextDestroyedAtMs;
     private static boolean contextCreationAttempted;
     private static boolean contextCreated;
+    private static boolean contextDestroying;
 
     private MPVLib() {
     }
@@ -180,9 +182,10 @@ public final class MPVLib {
 
     public static native void init();
 
-    public static native void destroy();
+    public static native int destroy();
 
     public static synchronized boolean tryCreate(Context appctx) {
+        awaitContextShutdown();
         if (contextCreationAttempted) {
             Log.w(TAG, "Ignore duplicate MPV context creation");
             return false;
@@ -199,22 +202,59 @@ public final class MPVLib {
         return true;
     }
 
+    private static void awaitContextShutdown() {
+        if (!contextDestroying) return;
+        long deadline = SystemClock.elapsedRealtime() + CONTEXT_SHUTDOWN_TIMEOUT_MS;
+        while (contextDestroying) {
+            long remaining = deadline - SystemClock.elapsedRealtime();
+            if (remaining <= 0) {
+                Log.w(TAG, "Timed out waiting for previous MPV context shutdown");
+                contextDestroying = false;
+                break;
+            }
+            try {
+                MPVLib.class.wait(Math.min(remaining, 100));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("Interrupted while waiting for MPV shutdown", e);
+            }
+        }
+    }
+
     public static synchronized void destroyCreatedContext() {
         if (!contextCreated) return;
         try {
-            destroy();
+            int result = destroy();
+            // The native no-event-thread path can deliver MPV_EVENT_SHUTDOWN
+            // synchronously from destroy(). In that case event() already
+            // cleared contextCreated/contextDestroying before this call
+            // returns, so do not reintroduce a phantom pending shutdown.
+            contextDestroying = result >= MpvError.MPV_ERROR_SUCCESS && contextCreated;
+            if (result < MpvError.MPV_ERROR_SUCCESS) {
+                Log.w(TAG, "MPV context destroy failed: " + result);
+            }
         } finally {
             contextCreated = false;
             contextCreationAttempted = false;
-            lastContextDestroyedAtMs = SystemClock.elapsedRealtime();
+            if (!contextDestroying) lastContextDestroyedAtMs = SystemClock.elapsedRealtime();
         }
     }
 
     public static native void attachSurface(Surface surface);
 
+    public static native void replaceSurface(Surface surface);
+
     public static native void detachSurface();
 
-    public static native void command(String[] cmd);
+    public static native void attachOsdSurface(Surface surface);
+
+    public static native void replaceOsdSurface(Surface surface);
+
+    public static native void detachOsdSurface();
+
+    public static native int command(String[] cmd);
+
+    public static native int enqueueCommand(long requestId, String[] cmd);
 
     public static native int setOptionString(String name, String value);
 
@@ -222,23 +262,25 @@ public final class MPVLib {
 
     public static native Integer getPropertyInt(String property);
 
-    public static native void setPropertyInt(String property, int value);
+    public static native int setPropertyInt(String property, int value);
 
     public static native Double getPropertyDouble(String property);
 
-    public static native void setPropertyDouble(String property, double value);
+    public static native int setPropertyDouble(String property, double value);
 
     public static native Boolean getPropertyBoolean(String property);
 
-    public static native void setPropertyBoolean(String property, boolean value);
+    public static native int setPropertyBoolean(String property, boolean value);
 
     public static native String getPropertyString(String property);
 
-    public static native void setPropertyString(String property, String value);
+    public static native int setPropertyString(String property, String value);
+
+    public static native byte[] getPropertyByteArray(String property);
 
     public static native void dumpTrackList();
 
-    public static native void observeProperty(String property, int format);
+    public static native int observeProperty(String property, int format);
 
     public static void addObserver(EventObserver observer) {
         synchronized (OBSERVERS) {
@@ -283,9 +325,28 @@ public final class MPVLib {
     }
 
     public static void event(int eventId) {
+        if (eventId == MpvEvent.MPV_EVENT_SHUTDOWN) {
+            synchronized (MPVLib.class) {
+                contextDestroying = false;
+                contextCreated = false;
+                contextCreationAttempted = false;
+                lastContextDestroyedAtMs = SystemClock.elapsedRealtime();
+                MPVLib.class.notifyAll();
+            }
+        }
         synchronized (OBSERVERS) {
             for (EventObserver observer : OBSERVERS) observer.event(eventId);
         }
+    }
+
+    public static void eventCommandReply(long requestId, int error) {
+        synchronized (OBSERVERS) {
+            for (EventObserver observer : OBSERVERS) observer.eventCommandReply(requestId, error);
+        }
+    }
+
+    public static void eventEndFile(int reason, int error, String errorText) {
+        endFile(reason, error, errorText);
     }
 
     public static void endFile(int reason, int error, String errorText) {
@@ -324,6 +385,9 @@ public final class MPVLib {
         void eventProperty(String property, double value);
 
         void event(int eventId);
+
+        default void eventCommandReply(long requestId, int error) {
+        }
 
         default void endFile(int reason, int error, String errorText) {
             event(MpvEvent.MPV_EVENT_END_FILE);
@@ -389,12 +453,25 @@ public final class MPVLib {
 
     public static final class MpvError {
         public static final int MPV_ERROR_SUCCESS = 0;
+        public static final int MPV_ERROR_EVENT_QUEUE_FULL = -1;
+        public static final int MPV_ERROR_NOMEM = -2;
+        public static final int MPV_ERROR_UNINITIALIZED = -3;
+        public static final int MPV_ERROR_INVALID_PARAMETER = -4;
+        public static final int MPV_ERROR_OPTION_NOT_FOUND = -5;
+        public static final int MPV_ERROR_OPTION_FORMAT = -6;
+        public static final int MPV_ERROR_OPTION_ERROR = -7;
+        public static final int MPV_ERROR_PROPERTY_NOT_FOUND = -8;
+        public static final int MPV_ERROR_PROPERTY_FORMAT = -9;
+        public static final int MPV_ERROR_PROPERTY_UNAVAILABLE = -10;
+        public static final int MPV_ERROR_PROPERTY_ERROR = -11;
+        public static final int MPV_ERROR_COMMAND = -12;
         public static final int MPV_ERROR_LOADING_FAILED = -13;
         public static final int MPV_ERROR_AO_INIT_FAILED = -14;
         public static final int MPV_ERROR_VO_INIT_FAILED = -15;
         public static final int MPV_ERROR_NOTHING_TO_PLAY = -16;
         public static final int MPV_ERROR_UNKNOWN_FORMAT = -17;
         public static final int MPV_ERROR_UNSUPPORTED = -18;
+        public static final int MPV_ERROR_NOT_IMPLEMENTED = -19;
         public static final int MPV_ERROR_GENERIC = -20;
 
         private MpvError() {

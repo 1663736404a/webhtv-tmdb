@@ -3,6 +3,7 @@ package androidx.media3.mpvplayer;
 import android.content.Context;
 import android.content.res.AssetManager;
 import android.graphics.Color;
+import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.net.Uri;
@@ -18,6 +19,7 @@ import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.TextureView;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.accessibility.CaptioningManager;
 
 import androidx.annotation.Nullable;
@@ -72,6 +74,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 
 import is.xyz.mpv.MPVLib;
@@ -99,6 +102,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     private static final String DASH_LOAD_OPTIONS = "demuxer=lavf,demuxer-lavf-format=dash,demuxer-lavf-probesize=10485760,demuxer-lavf-analyzeduration=5";
     private static final int RECENT_LOG_LIMIT = 32;
     private static final Object NATIVE_CONTEXT_LOCK = new Object();
+    private static final AtomicLong NATIVE_REQUEST_IDS = new AtomicLong(1);
     @Nullable
     private static MpvPlayer nativeContextOwner;
 
@@ -160,8 +164,12 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     private final long preloadCacheCapacityBytes;
     private MediaItem mediaItem;
     private SurfaceHolder surfaceHolder;
+    private SurfaceHolder osdSurfaceHolder;
+    private SurfaceView osdSurfaceView;
     private Surface surface;
+    private Surface osdSurface;
     private Surface attachedSurface;
+    private Surface attachedOsdSurface;
     private Surface lastFrameRateSurface;
     private Object videoOutput;
     private MpvLutShader lutShader;
@@ -208,6 +216,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     private boolean initialized;
     private boolean released;
     private boolean surfaceAttached;
+    private boolean osdSurfaceAttached;
     private boolean fileLoaded;
     private boolean loadStarted;
     private boolean playbackRestarted;
@@ -1019,6 +1028,17 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     @Override
     public void event(int eventId) {
         postToMain(() -> handleEvent(eventId));
+    }
+
+    @Override
+    public void eventCommandReply(long requestId, int error) {
+        if (error >= MPVLib.MpvError.MPV_ERROR_SUCCESS) return;
+        postToMain(() -> {
+            String message = "asynchronous command failed request=" + requestId + " error=" + error;
+            Log.e(TAG, message);
+            rememberLog(message);
+            markFailureSignal(message);
+        });
     }
 
     @Override
@@ -1979,13 +1999,16 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     private void setVideoOutput(Object output) {
         clearSurfaceFrameRate();
         resetSurfaceFrameRateRequest();
+        detachMpvSurface();
         detachSurfaceHolder();
+        removeOsdSurfaceView();
         surfaceWidth = 0;
         surfaceHeight = 0;
         Log.d(SIZE_TAG, "mpv setVideoOutput output=" + surfaceOutputName(output));
         if (output instanceof SurfaceView view) {
             updateSurfaceSize(view);
             setSurfaceHolder(view.getHolder());
+            createOsdSurfaceView(view);
         } else if (output instanceof TextureView view && view.getSurfaceTexture() != null) {
             updateSurfaceSize(view);
             releaseOwnedSurface();
@@ -2010,32 +2033,91 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         ownsSurface = false;
     }
 
+    private boolean requiresOsdSurface() {
+        return "mediacodec_embed".equals(config.vo());
+    }
+
+    private void createOsdSurfaceView(SurfaceView videoView) {
+        if (!requiresOsdSurface()) return;
+        if (!(videoView.getParent() instanceof ViewGroup parent)) {
+            Log.e(TAG, "Unable to create direct-output OSD surface without a ViewGroup parent");
+            return;
+        }
+
+        SurfaceView overlay = new SurfaceView(videoView.getContext());
+        overlay.setZOrderMediaOverlay(true);
+        overlay.setClickable(false);
+        overlay.setFocusable(false);
+        overlay.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        overlay.getHolder().setFormat(PixelFormat.TRANSLUCENT);
+        overlay.setLayoutParams(new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+        int videoIndex = parent.indexOfChild(videoView);
+        int overlayIndex = videoIndex < 0 ? parent.getChildCount() : Math.min(parent.getChildCount(), videoIndex + 1);
+        osdSurfaceView = overlay;
+        osdSurfaceHolder = overlay.getHolder();
+        osdSurfaceHolder.addCallback(osdSurfaceCallback);
+        parent.addView(overlay, overlayIndex);
+        osdSurface = osdSurfaceHolder.getSurface();
+        SpiderDebug.log("mpv", "created transparent OSD SurfaceView parent=%s index=%d", parent.getClass().getSimpleName(), overlayIndex);
+    }
+
+    private void removeOsdSurfaceView() {
+        if (osdSurfaceHolder != null) {
+            try {
+                osdSurfaceHolder.removeCallback(osdSurfaceCallback);
+            } catch (Throwable ignored) {
+            }
+        }
+        if (osdSurfaceView != null && osdSurfaceView.getParent() instanceof ViewGroup parent) {
+            try {
+                parent.removeView(osdSurfaceView);
+            } catch (Throwable ignored) {
+            }
+        }
+        osdSurfaceHolder = null;
+        osdSurfaceView = null;
+        osdSurface = null;
+    }
+
     private void bindVideoOutput() {
         if (!initialized || surface == null || !surface.isValid()) return;
+        if (requiresOsdSurface() && (osdSurface == null || !osdSurface.isValid())) {
+            Log.d(SIZE_TAG, "mpv waiting for transparent OSD surface before direct output");
+            return;
+        }
         try {
-            if (surfaceAttached && attachedSurface == surface) {
-                setRuntimeString("force-window", "yes");
+            boolean sameVideoSurface = surfaceAttached && attachedSurface == surface;
+            boolean sameOsdSurface = !requiresOsdSurface()
+                    || (osdSurfaceAttached && attachedOsdSurface == osdSurface);
+            if (sameVideoSurface && sameOsdSurface) {
                 applyAndroidSurfaceSize();
+                applyAndroidOsdSurfaceSize();
                 applySurfaceFrameRate();
                 if (!TextUtils.equals(attachedVo, config.vo())) {
-                    safeSetPropertyString("vo", config.vo());
-                    attachedVo = config.vo();
+                    if (enqueueMpvCommand("set", "vo", config.vo())) attachedVo = config.vo();
                 }
                 Log.d(SIZE_TAG, "mpv resize attached surface cached=" + surfaceWidth + "x" + surfaceHeight + " vo=" + config.vo());
                 SpiderDebug.log("mpv", "surface resized surface=%s size=%dx%d vo=%s", surface, surfaceWidth, surfaceHeight, config.vo());
                 return;
             }
-            if (surfaceAttached) detachMpvSurface();
+            if (surfaceAttached || osdSurfaceAttached) detachMpvSurface();
             MPVLib.attachSurface(surface);
             surfaceAttached = true;
             attachedSurface = surface;
-            setRuntimeString("force-window", "yes");
+            if (requiresOsdSurface()) {
+                MPVLib.attachOsdSurface(osdSurface);
+                osdSurfaceAttached = true;
+                attachedOsdSurface = osdSurface;
+            }
             applyAndroidSurfaceSize();
+            applyAndroidOsdSurfaceSize();
             applySurfaceFrameRate();
-            safeSetPropertyString("vo", config.vo());
-            attachedVo = config.vo();
+            enqueueMpvCommand("set", "force-window", "yes");
+            if (enqueueMpvCommand("set", "vo", config.vo())) attachedVo = config.vo();
             Log.d(SIZE_TAG, "mpv bind surface valid=" + surface.isValid() + " cached=" + surfaceWidth + "x" + surfaceHeight + " vo=" + config.vo());
-            SpiderDebug.log("mpv", "surface attached surface=%s size=%dx%d vo=%s", surface, surfaceWidth, surfaceHeight, config.vo());
+            SpiderDebug.log("mpv", "surface attached video=%s osd=%s size=%dx%d vo=%s", surface, osdSurface, surfaceWidth, surfaceHeight, config.vo());
         } catch (Throwable e) {
             fail(mpvError(ERROR_VIDEO_OUTPUT_FAILED, e.getMessage(), e), PlaybackException.ERROR_CODE_VIDEO_FRAME_PROCESSING_FAILED);
         }
@@ -2046,6 +2128,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         resetSurfaceFrameRateRequest();
         detachSurfaceHolder();
         detachMpvSurface();
+        removeOsdSurfaceView();
         releaseOwnedSurface();
         surface = null;
         surfaceWidth = 0;
@@ -2053,15 +2136,18 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     }
 
     private void detachMpvSurface() {
-        if (!initialized || !surfaceAttached) return;
+        if (!initialized || (!surfaceAttached && !osdSurfaceAttached)) return;
         try {
-            safeSetPropertyString("vo", "null");
-            setRuntimeString("force-window", "no");
-            MPVLib.detachSurface();
+            enqueueMpvCommand("set", "vo", "null");
+            enqueueMpvCommand("set", "force-window", "no");
+            if (osdSurfaceAttached) MPVLib.detachOsdSurface();
+            if (surfaceAttached) MPVLib.detachSurface();
         } catch (Throwable ignored) {
         }
         surfaceAttached = false;
+        osdSurfaceAttached = false;
         attachedSurface = null;
+        attachedOsdSurface = null;
         attachedVo = null;
     }
 
@@ -2104,6 +2190,17 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         } else {
             safeSetPropertyString("android-surface-size", "0x0");
             Log.d(SIZE_TAG, "mpv android-surface-size=0x0");
+        }
+    }
+
+    private void applyAndroidOsdSurfaceSize() {
+        if (!requiresOsdSurface()) return;
+        if (surfaceWidth > 0 && surfaceHeight > 0) {
+            safeSetPropertyString("android-osd-surface-size", surfaceWidth + "x" + surfaceHeight);
+            Log.d(SIZE_TAG, "mpv android-osd-surface-size=" + surfaceWidth + "x" + surfaceHeight);
+        } else {
+            safeSetPropertyString("android-osd-surface-size", "0x0");
+            Log.d(SIZE_TAG, "mpv android-osd-surface-size=0x0");
         }
     }
 
@@ -2191,6 +2288,34 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         }
     };
 
+    private final SurfaceHolder.Callback osdSurfaceCallback = new SurfaceHolder.Callback() {
+
+        @Override
+        public void surfaceCreated(SurfaceHolder holder) {
+            osdSurface = holder.getSurface();
+            updateSurfaceSize(holder);
+            Log.d(SIZE_TAG, "mpv OSD surfaceCreated frame=" + surfaceFrame(holder)
+                    + " valid=" + (osdSurface != null && osdSurface.isValid()));
+            bindVideoOutput();
+        }
+
+        @Override
+        public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+            osdSurface = holder.getSurface();
+            updateSurfaceSize(width, height);
+            applyAndroidOsdSurfaceSize();
+            Log.d(SIZE_TAG, "mpv OSD surfaceChanged format=" + format + " size=" + width + "x" + height);
+            bindVideoOutput();
+        }
+
+        @Override
+        public void surfaceDestroyed(SurfaceHolder holder) {
+            Log.d(SIZE_TAG, "mpv OSD surfaceDestroyed frame=" + surfaceFrame(holder));
+            osdSurface = null;
+            detachMpvSurface();
+        }
+    };
+
     private void stopInternal(boolean resetState) {
         restorePreloadCacheOverlay();
         cancelScheduledTrackRefresh();
@@ -2268,7 +2393,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         if (!initialized) return;
         boolean ownsNativeContext = nativeContextOwner == this;
         try {
-            if (ownsNativeContext && surfaceAttached) MPVLib.detachSurface();
+            if (ownsNativeContext && (surfaceAttached || osdSurfaceAttached)) detachMpvSurface();
         } catch (Throwable ignored) {
         }
         try {
@@ -2283,7 +2408,9 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
             initialized = false;
             autoHlsBitrateState.onNativeContextReleased();
             surfaceAttached = false;
+            osdSurfaceAttached = false;
             attachedSurface = null;
+            attachedOsdSurface = null;
             attachedVo = null;
             stopping = false;
             loadStarted = false;
@@ -3974,6 +4101,23 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
             MPVLib.command(command);
         } catch (Throwable ignored) {
         }
+    }
+
+    private boolean enqueueMpvCommand(String... command) {
+        if (!initialized) return false;
+        long requestId = NATIVE_REQUEST_IDS.getAndIncrement();
+        if (requestId <= 0) {
+            NATIVE_REQUEST_IDS.compareAndSet(requestId + 1, 2);
+            requestId = 1;
+        }
+        try {
+            int result = MPVLib.enqueueCommand(requestId, command);
+            if (result >= MPVLib.MpvError.MPV_ERROR_SUCCESS) return true;
+            Log.e(TAG, "Unable to enqueue mpv command request=" + requestId + " error=" + result);
+        } catch (Throwable e) {
+            Log.e(TAG, "Unable to enqueue mpv command request=" + requestId, e);
+        }
+        return false;
     }
 
     private void closeContentFds() {

@@ -35,37 +35,34 @@ third_party/mpv-native-lock.json
 
 构建包装脚本还会对当前选择的完整 lock 文件计算 SHA-256，并用它覆盖上游构建框架的 prefix cache 标识，避免升级 FFmpeg、字体栈、curl 或 nghttp2 后误复用旧缓存；使用 `--lock-file` 测试其他组合时也会生成独立缓存身份。
 
-当前已对 `arm64-v8a` 和 `armeabi-v7a` 做过从源码到最终 `.so` 的完整实编验证，核心组合如下：
+本次同步后的锁定组合如下。两套 ARM ABI 已完成从源码实编、ELF/能力校验和 APK 资产哈希核对；设备解锁后仍需补齐真机播放回归，之后才能把它标记为完整发布基线：
 
 | 组件 | 固定版本 |
 | --- | --- |
-| 构建框架 | `marlboro-advance/mpv-android@f712d4dcf56c00d04e7dd05e157d953d665a6890` |
-| NDK | `28.2.13676358`（r28c），API 24 |
-| MPV | `94335ab87ab225ca3e36e0faeac831639d3e1d4e`（`0.41.0-878-g94335ab87`） |
-| MediaCodec/Vulkan 互操作 | `FongMi/mpv@fd679c812149fe1f3e246897b1015ae109da7c74`，通过 AImageReader/AHardwareBuffer 保持 GPU 链路 |
-| AImageReader帧同步 | `third_party/patches/mpv-aimagereader-transient-buffer.patch`，无buffer时在100ms总截止时间内重试；Vulkan通过临时`sync_fd` semaphore等待真实新帧；seek/flush暂态最多保留4次上一张已同步帧，首帧和持续失败仍报错 |
+| 构建框架/JNI参考 | `FongMi/mpv-android@69cd182ff0af0182d8114889b3ff59d2aa01546a` |
+| NDK | `29.0.14206865`（r29），API 24 |
+| MPV | `FongMi/mpv@a1bb3e18efd8e31c0a75c37ebd6ef47311ff9022`（`0.41.0-939-ga1bb3e18e`） |
+| MediaCodec/Vulkan | FongMi 分支内建 AImageReader/AHardwareBuffer OpenGL/Vulkan 后端、sync-fd、HDR/Dolby Vision 和双 Surface OSD；不再叠加旧 `fd679c81` 或 transient patch |
 | Matroska代理Seek | `third_party/patches/mpv-matroska-segment-end.patch`，可Seek但HTTP总长度未知时使用MKV自身声明的Segment边界读取SeekHead/Cues |
-| FFmpeg | `8ae0b34901ba60a802f183ee75a250a9fc3e09a5`（n8.0.3） |
+| FFmpeg | `FongMi/FFmpeg@04482c8d13ac27b2a9fe93f5d388929eef8af5f4`（9.0 fongmi） |
 | 本地代理Range兼容 | `third_party/patches/ffmpeg-webhtv-proxy-range.patch`，识别App内部代理验证后的206起点标记，不把第三方未知长度伪装成完整文件长度 |
-| libplacebo | `a7a18af88ff0a17c04840dcb3246047bb6b46df3`（7.371.0） |
+| libplacebo | `FongMi/libplacebo@b694a21bf2dc176c1e98b8a13c6421a0de5f3da5`（7.375.0） |
 | curl | 8.21.0，MbedTLS，HTTP/HTTPS、HTTP/2 |
 | nghttp2 | 1.69.0 |
-| libass | `4a05d8127f525943ebf45fdc6497c9e665947f0d`（0.17.5） |
-| fontconfig | `6d0a98982ec351c165c9224c8b7dbdfca3010e47`（2.17.1），静态链接，Android 系统字体回退 |
-| Expat | `f9a3eeb3e09fbea04b1c451ffc422ab2f1e45744`（2.7.1），fontconfig XML 后端 |
+| 字幕/字体 | libaribcaption 1.1.1、libass、fontconfig 2.18.2、libxml2 2.15.3，全部静态链接 |
+| 光盘/归档 | libbluray 1.4.1、libarchive 3.8.7、libdvdread 7.0.1、libdvdnav 7.0.0 |
+| 字符集/音频 | libiconv 1.19、uchardet 0.0.8、rubberband 4.0.0、FFmpeg AV3A/libarcdav3a |
 | dav1d | `54706fc6bc0cdecab7e9593974a4039cc038fca7`（1.5.4） |
 
 其他字体、TLS、Lua 和构建工具版本也在 lock 文件中，不要只修改脚本里的单个组件。
 
-验证状态：ARM64 已在 vivo V2453A / Android 15 使用 MPV 网络播放场景验证正常，监听日志未出现 destroyed-mutex、SIGABRT 或 SIGSEGV；ARMv7 已完成独立源码构建、curl/HTTP2 标记、版本字符串、补丁标记、SONAME 和 `DT_NEEDED` 校验，仍需独立 32 位真机播放回归。
+当前 curl 使用 MbedTLS 3.6.7 和 nghttp2 1.69.0，静态链接进 `libmpv.so`，不会给 APK 增加独立 `libcurl.so` 或 `libnghttp2.so`。构建明确关闭 HTTP/3，不包含 ngtcp2、nghttp3 或 quiche。MPV 直接远程 HTTP/HTTPS 可使用 curl 后端；App 本地 HLS 代理、`stream_cb` 和 FFmpeg/lavf 输入仍保留原路径。
 
-当前 curl 使用 MbedTLS 3.6.5 和 nghttp2 1.69.0，静态链接进 `libmpv.so`，不会给 APK 增加独立 `libcurl.so` 或 `libnghttp2.so`。构建明确关闭 HTTP/3，不包含 ngtcp2、nghttp3 或 quiche。MPV 直接远程 HTTP/HTTPS 可使用 curl 后端；App 本地 HLS 代理、`stream_cb` 和 FFmpeg/lavf 输入仍保留原路径。
-
-libass 已启用 fontconfig，fontconfig 及其 Expat XML 后端同样静态链接进 `libmpv.so`，不会增加独立 `.so`。App 启动 MPV 时生成内容感知的 `fonts.conf`，只登记设备上可读的 `/system`、`/product`、`/system_ext`、`/vendor` 和 `/odm` 字体目录，并把索引放在 App cache。这样可按字符回退到设备已有中文字体；APK 不携带中文字体资产，媒体或 ASS 自带的字体附件仍由 `embeddedfonts=yes` 使用。
+libass 已启用 fontconfig，fontconfig 及其 libxml2 XML 后端同样静态链接进 `libmpv.so`，不会增加独立 `.so`。App 启动 MPV 时生成内容感知的 `fonts.conf`，只登记设备上可读的 `/system`、`/product`、`/system_ext`、`/vendor` 和 `/odm` 字体目录，并把索引放在 App cache。这样可按字符回退到设备已有中文字体；APK 不携带中文字体资产，媒体或 ASS 自带的字体附件仍由 `embeddedfonts=yes` 使用。
 
 ## 主机准备
 
-支持 macOS 和 x86_64 Linux。先安装 JDK 21、Android SDK、NDK r28c，并确保根目录 `local.properties` 的 `sdk.dir` 正确。
+支持 macOS 和 x86_64 Linux。先安装 JDK 21、Android SDK、NDK r29，并确保根目录 `local.properties` 的 `sdk.dir` 正确。
 
 macOS：
 
@@ -84,13 +81,13 @@ sudo apt-get install -y build-essential cmake gperf git curl file pkg-config pyt
 安装 Android NDK：
 
 ```bash
-"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358"
+"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.14206865"
 ```
 
-如果 NDK 不在 `$ANDROID_HOME/ndk/28.2.13676358`，设置：
+如果 NDK 不在 `$ANDROID_HOME/ndk/29.0.14206865`，设置：
 
 ```bash
-export ANDROID_NDK_HOME=/path/to/android-ndk-r28c
+export ANDROID_NDK_HOME=/path/to/android-ndk-r29
 ```
 
 网络需要代理时，在执行脚本前设置标准代理环境变量：
@@ -154,15 +151,15 @@ scripts/build_mpv_native.sh --abi arm64-v8a --jobs 8 --work-dir /tmp/webhtv-mpv-
 1. 读取 `third_party/mpv-native-lock.json`。
 2. 检查 NDK revision 和 LLVM 工具。
 3. 在独立 Python venv 中安装固定版本 Meson/Ninja及 MbedTLS 生成工具依赖。
-4. 下载构建框架和每个固定 commit，初始化 MbedTLS、libplacebo 子模块，并校验 Lua、libunibreak、curl、nghttp2 tar 包 SHA-256。
+4. 下载构建框架和每个固定 commit，初始化 MbedTLS、FreeType、libplacebo 子模块，并校验所有发行 tar 包 SHA-256。
 5. 对固定 FFmpeg commit 应用 `third_party/patches/ffmpeg-webhtv-proxy-range.patch`，只接受App内部代理写入的精确Range起点标记，使缺少`Content-Range`的206响应仍能按请求偏移重连；它不会制造未知的资源总长度。
-6. 对固定 MPV commit 应用锁定的 FongMi Vulkan/MediaCodec 互操作提交，通过 AImageReader/AHardwareBuffer 将 MediaCodec 帧导入 Vulkan；随后应用 `third_party/patches/mpv-stream-cb-disc-controls.patch`、`third_party/patches/mpv-aimagereader-transient-buffer.patch` 和 `third_party/patches/mpv-matroska-segment-end.patch`。它们分别提供光盘时间轴控制、AImageReader有界获取与Vulkan acquire-fence同步、seek/flush期间的有界上一帧保留，以及在可Seek代理总长度未知时使用Matroska自身Segment边界读取尾部索引。
-7. 按依赖顺序构建 MbedTLS、libunibreak、dav1d、FFmpeg、Expat、FreeType、fontconfig、FriBidi、HarfBuzz、libass、Lua、shaderc、libplacebo、nghttp2、curl 和 MPV。
+6. 固定 MPV 到 FongMi 完整分支；该分支已经包含 AImageReader OpenGL/Vulkan、sync-fd、HDR/Dolby Vision、双 Surface OSD、直播状态和 Android helper scheme。WebHTV 只继续应用 `third_party/patches/mpv-stream-cb-disc-controls.patch` 与 `third_party/patches/mpv-matroska-segment-end.patch`。
+7. 按依赖顺序构建字符集/压缩库、MbedTLS、dav1d、libxml2、FreeType、libaribcaption、FFmpeg、字体栈、shaderc、libplacebo、curl+nghttp2、libbluray、libarchive、DVD 库、rubberband 和 MPV。
 8. 把 FFmpeg 的文件名、ELF `SONAME` 和 `DT_NEEDED` 从 `libav*`/`libsw*` 等长修改为 `libmv*`/`libmw*`。
 9. 使用 NDK `llvm-strip --strip-unneeded` 处理最终库。
-10. 使用 NDK `llvm-readelf` 检查每个 SONAME、MPV 的完整依赖和 Vulkan 依赖，并检查 MPV/libplacebo/curl 版本字符串、HTTP/2标记、libass fontconfig 字符串、光盘控制、AImageReader有界获取、Vulkan fence导入和暂态上一帧保留、代理Range及Matroska Segment补丁标识；同时拒绝动态 `libfontconfig.so` 或 `libexpat.so` 依赖。
+10. 使用 NDK `llvm-readelf` 检查每个 SONAME、MPV 的完整依赖和 Vulkan 依赖，并检查 MPV/libplacebo/curl 版本、HTTP/2、双 Surface、Vulkan AImageReader/sync-fd、Dolby Vision、AV3A、ARIB/TTML、MMT/TLV、代理 Range 及 Matroska Segment 标记；同时拒绝动态 fontconfig/libxml2 依赖。
 
-`scripts/verify_mpv_native_assets.sh` 对已提交 assets 执行同类校验，Android Release Action 会在 Gradle 打包四个 APK 前以 `--require-elf` 模式调用它，并确认AImageReader有界获取、Vulkan fence同步与暂态上一帧保留、代理Range与Matroska Segment修复已进入两套原生资产，防止 lock、补丁、arm64/armv7 assets 或静态网络能力不一致的二进制进入 Release。
+`scripts/verify_mpv_native_assets.sh` 对已提交 assets 执行同类校验，Android Release Action 会在 Gradle 打包四个 APK 前以 `--require-elf` 模式调用它，防止 lock、补丁、arm64/armv7 assets 或静态能力不一致的二进制进入 Release。
 
 未指定 `--install` 时，输出位于：
 
@@ -181,15 +178,7 @@ build/mpv-native/output/armeabi-v7a/
 dlopen failed: cannot locate symbol "av_dynamic_hdr_smpte2094_app5_alloc"
 ```
 
-当前 MPV `94335ab87` 与 libplacebo 7.371.0 按同一 lock 构建。不能通过篡改 pkg-config 版本号让 MPV 链接不满足版本要求的旧 libplacebo。
-
-此前测试过的 FFmpeg 8.1.2 重新构建组合会在 vivo Android 15 播放初始化阶段触发：
-
-```text
-FORTIFY: pthread_mutex_lock called on a destroyed mutex
-```
-
-最新 MPV 与 FFmpeg n8.0.3、libplacebo 7.371.0、curl 8.21.0 和 nghttp2 1.69.0 的组合在同一设备正常，因此正式 lock 固定 n8.0.3。n8.0.3 同时包含 MPV curl 嵌套 AVIO 清理所需修复；脚本会拒绝缺少该修复的 FFmpeg 版本。现有证据只能把 destroyed-mutex 不兼容范围锁定在 FFmpeg 8.1.x 或其构建组合，不能据此把某个 FFmpeg 源文件认定为唯一根因。
+当前 FongMi MPV 直接依赖 FFmpeg 9 新增/调整的 HDR、Dolby Vision、MMT/TTML 与 MediaCodec API，并要求 libplacebo API 375。不能通过篡改 pkg-config 版本号让 MPV 链接旧 libplacebo，也不能从 FFmpeg 9 分支只挑单个 AV3A 或 MMT 提交；AV3A 还需要分支内携带的 `dependency/avs3a` 源码先构建 `libarcdav3a`。
 
 最终目录必须包含：
 
@@ -210,18 +199,17 @@ libplayer.so
 
 ## `libplayer.so` 的重建边界
 
-修改以下内容或 MPV client API 时才执行：
+原生依赖脚本仍会保留已有 `libplayer.so`，但本次 FongMi MPV/mpv-android 同步必须另行重建 JNI：
 
 ```bash
 scripts/build_mpv_player_jni.sh
 ```
 
-- `third_party/mpv-player-jni/src/**`
-- `third_party/mpv-player-jni/include/mpv/client.h`
-- `third_party/mpv-player-jni/include/mpv/stream_cb.h`
-- 新 `libmpv.so` 的 client API 与当前头文件不兼容
+- 新 JNI 增加 command reply、byte-array property、END_FILE 细节、异步 shutdown 和引用/异常清理。
+- 视频 Surface、OSD Surface 与 command 必须串行化，并支持 `android-osd-wid`。
+- WebHTV 的 ISO/DVD stream callback 与 END_FILE 扩展必须在新实现上重新移植。
 
-只重编相同 client API 的 MPV/FFmpeg 时，不需要重建 `libplayer.so`。
+以后若只重编完全相同 client API/JNI 源码的 MPV/FFmpeg，才可以复用 `libplayer.so`。
 
 ## 提交前验证
 
@@ -236,7 +224,9 @@ bash gradlew :app:assembleMobileArm64_v8aRelease -PfastRelease=true
 - OpenGL普通播放、硬解状态。
 - OpenGL LUT 生效，预览竖线可见，拖动连续且无闪烁。
 - Vulkan普通播放和 LUT。
-- Vulkan 硬解时确认 `hwdec-current=mediacodec`，并在日志中确认 `Using Vulkan AHardwareBuffer GPU conversion`；不应无条件回退到 `mediacodec-copy`。
+- Vulkan 硬解时确认 `hwdec-current=mediacodec`，并在日志中确认 `Vulkan AImageReader backend` 和 `Using Vulkan YCbCr AHardwareBuffer sampling`；不应无条件回退到 `mediacodec-copy`。
+- 电视直出/Dolby Vision 使用独立视频 Surface 和透明 OSD Surface，字幕与控制层可见，退出或换集不死锁。
+- MMT/TLV、TTML/ARIB 字幕、AV3A、Blu-ray/DVD ISO、压缩包播放入口分别做功能回归。
 - 文本字幕、图形字幕以及播放中切换。
 - 使用缺少部分中文字形的 SSA/ASS 字幕确认可逐字回退，不出现 `□`；同时确认媒体内嵌字体仍生效。
 - 播放成功前切换播放器内核。
@@ -245,20 +235,14 @@ bash gradlew :app:assembleMobileArm64_v8aRelease -PfastRelease=true
 
 不要提交 `build/mpv-native/`。只提交 lock、脚本、文档和最终 assets 中发生变化的 `.so`。
 
-当前完整稳定基线 tag：
-
-```text
-mpv-libcurl-http2-armv7-20260717-123347
-```
-
 ## 常见错误
 
 | 错误 | 处理 |
 | --- | --- |
 | `missing command: pkg-config` | macOS 安装 `brew install pkg-config`；Debian/Ubuntu 安装 `pkg-config` |
-| `missing command: cmake` 或 `gperf` | 安装 CMake 与 gperf；它们分别用于 Expat 和 fontconfig 构建 |
-| `missing llvm-readelf/readelf` | Linux 安装 `binutils`；macOS 安装 NDK r28c，或设置 `ANDROID_NDK_HOME`/`READELF` |
-| `Android NDK ... not found` | 安装 `ndk;28.2.13676358` 或设置 `ANDROID_NDK_HOME` |
+| `missing command: cmake` 或 `gperf` | 安装 CMake 与 gperf；CMake 用于 AV3A、ARIB、归档/字符集依赖 |
+| `missing llvm-readelf/readelf` | Linux 安装 `binutils`；macOS 安装 NDK r29，或设置 `ANDROID_NDK_HOME`/`READELF` |
+| `Android NDK ... not found` | 安装 `ndk;29.0.14206865` 或设置 `ANDROID_NDK_HOME` |
 | 下载 commit/tar 包失败 | 检查代理；重新执行会复用已校验缓存 |
 | tar 包 `SHA-256 mismatch` | 不要绕过检查；确认下载地址或 lock 是否经过审核 |
 | `libmpv.so does not depend on libvulkan.so` | 构建参数或 libplacebo/shaderc未正确启用 Vulkan |

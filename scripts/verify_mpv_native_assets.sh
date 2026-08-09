@@ -169,6 +169,7 @@ verify_abi() {
   [ ! -e "$directory/libnghttp2.so" ] || die "nghttp2 must remain static: $directory/libnghttp2.so"
   [ ! -e "$directory/libfontconfig.so" ] || die "fontconfig must remain static: $directory/libfontconfig.so"
   [ ! -e "$directory/libexpat.so" ] || die "Expat must remain static: $directory/libexpat.so"
+  [ ! -e "$directory/libxml2.so" ] || die "libxml2 must remain static: $directory/libxml2.so"
 
   file_info="$(file "$directory/libmpv.so")"
   printf '%s\n' "$file_info" | grep -E "$file_pattern" >/dev/null || die "unexpected $abi ELF type: $file_info"
@@ -176,11 +177,16 @@ verify_abi() {
   contains_string "$directory/libmpv.so" "mpv v$MPV_VERSION"
   contains_string "$directory/libmpv.so" "v$LIBPLACEBO_VERSION"
   contains_string "$directory/libmpv.so" "WebHTV stream_cb controls enabled"
-  contains_string "$directory/libmpv.so" "Using Vulkan AHardwareBuffer GPU conversion"
-  contains_string "$directory/libmpv.so" "AImageReader frame acquisition timed out"
-  contains_string "$directory/libmpv.so" "Holding last synchronized AImage frame"
-  contains_string "$directory/libmpv.so" "Using Vulkan sync_fd for AImage acquire fences"
+  contains_string "$directory/libmpv.so" "Vulkan AImageReader backend:"
+  contains_string "$directory/libmpv.so" "Using Vulkan YCbCr AHardwareBuffer sampling"
+  contains_string "$directory/libmpv.so" "Vulkan AImageReader sync-fd:"
+  contains_string "$directory/libmpv.so" "android-osd-wid"
+  contains_string "$directory/libmpv.so" "Direct Dolby Vision initialization failed"
   contains_string "$directory/libmpv.so" "Using declared Matroska segment end for seek metadata."
+  contains_string "$directory/libmvcodec.so" "libarcdav3a AV3A"
+  contains_string "$directory/libmvcodec.so" "libaribcaption"
+  contains_string "$directory/libmvcodec.so" "Timed Text Markup Language subtitle"
+  contains_string "$directory/libmvformat.so" "MMT protocol over TLV packets"
   contains_string "$directory/libmvformat.so" "WebHTV proxy range offset accepted"
   contains_string "$directory/libmpv.so" "No usable fontconfig configuration file found, using fallback."
   if [ -n "$CURL_VERSION" ]; then
@@ -197,7 +203,7 @@ verify_abi() {
       if printf '%s\n' "$dynamic" | grep -Eq 'Shared library: \[lib(curl|nghttp2|mbed[^]]*)\.so'; then
         die "network dependency must remain static in $file_path"
       fi
-      if printf '%s\n' "$dynamic" | grep -Eq 'Shared library: \[lib(fontconfig|expat)\.so'; then
+      if printf '%s\n' "$dynamic" | grep -Eq 'Shared library: \[lib(fontconfig|expat|xml2)\.so'; then
         die "font stack dependency must remain static in $file_path"
       fi
       name="$(basename "$file_path")"
