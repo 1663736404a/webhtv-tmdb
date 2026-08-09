@@ -408,7 +408,7 @@ other/        Logo 图片和辅助工具
 
 ## 上游基线
 
-本项目二开起始于[原版影视](https://github.com/FongMi/TV) commit `bec0f1d2fc22f394ba05f8e63a9ef2ba7ecbba0e`,当前已同步合并到[原版影视](https://github.com/FongMi/TV) commit `5fdff00a602dc56e8ba756174daef20edab024f2`。
+本项目二开起始于[原版影视](https://github.com/FongMi/TV) commit `bec0f1d2fc22f394ba05f8e63a9ef2ba7ecbba0e`，完整同步基线为原版 commit `5fdff00a602dc56e8ba756174daef20edab024f2`（上游重写历史后的等价提交为 `4573249cd6679c6becca9957f6a011bf6c4a5afd`）。2026-08-09 已审查至原版 commit `1a19fee278fa2234da725d61a53bf59b69fe9127`；因其播放器、设置和历史体系已与本项目的 Media3、MPV、IJK、缓存、诊断及观影同步实现明显分化，没有整段合并，而是选择性 cherry-pick `b8eed44d26458bb0ae1dc2722f833d81750aa356`、`28f504c491f902fbed1cff31d76d289b6e80de26`、`5ca4d2ba5ed0f2069f1524583e4261a051c40a2c`、`dd696dadcfa90a39f2e627e6f7048e51891768d8`、`b04c63ce61f7ca40226b14ecc944ddd3ad63215f`、`a7bd92541f287c5ba12a1c36d31e8b6229941e32`，并按现有架构移植 `42b3824caf1cd9271aad03aa180398a0cbb41d2a` / `bcb11b230586e7c509199c75f94cd100053b84e0` 中与播放结束态和末尾 seek 相关的安全部分。
 
 ## 免费声明与社区分享
 

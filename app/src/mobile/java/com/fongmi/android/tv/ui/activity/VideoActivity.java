@@ -5605,6 +5605,7 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
                 break;
             case Player.STATE_ENDED:
                 checkEnded(true);
+                updatePlayControl(false, syncPiPForPlaybackMode());
                 break;
         }
     }
@@ -5616,15 +5617,13 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         syncLyricsPlaybackState(isPlaying);
         syncKaraokePosition();
         boolean audioMode = syncPiPForPlaybackMode();
-        if (isPlaying) {
-            if (!audioMode) mPiP.update(this, true);
-            mBinding.control.play.setImageResource(androidx.media3.ui.R.drawable.exo_icon_pause);
-            checkAudioPlayImg(true);
-        } else if (isPaused()) {
-            if (!audioMode) mPiP.update(this, false);
-            mBinding.control.play.setImageResource(androidx.media3.ui.R.drawable.exo_icon_play);
-            checkAudioPlayImg(false);
-        }
+        if (isPlaying || isPaused()) updatePlayControl(isPlaying, audioMode);
+    }
+
+    private void updatePlayControl(boolean isPlaying, boolean audioMode) {
+        if (!audioMode) mPiP.update(this, isPlaying);
+        mBinding.control.play.setImageResource(isPlaying ? androidx.media3.ui.R.drawable.exo_icon_pause : androidx.media3.ui.R.drawable.exo_icon_play);
+        checkAudioPlayImg(isPlaying);
     }
 
     @Override

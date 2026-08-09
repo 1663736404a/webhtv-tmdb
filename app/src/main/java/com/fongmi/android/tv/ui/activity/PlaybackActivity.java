@@ -231,9 +231,13 @@ public abstract class PlaybackActivity extends BaseActivity implements MediaCont
     protected void onReclaim() {
     }
 
-    protected void seekTo(long time) {
-        mController.seekTo(player().getPosition() + time);
-        mController.play();
+    protected boolean seekTo(long deltaMs) {
+        long targetMs = Math.max(0, player().getPosition() + deltaMs);
+        long durationMs = player().getDuration();
+        boolean seekToEnd = durationMs > 0 && targetMs >= durationMs;
+        mController.seekTo(seekToEnd ? durationMs : targetMs);
+        if (!seekToEnd) mController.play();
+        return seekToEnd;
     }
 
     protected void startPlayer(String key, Result result, boolean useParse, long timeout, MediaMetadata metadata) {
