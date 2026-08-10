@@ -624,6 +624,12 @@ public class PlayerManager implements ParseCallback {
         return engine == null ? "" : engine.getRuntimeDiagnostics();
     }
 
+    public PlayerEngine.VideoPlaybackDetails getVideoPlaybackDetails() {
+        return engine == null
+                ? PlayerEngine.VideoPlaybackDetails.empty()
+                : engine.getVideoPlaybackDetails();
+    }
+
     public long getDroppedFrames() {
         return engine == null ? 0 : engine.getDroppedFrames();
     }

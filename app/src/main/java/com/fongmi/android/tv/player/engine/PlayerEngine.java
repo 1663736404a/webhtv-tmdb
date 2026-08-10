@@ -1,5 +1,7 @@
 package com.fongmi.android.tv.player.engine;
 
+import androidx.media3.common.C;
+import androidx.media3.common.ColorInfo;
 import androidx.media3.common.Effect;
 import androidx.media3.common.Format;
 import androidx.media3.common.MediaEdition;
@@ -110,6 +112,11 @@ public interface PlayerEngine {
         return "";
     }
 
+    /** Source-track identity and runtime decode/output facts for the selected video track. */
+    default VideoPlaybackDetails getVideoPlaybackDetails() {
+        return VideoPlaybackDetails.empty();
+    }
+
     default long getDroppedFrames() {
         return 0;
     }
@@ -218,6 +225,38 @@ public interface PlayerEngine {
         public static PlaybackFactsSnapshot empty() {
             return new PlaybackFactsSnapshot(null, null, null, null, "", "",
                     DecoderKind.UNKNOWN, null, "", "", null);
+        }
+    }
+
+    record VideoPlaybackDetails(
+            String sourceCodecs,
+            int dolbyVisionProfile,
+            int dolbyVisionLevel,
+            String decodedCodec,
+            String decoderName,
+            String hwdecCurrent,
+            ColorInfo outputColorInfo) {
+
+        public VideoPlaybackDetails {
+            sourceCodecs = sourceCodecs == null ? "" : sourceCodecs;
+            decodedCodec = decodedCodec == null ? "" : decodedCodec;
+            decoderName = decoderName == null ? "" : decoderName;
+            hwdecCurrent = hwdecCurrent == null ? "" : hwdecCurrent;
+        }
+
+        public boolean hasDolbyVisionSource() {
+            return dolbyVisionProfile > 0;
+        }
+
+        public boolean hasEvidence() {
+            return hasDolbyVisionSource() || !sourceCodecs.isEmpty()
+                    || !decodedCodec.isEmpty() || !decoderName.isEmpty()
+                    || !hwdecCurrent.isEmpty() || outputColorInfo != null;
+        }
+
+        public static VideoPlaybackDetails empty() {
+            return new VideoPlaybackDetails("", C.INDEX_UNSET, C.INDEX_UNSET,
+                    "", "", "", null);
         }
     }
 

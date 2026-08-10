@@ -182,6 +182,7 @@ verify_abi() {
   contains_string "$directory/libmpv.so" "Vulkan AImageReader sync-fd:"
   contains_string "$directory/libmpv.so" "android-osd-wid"
   contains_string "$directory/libmpv.so" "Direct Dolby Vision initialization failed"
+  contains_string "$directory/libmpv.so" "isolated decoder without the primary AImageReader Surface"
   contains_string "$directory/libmpv.so" "Using declared Matroska segment end for seek metadata."
   contains_string "$directory/libmvcodec.so" "libarcdav3a AV3A"
   contains_string "$directory/libmvcodec.so" "libaribcaption"

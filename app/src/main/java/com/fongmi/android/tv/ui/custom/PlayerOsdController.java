@@ -29,6 +29,7 @@ import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.player.PlayerManager;
 import com.fongmi.android.tv.player.PlaybackRoute;
 import com.fongmi.android.tv.player.engine.PlayerCacheState;
+import com.fongmi.android.tv.player.engine.PlayerEngine;
 import com.fongmi.android.tv.player.exo.PlaybackAnalyticsListener;
 import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
 import com.fongmi.android.tv.setting.PlayerSetting;
@@ -322,6 +323,8 @@ public class PlayerOsdController {
         String runtimeDiagnostics = player.isMpv() ? player.getRuntimeDiagnostics() : "";
         String frameTiming = player.isExo() ? summarizeFrameTiming() : "";
         String videoText = summarizeVideo(video, player, snapshot.videoDecoderName(), getVideoTrackState(player));
+        String sourceVideoText = summarizeSourceVideo(
+                player.getVideoPlaybackDetails(), video);
         AudioTrackState audioTrack = getAudioTrackState(player);
         String audioText = summarizeAudio(audio, audioTrack, snapshot.audioDecoderName());
         String render = PlayerSetting.getRender() == PlayerSetting.RENDER_SURFACE ? "Surface" : "Texture";
@@ -337,6 +340,7 @@ public class PlayerOsdController {
         String main = join("\n",
                 TextUtils.isEmpty(error) ? "" : row("错误", error),
                 row("视频", videoText),
+                TextUtils.isEmpty(sourceVideoText) ? "" : row("源片", sourceVideoText),
                 row("音频", audioText),
                 row("网络", network),
                 player.isExo() ? row("保流畅", strategy) : "",
@@ -448,9 +452,26 @@ public class PlayerOsdController {
     private String decoderText(PlayerManager player, String decoder) {
         if (!TextUtils.isEmpty(decoder)) return decoder;
         if (player == null) return "";
-        if (player.isMpv()) return player.isHardDecode() ? "MPV mediacodec" : "MPV ffmpeg";
+        if (player.isMpv()) {
+            String hwdec = player.getVideoPlaybackDetails().hwdecCurrent();
+            if (!TextUtils.isEmpty(hwdec)) return "MPV " + hwdec;
+            return player.isHardDecode() ? "MPV mediacodec" : "MPV ffmpeg";
+        }
         if (player.isIjk()) return player.isHardDecode() ? "IJK mediacodec" : "IJK ffmpeg";
         return "";
+    }
+
+    private String summarizeSourceVideo(
+            PlayerEngine.VideoPlaybackDetails details, Format current) {
+        if (details == null || !details.hasDolbyVisionSource()) return "";
+        String profile = String.format(Locale.US, "%02d",
+                details.dolbyVisionProfile());
+        String codecs = TextUtils.isEmpty(details.sourceCodecs())
+                ? "dvhe." + profile : details.sourceCodecs();
+        String output = outputHdrName(current);
+        return "Dolby Vision Profile " + details.dolbyVisionProfile()
+                + "（DV." + profile + "） / " + codecs
+                + " / 已回退" + (TextUtils.isEmpty(output) ? "" : "到 " + output);
     }
 
     private String audioDecoderText(String decoder) {
@@ -634,7 +655,18 @@ public class PlayerOsdController {
         String color = format.colorInfo.toLogString();
         if (TextUtils.isEmpty(color)) return "";
         color = color.replace("Limited range", "Limited").replace("Full range", "Full").replace("SMPTE 170M", "SMPTE170M");
-        return "color " + color;
+        return "color " + join(" ", outputHdrName(format), color);
+    }
+
+    private String outputHdrName(Format format) {
+        if (format == null || format.colorInfo == null) return "";
+        if (format.colorInfo.colorTransfer == C.COLOR_TRANSFER_ST2084) return "HDR10";
+        if (format.colorInfo.colorTransfer == C.COLOR_TRANSFER_HLG) return "HLG";
+        if (androidx.media3.common.ColorInfo.isTransferHdr(format.colorInfo)) return "HDR";
+        if (format.colorInfo.colorTransfer == C.COLOR_TRANSFER_SDR
+                || format.colorInfo.colorTransfer == C.COLOR_TRANSFER_SRGB
+                || format.colorInfo.colorTransfer == C.COLOR_TRANSFER_LINEAR) return "SDR";
+        return "";
     }
 
     private long getMediaBitrate(Format video, Format audio) {

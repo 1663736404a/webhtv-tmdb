@@ -183,6 +183,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     private PlaybackParameters playbackParameters;
     private PlaybackException playerError;
     private Tracks currentTracks;
+    private VideoTrackDiagnostics selectedVideoTrackDiagnostics;
     private List<MediaEdition> currentChapters;
     private VideoSize videoSize;
     private String lastVideoSizeCandidateLog;
@@ -316,6 +317,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         if (subtitleDiagnosticFile != null && subtitleDiagnosticFile.length() > 2 * 1024 * 1024) subtitleDiagnosticFile.delete();
         playbackParameters = PlaybackParameters.DEFAULT;
         currentTracks = Tracks.EMPTY;
+        selectedVideoTrackDiagnostics = VideoTrackDiagnostics.empty();
         currentChapters = List.of();
         videoSize = VideoSize.UNKNOWN;
         playbackState = Player.STATE_IDLE;
@@ -393,6 +395,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         cachedDurationMs = C.TIME_UNSET;
         resetCacheState();
         currentTracks = Tracks.EMPTY;
+        selectedVideoTrackDiagnostics = VideoTrackDiagnostics.empty();
         currentChapters = List.of();
         playbackState = mediaItem == null ? Player.STATE_IDLE : Player.STATE_IDLE;
         loading = false;
@@ -1512,6 +1515,10 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         return currentTracks;
     }
 
+    public VideoTrackDiagnostics getSelectedVideoTrackDiagnostics() {
+        return selectedVideoTrackDiagnostics;
+    }
+
     public VideoSize getVideoSizeSnapshot() {
         return videoSize;
     }
@@ -2336,6 +2343,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         cachedDurationMs = C.TIME_UNSET;
         resetCacheState();
         currentTracks = Tracks.EMPTY;
+        selectedVideoTrackDiagnostics = VideoTrackDiagnostics.empty();
         cachedSelectedHlsBitrate = 0;
         currentChapters = List.of();
         videoSize = VideoSize.UNKNOWN;
@@ -3197,12 +3205,14 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         if (trackRefreshScheduled) cancelScheduledTrackRefresh();
         if (!initialized) {
             currentTracks = Tracks.EMPTY;
+            selectedVideoTrackDiagnostics = VideoTrackDiagnostics.empty();
             cachedSelectedHlsBitrate = 0;
             return;
         }
         int count = Math.max(0, intProperty("track-list/count", 0));
         if (count <= 0) {
             currentTracks = Tracks.EMPTY;
+            selectedVideoTrackDiagnostics = VideoTrackDiagnostics.empty();
             cachedSelectedHlsBitrate = 0;
             return;
         }
@@ -3222,6 +3232,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         }
         if (infos.isEmpty()) {
             currentTracks = Tracks.EMPTY;
+            selectedVideoTrackDiagnostics = VideoTrackDiagnostics.empty();
             cachedSelectedHlsBitrate = 0;
             return;
         }
@@ -3230,8 +3241,14 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         String selectedText = selectedTrackId(C.TRACK_TYPE_TEXT);
         TrackInfo selectedVideoInfo = findTrack(
                 infos, C.TRACK_TYPE_VIDEO, selectedVideo);
+        if (selectedVideoInfo == null && isAutoOrUnknownTrackChoice(selectedVideo)) {
+            selectedVideoInfo = firstTrack(infos, C.TRACK_TYPE_VIDEO);
+        }
         TrackInfo selectedAudioInfo = findTrack(
                 infos, C.TRACK_TYPE_AUDIO, selectedAudio);
+        selectedVideoTrackDiagnostics = selectedVideoInfo == null
+                ? VideoTrackDiagnostics.empty()
+                : selectedVideoInfo.toVideoTrackDiagnostics();
         cachedSelectedHlsBitrate = selectedVideoInfo != null
                 && selectedVideoInfo.hlsBitrate > 0
                 ? selectedVideoInfo.hlsBitrate
@@ -3283,6 +3300,12 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     @Nullable
     private TrackInfo findTrack(List<TrackInfo> infos, int type, String selectedId) {
         for (TrackInfo info : infos) if (info.type == type && isTrackSelected(info, selectedId)) return info;
+        return null;
+    }
+
+    @Nullable
+    private TrackInfo firstTrack(List<TrackInfo> infos, int type) {
+        for (TrackInfo info : infos) if (info.type == type) return info;
         return null;
     }
 
@@ -3402,6 +3425,9 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
             builder.append(" title=").append(info.title);
             builder.append(" lang=").append(info.lang);
             builder.append(" codec=").append(info.codec);
+            builder.append(" decoder=").append(info.decoder);
+            builder.append(" doviProfile=").append(info.dolbyVisionProfile);
+            builder.append(" doviLevel=").append(info.dolbyVisionLevel);
             Format format = info.toFormat();
             builder.append(" label=").append(format.label);
             builder.append(" formatLang=").append(format.language);
@@ -3528,6 +3554,9 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
             }
         }
         String codec = stringProperty(prefix + "codec", "");
+        String decoder = stringProperty(prefix + "decoder", "");
+        int dolbyVisionProfile = intProperty(prefix + "dolby-vision-profile", C.INDEX_UNSET);
+        int dolbyVisionLevel = intProperty(prefix + "dolby-vision-level", C.INDEX_UNSET);
         boolean selected = booleanProperty(prefix + "selected", false);
         int width = intProperty(prefix + "demux-w", C.LENGTH_UNSET);
         int height = intProperty(prefix + "demux-h", C.LENGTH_UNSET);
@@ -3544,6 +3573,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         int hlsBitrate = intProperty(prefix + "hls-bitrate", C.LENGTH_UNSET);
         ColorInfo colorInfo = type == C.TRACK_TYPE_VIDEO ? videoColorInfo() : null;
         return new TrackInfo(type, id, demuxId, srcId, title, lang, codec,
+                decoder, dolbyVisionProfile, dolbyVisionLevel,
                 selected, width, height, frameRate, sampleRate, channels,
                 bitrate, hlsBitrate, colorInfo);
     }
@@ -4260,6 +4290,9 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         final String title;
         final String lang;
         final String codec;
+        final String decoder;
+        final int dolbyVisionProfile;
+        final int dolbyVisionLevel;
         final boolean selected;
         final int width;
         final int height;
@@ -4271,9 +4304,11 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         final ColorInfo colorInfo;
 
         TrackInfo(int type, String id, int demuxId, int srcId, String title,
-                  String lang, String codec, boolean selected, int width,
-                  int height, float frameRate, int sampleRate, int channels,
-                  int bitrate, int hlsBitrate, @Nullable ColorInfo colorInfo) {
+                  String lang, String codec, String decoder,
+                  int dolbyVisionProfile, int dolbyVisionLevel,
+                  boolean selected, int width, int height, float frameRate,
+                  int sampleRate, int channels, int bitrate, int hlsBitrate,
+                  @Nullable ColorInfo colorInfo) {
             this.type = type;
             this.id = id;
             this.demuxId = demuxId;
@@ -4281,6 +4316,9 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
             this.title = title;
             this.lang = lang;
             this.codec = codec;
+            this.decoder = decoder;
+            this.dolbyVisionProfile = dolbyVisionProfile;
+            this.dolbyVisionLevel = dolbyVisionLevel;
             this.selected = selected;
             this.width = width;
             this.height = height;
@@ -4310,6 +4348,20 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
             return builder.build();
         }
 
+        VideoTrackDiagnostics toVideoTrackDiagnostics() {
+            return new VideoTrackDiagnostics(
+                    sourceCodecs(), dolbyVisionProfile, dolbyVisionLevel,
+                    codec, decoder, colorInfo);
+        }
+
+        private String sourceCodecs() {
+            if (dolbyVisionProfile <= 0) return codec;
+            String value = String.format(Locale.US, "dvhe.%02d", dolbyVisionProfile);
+            return dolbyVisionLevel >= 0
+                    ? value + String.format(Locale.US, ".%02d", dolbyVisionLevel)
+                    : value;
+        }
+
         private String trackLabel() {
             String prefix = switch (type) {
                 case C.TRACK_TYPE_VIDEO -> "Video";
@@ -4318,6 +4370,30 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
                 default -> "Track";
             };
             return prefix + " " + id;
+        }
+    }
+
+    public record VideoTrackDiagnostics(
+            String sourceCodecs,
+            int dolbyVisionProfile,
+            int dolbyVisionLevel,
+            String decodedCodec,
+            String decoderName,
+            @Nullable ColorInfo outputColorInfo) {
+
+        public VideoTrackDiagnostics {
+            sourceCodecs = sourceCodecs == null ? "" : sourceCodecs;
+            decodedCodec = decodedCodec == null ? "" : decodedCodec;
+            decoderName = decoderName == null ? "" : decoderName;
+        }
+
+        public boolean hasDolbyVisionSource() {
+            return dolbyVisionProfile > 0;
+        }
+
+        public static VideoTrackDiagnostics empty() {
+            return new VideoTrackDiagnostics("", C.INDEX_UNSET, C.INDEX_UNSET,
+                    "", "", null);
         }
     }
 

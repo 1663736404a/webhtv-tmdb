@@ -324,6 +324,20 @@ public class MpvPlayerEngine implements PlayerEngine {
     }
 
     @Override
+    public VideoPlaybackDetails getVideoPlaybackDetails() {
+        MpvPlayer.VideoTrackDiagnostics details =
+                player.getSelectedVideoTrackDiagnostics();
+        return new VideoPlaybackDetails(
+                details.sourceCodecs(),
+                details.dolbyVisionProfile(),
+                details.dolbyVisionLevel(),
+                details.decodedCodec(),
+                details.decoderName(),
+                player.getObservedHwdecCurrent(),
+                details.outputColorInfo());
+    }
+
+    @Override
     public long getDroppedFrames() {
         return player.getDroppedFrames();
     }

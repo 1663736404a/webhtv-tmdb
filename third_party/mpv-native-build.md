@@ -43,6 +43,7 @@ third_party/mpv-native-lock.json
 | NDK | `29.0.14206865`（r29），API 24 |
 | MPV | `FongMi/mpv@cca559b41ceb0bb7731cf6ef2e1f33276cd30c42`（`0.41.0-940-gcca559b41`） |
 | MediaCodec/Vulkan | FongMi 分支内建 AImageReader/AHardwareBuffer OpenGL/Vulkan 后端、sync-fd、HDR/Dolby Vision 和双 Surface OSD；不再叠加旧 `fd679c81` 或 transient patch |
+| Dolby Vision双层硬解 | `third_party/patches/mpv-android-dovi-el-surface.patch`：`vo=gpu` 只解可显示的基础层并保留 `mediacodec` 零拷贝；支持EL合成的输出让增强层独立探测复制回退，禁止两个MediaCodec共用一个AImageReader Surface |
 | Matroska代理Seek | `third_party/patches/mpv-matroska-segment-end.patch`，可Seek但HTTP总长度未知时使用MKV自身声明的Segment边界读取SeekHead/Cues |
 | FFmpeg | `FongMi/FFmpeg@04482c8d13ac27b2a9fe93f5d388929eef8af5f4`（9.0 fongmi） |
 | 本地代理Range兼容 | `third_party/patches/ffmpeg-webhtv-proxy-range.patch`，识别App内部代理验证后的206起点标记，不把第三方未知长度伪装成完整文件长度 |
@@ -153,11 +154,11 @@ scripts/build_mpv_native.sh --abi arm64-v8a --jobs 8 --work-dir /tmp/webhtv-mpv-
 3. 在独立 Python venv 中安装固定版本 Meson/Ninja及 MbedTLS 生成工具依赖。
 4. 下载构建框架和每个固定 commit，初始化 MbedTLS、FreeType、libplacebo 子模块，并校验所有发行 tar 包 SHA-256。
 5. 对固定 FFmpeg commit 应用 `third_party/patches/ffmpeg-webhtv-proxy-range.patch`，只接受App内部代理写入的精确Range起点标记，使缺少`Content-Range`的206响应仍能按请求偏移重连；它不会制造未知的资源总长度。
-6. 固定 MPV 到 FongMi 完整分支；该分支已经包含 AImageReader OpenGL/Vulkan、sync-fd、HDR/Dolby Vision、双 Surface OSD、直播状态和 Android helper scheme。WebHTV 只继续应用 `third_party/patches/mpv-stream-cb-disc-controls.patch` 与 `third_party/patches/mpv-matroska-segment-end.patch`。
+6. 固定 MPV 到 FongMi 完整分支；该分支已经包含 AImageReader OpenGL/Vulkan、sync-fd、HDR/Dolby Vision、双 Surface OSD、直播状态和 Android helper scheme。WebHTV 继续应用 `third_party/patches/mpv-stream-cb-disc-controls.patch`、`third_party/patches/mpv-android-dovi-el-surface.patch` 与 `third_party/patches/mpv-matroska-segment-end.patch`。其中 Dolby Vision 补丁恢复 main 已验证的单路基础层零拷贝行为，并为可合成增强层的输出隔离第二个解码器，避免 Android BufferQueue `connect: already connected`。
 7. 按依赖顺序构建字符集/压缩库、MbedTLS、dav1d、libxml2、FreeType、libaribcaption、FFmpeg、字体栈、shaderc、libplacebo、curl+nghttp2、libbluray、libarchive、DVD 库、rubberband 和 MPV。
 8. 把 FFmpeg 的文件名、ELF `SONAME` 和 `DT_NEEDED` 从 `libav*`/`libsw*` 等长修改为 `libmv*`/`libmw*`。
 9. 使用 NDK `llvm-strip --strip-unneeded` 处理最终库。
-10. 使用 NDK `llvm-readelf` 检查每个 SONAME、MPV 的完整依赖和 Vulkan 依赖，并检查 MPV/libplacebo/curl 版本、HTTP/2、双 Surface、Vulkan AImageReader/sync-fd、Dolby Vision、AV3A、ARIB/TTML、MMT/TLV、代理 Range 及 Matroska Segment 标记；同时拒绝动态 fontconfig/libxml2 依赖。
+10. 使用 NDK `llvm-readelf` 检查每个 SONAME、MPV 的完整依赖和 Vulkan 依赖，并检查 MPV/libplacebo/curl 版本、HTTP/2、双 Surface、Vulkan AImageReader/sync-fd、Dolby Vision增强层Surface隔离、AV3A、ARIB/TTML、MMT/TLV、代理 Range 及 Matroska Segment 标记；同时拒绝动态 fontconfig/libxml2 依赖。
 
 `scripts/verify_mpv_native_assets.sh` 对已提交 assets 执行同类校验，Android Release Action 会在 Gradle 打包四个 APK 前以 `--require-elf` 模式调用它，防止 lock、补丁、arm64/armv7 assets 或静态能力不一致的二进制进入 Release。
 
@@ -225,6 +226,7 @@ bash gradlew :app:assembleMobileArm64_v8aRelease -PfastRelease=true
 - OpenGL LUT 生效，预览竖线可见，拖动连续且无闪烁。
 - Vulkan普通播放和 LUT。
 - Vulkan 硬解时确认 `hwdec-current=mediacodec`，并在日志中确认 `Vulkan AImageReader backend` 和 `Using Vulkan YCbCr AHardwareBuffer sampling`；不应无条件回退到 `mediacodec-copy`。
+- Dolby Vision Profile 7 REMUX 在 OpenGL `vo=gpu` 下确认只有基础层解码器连接 AImageReader、`hwdec-current=mediacodec` 且能持续出帧；在 `gpu-next` 下确认增强层不会复用基础层 Surface，系统日志不得出现 `connect: already connected` 或 MediaCodec `-22`。
 - 电视直出/Dolby Vision 使用独立视频 Surface 和透明 OSD Surface，字幕与控制层可见，退出或换集不死锁。
 - MMT/TLV、TTML/ARIB 字幕、AV3A、Blu-ray/DVD ISO、压缩包播放入口分别做功能回归。
 - 文本字幕、图形字幕以及播放中切换。
