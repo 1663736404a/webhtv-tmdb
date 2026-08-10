@@ -101,6 +101,11 @@
                     tools:text="硬解" />
 
                 <com.google.android.material.textview.MaterialTextView
+                    android:id="@+id/playParams"
+                    style="@style/ControlSheetButton"
+                    android:text="@string/play_params" />
+
+                <com.google.android.material.textview.MaterialTextView
                     android:id="@+id/opening"
                     style="@style/ControlSheetButton"
                     tools:text="片头" />

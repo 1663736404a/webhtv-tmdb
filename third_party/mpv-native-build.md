@@ -39,9 +39,9 @@ third_party/mpv-native-lock.json
 
 | 组件 | 固定版本 |
 | --- | --- |
-| 构建框架/JNI参考 | `FongMi/mpv-android@69cd182ff0af0182d8114889b3ff59d2aa01546a` |
+| 构建框架/JNI参考 | `FongMi/mpv-android@99a60ad2141d5ace94453590903c2c6b9a0a2443` |
 | NDK | `29.0.14206865`（r29），API 24 |
-| MPV | `FongMi/mpv@a1bb3e18efd8e31c0a75c37ebd6ef47311ff9022`（`0.41.0-939-ga1bb3e18e`） |
+| MPV | `FongMi/mpv@cca559b41ceb0bb7731cf6ef2e1f33276cd30c42`（`0.41.0-940-gcca559b41`） |
 | MediaCodec/Vulkan | FongMi 分支内建 AImageReader/AHardwareBuffer OpenGL/Vulkan 后端、sync-fd、HDR/Dolby Vision 和双 Surface OSD；不再叠加旧 `fd679c81` 或 transient patch |
 | Matroska代理Seek | `third_party/patches/mpv-matroska-segment-end.patch`，可Seek但HTTP总长度未知时使用MKV自身声明的Segment边界读取SeekHead/Cues |
 | FFmpeg | `FongMi/FFmpeg@04482c8d13ac27b2a9fe93f5d388929eef8af5f4`（9.0 fongmi） |

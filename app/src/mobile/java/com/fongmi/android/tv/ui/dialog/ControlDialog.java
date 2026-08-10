@@ -130,6 +130,7 @@ public class ControlDialog extends BaseBottomSheetDialog implements ParseAdapter
         setControlPadding();
         setSheetBackground();
         binding.decode.setText(parent.control.action.decode.getText());
+        binding.playParams.setSelected(parent.control.action.playParams.isSelected());
         setLut();
         binding.ending.setText(parent.control.action.ending.getText());
         binding.opening.setText(parent.control.action.opening.getText());
@@ -172,6 +173,10 @@ public class ControlDialog extends BaseBottomSheetDialog implements ParseAdapter
         binding.danmaku.setOnClickListener(v -> ((Listener) requireActivity()).onDanmakuPanel());
         binding.repeat.setOnClickListener(v -> active(binding.repeat, parent.control.action.repeat));
         binding.decode.setOnClickListener(v -> click(binding.decode, parent.control.action.decode));
+        binding.playParams.setOnClickListener(v -> {
+            dismissAllowingStateLoss();
+            ((Listener) requireActivity()).onPlayParamsPanel();
+        });
         binding.codecCapability.setOnClickListener(v -> ((Listener) requireActivity()).onCodecCapabilityPanel());
         binding.panDiagnostic.setOnClickListener(v -> onPanDiagnostic());
         binding.lut.setOnClickListener(v -> onLut());
@@ -468,5 +473,7 @@ public class ControlDialog extends BaseBottomSheetDialog implements ParseAdapter
         void onKaraokeTrackPanel();
 
         void onCodecCapabilityPanel();
+
+        void onPlayParamsPanel();
     }
 }

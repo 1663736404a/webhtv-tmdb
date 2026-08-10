@@ -170,7 +170,7 @@ bash gradlew :app:assembleLeanbackArmeabi_v7aRelease
 bash gradlew :app:assembleMobileArm64_v8aRelease -PfastRelease=true
 ```
 
-快速 Release 的版本标识为 `<versionName>-fast-yyyyMMddHHmm`（当前例如 `5.5.6-fast-202607112354`），时间使用上海时区；不传 `-PfastRelease=true` 时仍执行正常 Release 优化，版本标识保持 `<versionName>-yyyyMMddHHmm`。快速包只用于临时测试，不代替正式发布包。
+快速 Release 的版本标识为 `<versionName>-fast-yyyyMMddHHmm`（当前例如 `5.6.0-fast-202608101200`），时间使用上海时区；不传 `-PfastRelease=true` 时仍执行正常 Release 优化，版本标识保持 `<versionName>-yyyyMMddHHmm`。快速包只用于临时测试，不代替正式发布包。
 
 也可以一次打常用三包：手机 64 位、电视 32 位、电视 64 位。
 
@@ -191,13 +191,13 @@ bash gradlew :app:assembleMobileArm64_v8aDebug :app:assembleLeanbackArmeabi_v7aD
 
 | ABI | MPV | FFmpeg | libplacebo | 网络后端 | 说明 |
 | --- | --- | --- | --- | --- | --- |
-| `arm64-v8a` | `0.41.0-939-ga1bb3e18e` | `04482c8d13ac`（9.0-fongmi） | `7.375.0` / `b694a21bf2dc` | curl 8.21.0 + nghttp2 1.69.0 | 已独立实编，并通过 lock、能力标记、SONAME、DT_NEEDED 与 APK 内资产哈希校验；真机播放回归待设备解锁 |
-| `armeabi-v7a` | `0.41.0-939-ga1bb3e18e` | `04482c8d13ac`（9.0-fongmi） | `7.375.0` / `b694a21bf2dc` | curl 8.21.0 + nghttp2 1.69.0 | 已独立实编，并通过同一套版本、功能和 ELF 校验；待 32 位真机播放回归 |
+| `arm64-v8a` | `0.41.0-940-gcca559b41` | `04482c8d13ac`（9.0-fongmi） | `7.375.0` / `b694a21bf2dc` | curl 8.21.0 + nghttp2 1.69.0 | 2026-08-10 已按新 lock 从源码重编，完成能力、ELF 与 APK 资产哈希校验 |
+| `armeabi-v7a` | `0.41.0-940-gcca559b41` | `04482c8d13ac`（9.0-fongmi） | `7.375.0` / `b694a21bf2dc` | curl 8.21.0 + nghttp2 1.69.0 | 2026-08-10 已按同一 lock 独立重编，完成能力、ELF 与 APK 资产哈希校验 |
 
 替换或升级 MPV native 时必须遵守：
 
 - `libmpv.so`、FFmpeg（codec/device/filter/format/util/swresample/swscale）、静态链接进 MPV 的 libplacebo、curl、nghttp2、MbedTLS 和 `libc++_shared.so` 必须按同一 ABI、同一 lock 成套构建，不能再混用旧 `libmpv.so` 与新依赖作为正式方案。
-- 当前已提交 assets 使用 MPV `a1bb3e18efd8e31c0a75c37ebd6ef47311ff9022`、FFmpeg 9.0-fongmi `04482c8d13ac27b2a9fe93f5d388929eef8af5f4`、libplacebo `b694a21bf2dc176c1e98b8a13c6421a0de5f3da5`（7.375.0/API 375）、mpv-android `69cd182ff0af0182d8114889b3ff59d2aa01546a` 和 NDK r29/API 24。curl 使用 MbedTLS 3.6.7，只启用 HTTP/HTTPS 与 HTTP/2，不包含 HTTP/3、ngtcp2、nghttp3 或 quiche。
+- 当前 native lock 使用 MPV `cca559b41ceb0bb7731cf6ef2e1f33276cd30c42`、FFmpeg 9.0-fongmi `04482c8d13ac27b2a9fe93f5d388929eef8af5f4`、libplacebo `b694a21bf2dc176c1e98b8a13c6421a0de5f3da5`（7.375.0/API 375）、mpv-android `99a60ad2141d5ace94453590903c2c6b9a0a2443` 和 NDK r29/API 24。curl 使用 MbedTLS 3.6.7，只启用 HTTP/HTTPS 与 HTTP/2，不包含 HTTP/3、ngtcp2、nghttp3 或 quiche。
 - 最新 FongMi MPV 分支已经内建重写后的 AImageReader/AHardwareBuffer OpenGL/Vulkan 后端、异步 fence、HDR/Dolby Vision、双 Surface OSD 和 Android helper scheme；旧的 `fd679c81` 不是新分支祖先，原 `mpv-aimagereader-transient-buffer.patch` 已删除，不能在新分支上重复叠加。
 - curl 与 nghttp2 静态链接进 `libmpv.so`，APK 不新增独立网络 `.so`。它增强 MPV 直接远程 HTTP/HTTPS 输入；App 自己处理的本地 HLS 代理、`stream_cb` 和 FFmpeg/lavf 路径仍按各自实现工作，不能把启用 curl 理解为所有播放请求都强制走同一后端。
 - FFmpeg 文件名、ELF `SONAME` 和所有 `DT_NEEDED` 都要从 `libav*`/`libsw*` 等长改为 `libmv*`/`libmw*`，不能只重命名文件，否则会和 `nextlib-media3ext` 内置 FFmpeg 发生 Android linker 复用冲突。
@@ -407,9 +407,17 @@ other/        Logo 图片和辅助工具
 
 ## 上游基线
 
-本项目二开起始于[原版影视](https://github.com/FongMi/TV) commit `bec0f1d2fc22f394ba05f8e63a9ef2ba7ecbba0e`，完整同步基线为原版 commit `5fdff00a602dc56e8ba756174daef20edab024f2`（上游重写历史后的等价提交为 `4573249cd6679c6becca9957f6a011bf6c4a5afd`）。2026-08-09 已审查至原版 commit `1a19fee278fa2234da725d61a53bf59b69fe9127`；因其播放器、设置和历史体系已与本项目的 Media3、MPV、IJK、缓存、诊断及观影同步实现明显分化，没有整段合并，而是选择性 cherry-pick `b8eed44d26458bb0ae1dc2722f833d81750aa356`、`28f504c491f902fbed1cff31d76d289b6e80de26`、`5ca4d2ba5ed0f2069f1524583e4261a051c40a2c`、`dd696dadcfa90a39f2e627e6f7048e51891768d8`、`b04c63ce61f7ca40226b14ecc944ddd3ad63215f`、`a7bd92541f287c5ba12a1c36d31e8b6229941e32`，并按现有架构移植 `42b3824caf1cd9271aad03aa180398a0cbb41d2a` / `bcb11b230586e7c509199c75f94cd100053b84e0` 中与播放结束态和末尾 seek 相关的安全部分。
+| 仓库 | 分支 | Commit |
+| --- | --- | --- |
+| [TV](https://github.com/FongMi/TV) | `fongmi` | `1a19fee278fa2234da725d61a53bf59b69fe9127`（`560 / 5.6.0`） |
+| [FFmpeg](https://github.com/FongMi/FFmpeg) | `release-9.0-fongmi` | `04482c8d13ac27b2a9fe93f5d388929eef8af5f4` |
+| [mpv-android](https://github.com/FongMi/mpv-android) | `fongmi` | `99a60ad2141d5ace94453590903c2c6b9a0a2443` |
+| [media](https://github.com/FongMi/media) | `release` | `2bc207851df311340767e913931ca7b28cab1794` |
+| [mpv](https://github.com/FongMi/mpv) | `fongmi` | `cca559b41ceb0bb7731cf6ef2e1f33276cd30c42` |
+| [libplacebo](https://github.com/FongMi/libplacebo) | `fongmi` | `b694a21bf2dc176c1e98b8a13c6421a0de5f3da5` |
+| [CatVodSpider](https://github.com/FongMi/CatVodSpider) | `main` | `a511a606a287089dffdd8374db75d95ec5f372b6` |
 
-FFmpeg、mpv、media、mpv-android、libplacebo 与 CatVodSpider 在 2026-07-09 至 2026-08-09 的 394 个提交已逐项复核；原生播放器整链升级、Media3 选择性移植和未合并项的依据见[审计报告](docs/fongmi-related-repos-audit-2026-08-09.md)。
+机器可读记录见 [`third_party/fongmi-repositories-lock.json`](third_party/fongmi-repositories-lock.json)。
 
 ## 免费声明与社区分享
 

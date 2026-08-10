@@ -1,7 +1,7 @@
 {
   "builder": {
     "repo": "https://github.com/FongMi/mpv-android.git",
-    "commit": "69cd182ff0af0182d8114889b3ff59d2aa01546a"
+    "commit": "99a60ad2141d5ace94453590903c2c6b9a0a2443"
   },
   "android": {
     "ndk_version": "29.0.14206865",
@@ -143,8 +143,8 @@
     },
     "mpv": {
       "repo": "https://github.com/FongMi/mpv.git",
-      "commit": "a1bb3e18efd8e31c0a75c37ebd6ef47311ff9022",
-      "version": "0.41.0-939-ga1bb3e18e",
+      "commit": "cca559b41ceb0bb7731cf6ef2e1f33276cd30c42",
+      "version": "0.41.0-940-gcca559b41",
       "describe_tag": "v0.41.0",
       "tag_repo": "https://github.com/mpv-player/mpv.git",
       "history_depth": 1600

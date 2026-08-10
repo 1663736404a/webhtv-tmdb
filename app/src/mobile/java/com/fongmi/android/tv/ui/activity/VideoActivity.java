@@ -770,6 +770,7 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         mBinding.control.title.setOnLongClickListener(view -> onChange());
         mBinding.control.right.lock.setOnClickListener(view -> onLock());
         mBinding.control.right.rotate.setOnClickListener(view -> onRotate());
+        mBinding.control.playParamsQuick.setOnClickListener(view -> onPlayParams());
         mBinding.control.fullscreen.setOnClickListener(view -> onFullscreen());
         mBinding.control.danmaku.setOnClickListener(view -> onDanmakuShow());
         mBinding.control.action.text.setOnClickListener(this::onTrack);
@@ -786,6 +787,7 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         mBinding.control.action.prev.setOnClickListener(view -> checkPrev());
         mBinding.control.action.next.setOnClickListener(view -> checkNext());
         mBinding.control.action.decode.setOnClickListener(view -> onDecode());
+        mBinding.control.action.playParams.setOnClickListener(view -> onPlayParams());
         mBinding.control.action.ending.setOnClickListener(view -> onEnding());
         mBinding.control.action.repeat.setOnClickListener(view -> onRepeat());
         mBinding.control.action.opening.setOnClickListener(view -> onOpening());
@@ -980,6 +982,7 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         mActionButtons = new HashMap<>();
         addActionButton(PlayerButtonSetting.PLAYER, mBinding.control.action.player);
         addActionButton(PlayerButtonSetting.DECODE, mBinding.control.action.decode);
+        addActionButton(PlayerButtonSetting.PLAY_PARAMS, mBinding.control.action.playParams);
         addActionButton(PlayerButtonSetting.SPEED, mBinding.control.action.speed);
         addActionButton(PlayerButtonSetting.SCALE, mBinding.control.action.scale);
         addActionButton(PlayerButtonSetting.LUT, mBinding.control.action.lut);
@@ -3521,6 +3524,11 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
     }
 
     @Override
+    public void onPlayParamsPanel() {
+        onPlayParams();
+    }
+
+    @Override
     public ActivityVideoBinding getControlBinding() {
         return mBinding;
     }
@@ -3988,8 +3996,13 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         mBinding.control.right.rotate.setVisibility(isFullscreen() && !isLock() ? View.VISIBLE : View.GONE);
         mBinding.control.fullscreen.setVisibility(isLock() ? View.GONE : View.VISIBLE);
         mBinding.control.keep.setVisibility(mHistory == null || isFullscreen() ? View.GONE : View.VISIBLE);
-        mBinding.control.osdDiagnostics.setVisibility(PlayerSetting.isOsdDiagnostics() && !player().isEmpty() ? View.VISIBLE : View.GONE);
+        boolean showPlayParams = PlayerButtonSetting.isVisible(PlayerButtonSetting.PLAY_PARAMS);
+        mBinding.control.playParamsQuick.setVisibility(!isFullscreen() && !isLock() && !player().isEmpty() && showPlayParams ? View.VISIBLE : View.GONE);
+        mBinding.control.playParamsQuick.setSelected(mOsd != null && mOsd.isDiagnosticsVisible());
+        mBinding.control.action.playParams.setVisibility(showPlayParams ? View.VISIBLE : View.GONE);
+        mBinding.control.osdDiagnostics.setVisibility(PlayerSetting.isOsdDiagnostics() && PlayerButtonSetting.isVisible(PlayerButtonSetting.PLAY_PARAMS) && !player().isEmpty() ? View.VISIBLE : View.GONE);
         mBinding.control.osdDiagnostics.setAlpha(mOsd != null && mOsd.isDiagnosticsVisible() ? 1f : 0.72f);
+        mBinding.control.action.playParams.setSelected(mOsd != null && mOsd.isDiagnosticsVisible());
         mBinding.control.parse.setVisibility(isFullscreen() && isUseParse() ? View.VISIBLE : View.GONE);
         mBinding.control.action.getRoot().setVisibility(isFullscreen() ? View.VISIBLE : View.GONE);
         mBinding.control.right.lock.setVisibility(isFullscreen() ? View.VISIBLE : View.GONE);
@@ -4014,6 +4027,14 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
     private void onOsdDiagnostics() {
         if (mOsd == null) return;
         mOsd.toggleDiagnostics();
+        hideControl();
+    }
+
+    private void onPlayParams() {
+        if (mOsd == null) return;
+        boolean visible = !mOsd.isDiagnosticsVisible();
+        PlayerSetting.putOsdDiagnostics(visible);
+        mOsd.setDiagnosticsVisible(visible);
         hideControl();
     }
 
