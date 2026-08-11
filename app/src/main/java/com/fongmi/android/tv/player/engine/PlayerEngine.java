@@ -235,7 +235,8 @@ public interface PlayerEngine {
             String decodedCodec,
             String decoderName,
             String hwdecCurrent,
-            ColorInfo outputColorInfo) {
+            ColorInfo outputColorInfo,
+            boolean dolbyVisionHdr10Fallback) {
 
         public VideoPlaybackDetails {
             sourceCodecs = sourceCodecs == null ? "" : sourceCodecs;
@@ -251,12 +252,13 @@ public interface PlayerEngine {
         public boolean hasEvidence() {
             return hasDolbyVisionSource() || !sourceCodecs.isEmpty()
                     || !decodedCodec.isEmpty() || !decoderName.isEmpty()
-                    || !hwdecCurrent.isEmpty() || outputColorInfo != null;
+                    || !hwdecCurrent.isEmpty() || outputColorInfo != null
+                    || dolbyVisionHdr10Fallback;
         }
 
         public static VideoPlaybackDetails empty() {
             return new VideoPlaybackDetails("", C.INDEX_UNSET, C.INDEX_UNSET,
-                    "", "", "", null);
+                    "", "", "", null, false);
         }
     }
 

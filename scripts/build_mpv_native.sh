@@ -10,6 +10,7 @@ MPV_AUDIO_PASSTHROUGH_PATCH="$ROOT/third_party/patches/mpv-audiotrack-native-pas
 MPV_VULKAN_CONVERSION_PATCH="$ROOT/third_party/patches/mpv-android-vulkan-conversion-default.patch"
 MPV_AIMAGEREADER_STABLE_PATCH="$ROOT/third_party/patches/mpv-aimagereader-stable-flow.patch"
 MPV_AIMAGEREADER_STABLE_SOURCE="$OVERRIDE_DIR/aimagereader-stable/video/out/hwdec/hwdec_aimagereader_vk_stable.c"
+MPV_AIMAGEREADER_STABLE_SHADER="$OVERRIDE_DIR/aimagereader-stable/video/out/hwdec/hwdec_aimagereader_vk_stable.comp"
 MPV_MATROSKA_PATCH="$ROOT/third_party/patches/mpv-matroska-segment-end.patch"
 FFMPEG_PROXY_RANGE_PATCH="$ROOT/third_party/patches/ffmpeg-webhtv-proxy-range.patch"
 FFMPEG_MEDIACODEC_STARVATION_PATCH="$ROOT/third_party/patches/ffmpeg-mediacodec-port-starvation.patch"
@@ -205,7 +206,12 @@ TOOLCHAIN="$NDK_ROOT/toolchains/llvm/prebuilt/$HOST_TAG"
 OBJCOPY="$TOOLCHAIN/bin/llvm-objcopy"
 STRIP="$TOOLCHAIN/bin/llvm-strip"
 READELF="$TOOLCHAIN/bin/llvm-readelf"
-[ -x "$OBJCOPY" ] && [ -x "$STRIP" ] && [ -x "$READELF" ] || die "NDK LLVM tools are incomplete"
+GLSLC="$NDK_ROOT/shader-tools/$HOST_TAG/glslc"
+SPIRV_VAL="$NDK_ROOT/shader-tools/$HOST_TAG/spirv-val"
+[ -x "$OBJCOPY" ] && [ -x "$STRIP" ] && [ -x "$READELF" ] && \
+  [ -x "$GLSLC" ] && [ -x "$SPIRV_VAL" ] || \
+  die "NDK LLVM/shader tools are incomplete"
+python3 "$ROOT/scripts/verify_mpv_vulkan_shader_contract.py"
 
 if [ -z "$JOBS" ]; then
   if command -v nproc >/dev/null 2>&1; then
@@ -448,8 +454,20 @@ prepare_sources() {
     die "pinned FongMi MPV is missing direct Vulkan AHardwareBuffer sampling"
   [ -f "$MPV_AIMAGEREADER_STABLE_SOURCE" ] || \
     die "missing stable Vulkan AImageReader conversion source: $MPV_AIMAGEREADER_STABLE_SOURCE"
+  [ -f "$MPV_AIMAGEREADER_STABLE_SHADER" ] || \
+    die "missing stable Vulkan AImageReader conversion shader: $MPV_AIMAGEREADER_STABLE_SHADER"
   cp "$MPV_AIMAGEREADER_STABLE_SOURCE" \
     "$deps/mpv/video/out/hwdec/hwdec_aimagereader_vk_stable.c"
+  cp "$MPV_AIMAGEREADER_STABLE_SHADER" \
+    "$deps/mpv/video/out/hwdec/hwdec_aimagereader_vk_stable.comp"
+  "$GLSLC" -fshader-stage=compute --target-env=vulkan1.2 -O \
+    -o "$deps/mpv/video/out/hwdec/hwdec_aimagereader_vk_stable_comp.spv" \
+    "$deps/mpv/video/out/hwdec/hwdec_aimagereader_vk_stable.comp"
+  "$SPIRV_VAL" --target-env vulkan1.2 \
+    "$deps/mpv/video/out/hwdec/hwdec_aimagereader_vk_stable_comp.spv"
+  "$GLSLC" -fshader-stage=compute --target-env=vulkan1.2 -O -mfmt=c \
+    -o "$deps/mpv/video/out/hwdec/hwdec_aimagereader_vk_stable_comp.inc" \
+    "$deps/mpv/video/out/hwdec/hwdec_aimagereader_vk_stable.comp"
   [ -f "$MPV_DISC_PATCH" ] || die "missing MPV disc controls patch: $MPV_DISC_PATCH"
   git -C "$deps/mpv" apply --check "$MPV_DISC_PATCH"
   git -C "$deps/mpv" apply "$MPV_DISC_PATCH"
@@ -548,6 +566,7 @@ verify_directory() {
   grep -Fq "Using device native output sample rate for passthrough compatibility" <<<"$version_strings" || die "MPV AudioTrack passthrough native-rate patch missing from $directory/libmpv.so"
   grep -Fq "WebHTV Vulkan auto backend prefers stable GPU conversion" <<<"$version_strings" || die "MPV Android Vulkan stable conversion-default patch missing from $directory/libmpv.so"
   grep -Fq "WebHTV Vulkan auto uses a queue-safe four-output bounded-fence pool" <<<"$version_strings" || die "MPV Android Vulkan queue-safe conversion pool missing from $directory/libmpv.so"
+  grep -Fq "CPU-precomputed UV transform" <<<"$version_strings" || die "MPV Android Vulkan low-power coordinate transform missing from $directory/libmpv.so"
   grep -Fq "Stable Vulkan conversion preserves Dolby Vision raw YUV component mapping" <<<"$version_strings" || die "MPV Android Vulkan stable Dolby Vision mapping missing from $directory/libmpv.so"
   grep -Fq "WebHTV Vulkan keeps AImage until the conversion fence completes" <<<"$version_strings" || die "MPV Android Vulkan stable AImage lifetime patch missing from $directory/libmpv.so"
   grep -Fq "WebHTV AImageReader uses stable release/acquire flow" <<<"$version_strings" || die "MPV Android stable AImageReader release/acquire patch missing from $directory/libmpv.so"

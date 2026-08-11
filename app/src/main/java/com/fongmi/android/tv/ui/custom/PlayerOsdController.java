@@ -26,6 +26,7 @@ import androidx.media3.common.Tracks;
 
 import com.fongmi.android.tv.App;
 import com.fongmi.android.tv.R;
+import com.fongmi.android.tv.player.DolbyVisionFormatLabel;
 import com.fongmi.android.tv.player.PlayerManager;
 import com.fongmi.android.tv.player.PlaybackRoute;
 import com.fongmi.android.tv.player.engine.PlayerCacheState;
@@ -322,9 +323,11 @@ public class PlayerOsdController {
         String renderDiagnostics = player.isMpv() ? player.getRenderDiagnostics() : "";
         String runtimeDiagnostics = player.isMpv() ? player.getRuntimeDiagnostics() : "";
         String frameTiming = player.isExo() ? summarizeFrameTiming() : "";
-        String videoText = summarizeVideo(video, player, snapshot.videoDecoderName(), getVideoTrackState(player));
-        String sourceVideoText = summarizeSourceVideo(
-                player.getVideoPlaybackDetails(), video);
+        PlayerEngine.VideoPlaybackDetails videoDetails =
+                player.getVideoPlaybackDetails();
+        String videoText = summarizeVideo(video, player,
+                snapshot.videoDecoderName(), getVideoTrackState(player),
+                videoDetails);
         AudioTrackState audioTrack = getAudioTrackState(player);
         String audioText = summarizeAudio(audio, audioTrack, snapshot.audioDecoderName());
         String render = PlayerSetting.getRender() == PlayerSetting.RENDER_SURFACE ? "Surface" : "Texture";
@@ -340,7 +343,6 @@ public class PlayerOsdController {
         String main = join("\n",
                 TextUtils.isEmpty(error) ? "" : row("错误", error),
                 row("视频", videoText),
-                TextUtils.isEmpty(sourceVideoText) ? "" : row("源片", sourceVideoText),
                 row("音频", audioText),
                 row("网络", network),
                 player.isExo() ? row("保流畅", strategy) : "",
@@ -405,17 +407,29 @@ public class PlayerOsdController {
         return "ERROR_CODE_DECODER_INIT_FAILED".equals(code) || "ERROR_CODE_DECODER_QUERY_FAILED".equals(code) || "ERROR_CODE_DECODING_FAILED".equals(code);
     }
 
-    private String summarizeVideo(Format format, PlayerManager player, String decoder, VideoTrackState videoTrack) {
+    private String summarizeVideo(Format format, PlayerManager player,
+                                  String decoder,
+                                  VideoTrackState videoTrack,
+                                  PlayerEngine.VideoPlaybackDetails details) {
         if (videoTrack.hasTracks()) format = mergeFormat(format, videoTrack.format());
         String size = getSize(format, player);
         String fps = getFrameRate(format, player);
         String bitrate = getBitrate(format, player);
-        String codec = format == null || TextUtils.isEmpty(format.codecs) ? "codec -" : "codec " + format.codecs;
+        boolean dolbyVision = details != null
+                && details.hasDolbyVisionSource();
+        String formatName = dolbyVision
+                ? DolbyVisionFormatLabel.formatName(details)
+                : getVideoCodecName(format);
+        String codecValue = dolbyVision
+                ? DolbyVisionFormatLabel.codecText(details)
+                : format == null ? "" : format.codecs;
+        String codec = TextUtils.isEmpty(codecValue)
+                ? "codec -" : "codec " + codecValue;
         String color = getColor(format).replace("color ", "色彩 ");
         String support = videoTrack.hasTracks() && !videoTrack.isHandled() ? supportText(videoTrack.support()) : "";
         String decode = "decoder " + emptyDash(decoderText(player, decoder));
         return join(" / ",
-                "格式 " + emptyDash(getVideoCodecName(format)),
+                "格式 " + emptyDash(formatName),
                 "分辨率 " + emptyDash(size),
                 "帧率 " + emptyDash(fps),
                 "码率 " + emptyDash(bitrate),
@@ -459,19 +473,6 @@ public class PlayerOsdController {
         }
         if (player.isIjk()) return player.isHardDecode() ? "IJK mediacodec" : "IJK ffmpeg";
         return "";
-    }
-
-    private String summarizeSourceVideo(
-            PlayerEngine.VideoPlaybackDetails details, Format current) {
-        if (details == null || !details.hasDolbyVisionSource()) return "";
-        String profile = String.format(Locale.US, "%02d",
-                details.dolbyVisionProfile());
-        String codecs = TextUtils.isEmpty(details.sourceCodecs())
-                ? "dvhe." + profile : details.sourceCodecs();
-        String output = outputHdrName(current);
-        return "Dolby Vision Profile " + details.dolbyVisionProfile()
-                + "（DV." + profile + "） / " + codecs
-                + " / 已回退" + (TextUtils.isEmpty(output) ? "" : "到 " + output);
     }
 
     private String audioDecoderText(String decoder) {

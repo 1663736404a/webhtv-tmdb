@@ -131,6 +131,22 @@ public class ExoUtil {
             boolean tunnelingFallbackAttempted,
             @Nullable ExoDecoderRuntimeSession decoderRuntimeSession,
             ExoFrameSchedulingPlayerSettings frameSchedulingSettings) {
+        return buildPlayer(
+                decode,
+                listener,
+                tunnelingFallbackAttempted,
+                decoderRuntimeSession,
+                frameSchedulingSettings,
+                null);
+    }
+
+    public static ExoPlayer buildPlayer(
+            int decode,
+            Player.Listener listener,
+            boolean tunnelingFallbackAttempted,
+            @Nullable ExoDecoderRuntimeSession decoderRuntimeSession,
+            ExoFrameSchedulingPlayerSettings frameSchedulingSettings,
+            @Nullable ExoDolbyVisionPlaybackState dolbyVisionPlaybackState) {
         ExoFrameSchedulingPlayerSettings schedulingSettings =
                 frameSchedulingSettings == null
                         ? ExoFrameSchedulingPlayerSettings.capture(decode)
@@ -148,7 +164,8 @@ public class ExoUtil {
                         decode,
                         automatic ? decoderRuntimeSession : null,
                         decoderOutput,
-                        schedulingSettings))
+                        schedulingSettings,
+                        dolbyVisionPlaybackState))
                 .setMediaSourceFactory(buildMediaSourceFactory())
                 .setVideoChangeFrameRateStrategy(ExoPerformanceSetting.getFrameRateStrategy());
         if (PlaybackPerformanceSetting.isHighBufferEnabled()) builder.setLoadControl(buildEnhancedLoadControl());
@@ -537,7 +554,8 @@ public class ExoUtil {
             int decode,
             @Nullable ExoDecoderRuntimeSession decoderRuntimeSession,
             ExoDecoderRuntimeSession.OutputConfig decoderOutput,
-            ExoFrameSchedulingPlayerSettings frameSchedulingSettings) {
+            ExoFrameSchedulingPlayerSettings frameSchedulingSettings,
+            @Nullable ExoDolbyVisionPlaybackState dolbyVisionPlaybackState) {
         return buildRenderersFactory(
                 getAudioRenderMode(),
                 getVideoRenderMode(decode),
@@ -547,7 +565,8 @@ public class ExoUtil {
                         && PlaybackPerformanceSetting.isSoftVideoTuneEnabled(),
                 decoderRuntimeSession,
                 decoderOutput,
-                frameSchedulingSettings);
+                frameSchedulingSettings,
+                dolbyVisionPlaybackState);
     }
 
     static RenderersFactory buildRenderersFactory() {
@@ -571,7 +590,8 @@ public class ExoUtil {
                                         == ExoPerformanceSetting
                                         .CODEC_QUEUE_SYNC),
                         dynamicSchedulingEnabled,
-                        codecQueueMode));
+                        codecQueueMode),
+                null);
     }
 
     private static RenderersFactory buildRenderersFactory(
@@ -582,7 +602,8 @@ public class ExoUtil {
             boolean softVideoTune,
             @Nullable ExoDecoderRuntimeSession decoderRuntimeSession,
             ExoDecoderRuntimeSession.OutputConfig decoderOutput,
-            ExoFrameSchedulingPlayerSettings frameSchedulingSettings) {
+            ExoFrameSchedulingPlayerSettings frameSchedulingSettings,
+            @Nullable ExoDolbyVisionPlaybackState dolbyVisionPlaybackState) {
         ExoFrameSchedulingExperimentPolicy.Decision frameSchedulingDecision =
                 frameSchedulingSettings.decision();
         DefaultRenderersFactory factory = new FfmpegRenderersFactory(
@@ -594,7 +615,8 @@ public class ExoUtil {
                 softVideoTune,
                 decoderRuntimeSession,
                 decoderOutput,
-                frameSchedulingDecision) {
+                frameSchedulingDecision,
+                dolbyVisionPlaybackState) {
             @Override
             protected AudioSink buildAudioSink(@NonNull Context context, boolean enableFloatOutput, boolean enableAudioOutputPlaybackParams) {
                 return ExoUtil.buildAudioSink(context, enableFloatOutput, enableAudioOutputPlaybackParams);
@@ -679,6 +701,8 @@ public class ExoUtil {
         private final ExoDecoderRuntimeSession.OutputConfig decoderOutput;
         private final ExoFrameSchedulingExperimentPolicy.Decision
                 frameSchedulingDecision;
+        @Nullable private final ExoDolbyVisionPlaybackState
+                dolbyVisionPlaybackState;
 
         FfmpegRenderersFactory(
                 Context context,
@@ -690,7 +714,9 @@ public class ExoUtil {
                 @Nullable ExoDecoderRuntimeSession decoderRuntimeSession,
                 ExoDecoderRuntimeSession.OutputConfig decoderOutput,
                 ExoFrameSchedulingExperimentPolicy.Decision
-                        frameSchedulingDecision) {
+                        frameSchedulingDecision,
+                @Nullable ExoDolbyVisionPlaybackState
+                        dolbyVisionPlaybackState) {
             super(context);
             this.audioRenderMode = audioRenderMode;
             this.videoRenderMode = videoRenderMode;
@@ -700,6 +726,7 @@ public class ExoUtil {
             this.decoderRuntimeSession = decoderRuntimeSession;
             this.decoderOutput = decoderOutput;
             this.frameSchedulingDecision = frameSchedulingDecision;
+            this.dolbyVisionPlaybackState = dolbyVisionPlaybackState;
         }
 
         @Override
@@ -742,7 +769,10 @@ public class ExoUtil {
                         enableDecoderFallback,
                         eventHandler,
                         eventListener,
-                        frameSchedulingDecision));
+                        frameSchedulingDecision,
+                        PlaybackPerformanceSetting
+                                .isDv7Hdr10FallbackEnabled(),
+                        dolbyVisionPlaybackState));
             } catch (Throwable ignored) {
             }
             if (videoRenderMode == EXTENSION_RENDERER_MODE_OFF) return;
@@ -776,7 +806,13 @@ public class ExoUtil {
     }
 
     private static final class DolbyVisionHdr10FallbackRenderer extends MediaCodecVideoRenderer {
-        DolbyVisionHdr10FallbackRenderer(Context context, MediaCodecAdapter.Factory factory, MediaCodecSelector selector, long joiningMs, boolean decoderFallback, Handler handler, VideoRendererEventListener listener, ExoFrameSchedulingExperimentPolicy.Decision frameSchedulingDecision) {
+
+        private final boolean dv7FallbackEnabled;
+        @Nullable private final ExoDolbyVisionPlaybackState playbackState;
+        @Nullable private Format pendingSourceFormat;
+        @Nullable private Format pendingOutputFormat;
+
+        DolbyVisionHdr10FallbackRenderer(Context context, MediaCodecAdapter.Factory factory, MediaCodecSelector selector, long joiningMs, boolean decoderFallback, Handler handler, VideoRendererEventListener listener, ExoFrameSchedulingExperimentPolicy.Decision frameSchedulingDecision, boolean dv7FallbackEnabled, @Nullable ExoDolbyVisionPlaybackState playbackState) {
             super(ExoFrameSchedulingRendererSettings.from(frameSchedulingDecision)
                     .apply(new Builder(context)
                             .setCodecAdapterFactory(factory)
@@ -788,13 +824,15 @@ public class ExoUtil {
                             .setMaxDroppedFramesToNotify(
                                     DefaultRenderersFactory
                                             .MAX_DROPPED_VIDEO_FRAME_COUNT_TO_NOTIFY)));
+            this.dv7FallbackEnabled = dv7FallbackEnabled;
+            this.playbackState = playbackState;
         }
 
         @Override public String getName() { return "MediaCodecVideoRenderer-DV-HDR10"; }
 
         @Override
         protected int supportsFormat(MediaCodecSelector selector, Format format) throws androidx.media3.exoplayer.mediacodec.MediaCodecUtil.DecoderQueryException {
-            if (!isFallback(format)) return C.FORMAT_UNSUPPORTED_TYPE;
+            if (!shouldUseDolbyVisionHdr10Fallback(format, dv7FallbackEnabled)) return C.FORMAT_UNSUPPORTED_TYPE;
             Format hdr10 = asHdr10(format);
             int support = super.supportsFormat(selector, hdr10);
             if (SpiderDebug.isEnabled()) SpiderDebug.log("exo-dv", "DV HDR10 fallback support=%d codecs=%s size=%dx%d", support, format.codecs, format.width, format.height);
@@ -803,19 +841,38 @@ public class ExoUtil {
 
         @Override
         protected List<MediaCodecInfo> getDecoderInfos(MediaCodecSelector selector, Format format, boolean secure) throws androidx.media3.exoplayer.mediacodec.MediaCodecUtil.DecoderQueryException {
-            if (!isFallback(format)) return List.of();
+            if (!shouldUseDolbyVisionHdr10Fallback(format, dv7FallbackEnabled)) return List.of();
             return super.getDecoderInfos(selector, asHdr10(format), secure);
         }
 
         @Override
         protected MediaCodecAdapter.Configuration getMediaCodecConfiguration(MediaCodecInfo info, Format format, MediaCrypto crypto, float rate) {
-            return super.getMediaCodecConfiguration(info, isFallback(format) ? asHdr10(format) : format, crypto, rate);
+            if (!shouldUseDolbyVisionHdr10Fallback(format, dv7FallbackEnabled)) {
+                return super.getMediaCodecConfiguration(info, format, crypto, rate);
+            }
+            pendingSourceFormat = format;
+            pendingOutputFormat = asHdr10(format);
+            return super.getMediaCodecConfiguration(info, pendingOutputFormat, crypto, rate);
         }
 
-        private static boolean isFallback(Format format) {
-            if (format == null || !MimeTypes.VIDEO_DOLBY_VISION.equals(format.sampleMimeType) || format.codecs == null) return false;
-            String codecs = format.codecs.toLowerCase(java.util.Locale.US);
-            return codecs.startsWith("dvhe.05.") || codecs.startsWith("dvh1.05.") || codecs.startsWith("dvhe.07.") || codecs.startsWith("dvh1.07.");
+        @Override
+        protected void onCodecInitialized(String name, MediaCodecAdapter.Configuration configuration, long initializedTimestampMs, long initializationDurationMs) {
+            super.onCodecInitialized(name, configuration, initializedTimestampMs, initializationDurationMs);
+            if (playbackState != null && pendingSourceFormat != null
+                    && pendingOutputFormat != null) {
+                playbackState.activate(pendingSourceFormat, pendingOutputFormat);
+            }
+        }
+
+        @Override
+        protected void onDisabled() {
+            try {
+                super.onDisabled();
+            } finally {
+                pendingSourceFormat = null;
+                pendingOutputFormat = null;
+                if (playbackState != null) playbackState.reset();
+            }
         }
 
         private static Format asHdr10(Format format) {
@@ -824,6 +881,18 @@ public class ExoUtil {
                     : format.colorInfo.buildUpon().setColorSpace(C.COLOR_SPACE_BT2020).setColorRange(C.COLOR_RANGE_LIMITED).setColorTransfer(C.COLOR_TRANSFER_ST2084).build();
             return format.buildUpon().setSampleMimeType(MimeTypes.VIDEO_H265).setCodecs(null).setColorInfo(color).build();
         }
+    }
+
+    static boolean shouldUseDolbyVisionHdr10Fallback(
+            Format format, boolean dv7FallbackEnabled) {
+        if (format == null
+                || !MimeTypes.VIDEO_DOLBY_VISION.equals(format.sampleMimeType)
+                || format.codecs == null) return false;
+        String codecs = format.codecs.toLowerCase(java.util.Locale.US);
+        if (codecs.startsWith("dvhe.05.")
+                || codecs.startsWith("dvh1.05.")) return true;
+        return dv7FallbackEnabled && (codecs.startsWith("dvhe.07.")
+                || codecs.startsWith("dvh1.07."));
     }
 
     private static class AutomaticVideoConstraintController implements AnalyticsListener {
