@@ -360,11 +360,12 @@ keyPassword=your_key_password
 
 - `app/libs/*.aar`:内置 Hook、TVBus、Thunder、ForceTech、JianPian 播放能力依赖。
 - `third_party/maven`:已生成的 `androidx.media3:*:1.11.0-alpha01-fongmi` 本地 Maven 产物，以及定制 `nextlib-media3ext`。
-- `third_party/media-lock.json`:记录 Media3 锁定版本,升级 Media3 时使用(配套脚本 `scripts/build_media_deps.sh`)。
+- `third_party/media-lock.json`:记录 Media3、nextlib、FFmpeg、NDK 与 CMake 的精确构建输入，配套脚本为 `scripts/build_media_deps.sh`。
 - `third_party/patches/media3-*.patch`:在锁定的 FongMi Media3 源码上叠加本项目补丁；`media3-upstream-playback-fixes-2026-08.patch` 选择性移植 AV1/HEVC HDR 元数据、scrub、DASH、LL-HLS、MP4 IT.35、MediaSession 和 detached Surface 等上游修复，`media3-danmaku-live.patch` 提供 WebSocket 实时弹幕的批量接收、有界队列、TTL、每帧处理上限和聚合统计。
+- `third_party/patches/nextlib-*.patch`:在 `anilbeesetti/nextlib@6ff6cf9d0820382b3c233d018c52e4163b09d345` 上叠加 FFmpeg 软解负载控制和 AV3A/libarcdav3a 支持。
 - `third_party/mpv-player-jni`:MPV `libplayer.so` JNI 桥接源码，修改后用 `scripts/build_mpv_player_jni.sh` 重建。
 - `app/src/*/assets/mpv-libs/*`:随 APK 打包的 MPV native 库和 JNI 桥接库。
-- `nextlib-media3ext`:`io.github.anilbeesetti:nextlib-media3ext:1.10.0-0.12.1-fongmi-softload`,提供 FFmpeg renderer。
+- `nextlib-media3ext`:`io.github.anilbeesetti:nextlib-media3ext:1.10.0-0.12.1-fongmi-softload-av3a-r1`，提供 FFmpeg renderer；内置 FongMi FFmpeg `04482c8d13ac27b2a9fe93f5d388929eef8af5f4` 和静态链接的 `libarcdav3a`，Exo 可软解 `audio/av3a`，并在输出设备不接受源多声道 PCM 时下混到立体声。
 
 `settings.gradle` 中的依赖顺序是仓库本地 `third_party/maven`、Maven Central、Google Maven、`app/libs` 和 JitPack。`app/build.gradle` 会强制所有 `androidx.media3` 依赖使用 `1.11.0-alpha01-fongmi`，避免传递依赖拉回官方版本。
 
@@ -377,6 +378,15 @@ bash gradlew :app:assembleMobileArm64_v8aDebug :app:assembleLeanbackArm64_v8aDeb
 ```
 
 脚本会按 `third_party/media-lock.json` 检出锁定提交、应用全部 Media3 补丁并发布到 `third_party/maven`。上游播放器修复及其精确移植方式记录在 lock 和[相关仓库提交审计](docs/fongmi-related-repos-audit-2026-08-09.md)中；`media3-danmaku-live.patch` 还包含 Media3 渲染侧 Robolectric 压力测试。App 测试使用 MockWebServer 模拟 WebSocket，MockWebServer 仅属于 `testImplementation`，不会进入正式 APK。发布 GitHub Action 会先运行完整 WebSocket 弹幕单测，再构建四个 release APK。
+
+只重建 nextlib/FFmpeg AV3A 扩展时使用：
+
+```bash
+export ANDROID_HOME="$HOME/Library/Android/sdk"
+scripts/build_media_deps.sh --nextlib-only
+```
+
+该命令使用 NDK `28.2.13676358`、CMake `3.22.1` 为 `arm64-v8a` 和 `armeabi-v7a` 重编 FFmpeg/libarcdav3a，校验两端 `libavcodec.so` 的 AV3A 标记后发布到 `third_party/maven`。真实样片来源、SHA-256、实机步骤和验收结果见 [Exo AV3A 验收记录](docs/exo-av3a-acceptance-2026-08-11.md)。
 
 ### 常见构建失败
 
