@@ -3109,7 +3109,14 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
                 || lower.contains("lavf")
                 || lower.contains("demux")
                 || lower.contains("codec")
-                || lower.contains("track");
+                || lower.contains("track")
+                || lower.contains("aimagereader")
+                || lower.contains("vulkan")
+                || lower.contains("fence")
+                || lower.contains("bufferqueue")
+                || lower.contains("surface pool")
+                || lower.contains("conversion pool")
+                || lower.contains("mediacodec output");
     }
 
     private void resetFailureSignals() {
