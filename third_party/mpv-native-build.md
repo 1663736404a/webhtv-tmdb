@@ -45,7 +45,7 @@ third_party/mpv-native-lock.json
 | MediaCodec/Vulkan | FongMi 分支内建 AImageReader/AHardwareBuffer OpenGL/Vulkan 后端、sync-fd、HDR/Dolby Vision 和双 Surface OSD；不再叠加旧 `fd679c81` 或 transient patch |
 | Dolby Vision双层硬解 | `third_party/patches/mpv-android-dovi-el-surface.patch`：把 GPU 杜比元数据处理与独立增强层解码拆成两项能力；Android AImageReader 只提供单路生产者 Surface，因此 `gpu-next` 保留 DV5 映射、DV 来源识别与 HDR10 基础层回退，但不启动第二个无 Surface 的 `mediacodec-copy`；非 Android 输出仍可显式声明 EL 合成能力 |
 | AudioTrack音频直通 | `third_party/patches/mpv-audiotrack-native-passthrough-rate.patch`：恢复 main 已验证的行为，SPDIF/IEC61937 同样采用设备原生输出采样率，避免老机顶盒以 192 kHz 建轨后功放无法锁定 Dolby 音频 |
-| Vulkan硬解稳定性与功耗 | `third_party/patches/mpv-android-vulkan-conversion-default.patch`：`auto` 优先使用 GPU conversion（compute，必要时 fragment），规避部分 Adreno 驱动在 direct AHardwareBuffer/sync-fd 路径卡死；`third_party/patches/mpv-aimagereader-stable-flow.patch` 恢复 `v5.5.6-202608072014` 已验证的 MediaCodec 输出释放、回调序列领取和短暂缺帧保留逻辑，移除新版 pending-frame/严格时间戳匹配造成的首帧卡死；稳定 shader 保持与 Vulkan 核心下限兼容的 `16×8` workgroup，并把裁剪归一化除法改为 CPU 每帧预计算，减少 4K 逐像素 GPU 运算；显式 `direct` 仍保留，conversion 初始化不可用时才回退 direct |
+| Vulkan硬解稳定性与功耗 | `auto` 通过 `mpv-android-vulkan-smart-backend.patch` 恢复优先 direct AHardwareBuffer 采样，避免 HDR 默认执行全分辨率转换；direct 不支持时回退 queue-safe stable pool，再回退通用 conversion。显式 `stable` 保留给问题驱动，App 在自动模式发生视频输出错误或已识别首帧超时时会重建为 stable，并按设备环境记忆。stable 额外尝试两种 packed RGB10 storage 格式，最后才扩大到 RGBA16F。 |
 | Matroska代理Seek | `third_party/patches/mpv-matroska-segment-end.patch`，可Seek但HTTP总长度未知时使用MKV自身声明的Segment边界读取SeekHead/Cues |
 | FFmpeg | `FongMi/FFmpeg@04482c8d13ac27b2a9fe93f5d388929eef8af5f4`（9.0 fongmi） |
 | 本地代理Range兼容 | `third_party/patches/ffmpeg-webhtv-proxy-range.patch`，识别App内部代理验证后的206起点标记，不把第三方未知长度伪装成完整文件长度 |
@@ -227,7 +227,7 @@ bash gradlew :app:assembleMobileArm64_v8aRelease -PfastRelease=true
 - OpenGL普通播放、硬解状态。
 - OpenGL LUT 生效，预览竖线可见，拖动连续且无闪烁。
 - Vulkan普通播放和 LUT。
-- Vulkan 硬解时确认 `hwdec-current=mediacodec`，并在默认 `auto` 模式日志中确认 `WebHTV Vulkan auto backend prefers stable GPU conversion`、`WebHTV AImageReader uses stable release/acquire flow` 和带有 `workgroup 16x8, CPU-precomputed UV transform` 的 `Using Vulkan AHardwareBuffer stable GPU conversion`；不应出现 direct 的 `Using Vulkan YCbCr AHardwareBuffer sampling`，也不应无条件回退到 `mediacodec-copy`。
+- Vulkan 硬解时确认 `hwdec-current=mediacodec`，默认 `auto` 日志应出现 `WebHTV Vulkan auto backend prefers direct AHardwareBuffer sampling` 和 `Using Vulkan YCbCr AHardwareBuffer sampling`；仅 direct 不支持或自动恢复后才应出现 stable conversion，且不得无条件回退到 `mediacodec-copy`。
 - Dolby Vision Profile 7 REMUX 在 OpenGL `vo=gpu` 下确认只有基础层解码器连接 AImageReader、`hwdec-current=mediacodec` 且能持续出帧；在 `gpu-next` 下确认增强层不会复用基础层 Surface，系统日志不得出现 `connect: already connected` 或 MediaCodec `-22`。
 - 电视直出/Dolby Vision 使用独立视频 Surface 和透明 OSD Surface，字幕与控制层可见，退出或换集不死锁。
 - MPV 音频直通在 HDMI 功放链路分别验证 AC3、E-AC3 与 TrueHD/Atmos，确认功放能锁定格式并亮灯；日志应出现设备原生输出采样率，不得回退为 PCM。

@@ -185,7 +185,7 @@ verify_abi() {
   contains_string "$directory/libmpv.so" "Direct Dolby Vision initialization failed"
   contains_string "$directory/libmpv.so" "video output has no queue-safe EL decoder"
   contains_string "$directory/libmpv.so" "Using device native output sample rate for passthrough compatibility"
-  contains_string "$directory/libmpv.so" "WebHTV Vulkan auto backend prefers stable GPU conversion"
+  contains_string "$directory/libmpv.so" "WebHTV Vulkan auto backend prefers direct AHardwareBuffer sampling"
   contains_string "$directory/libmpv.so" "WebHTV Vulkan auto uses a queue-safe four-output bounded-fence pool"
   contains_string "$directory/libmpv.so" "CPU-precomputed UV transform"
   contains_string "$directory/libmpv.so" "Stable Vulkan conversion preserves Dolby Vision raw YUV component mapping"

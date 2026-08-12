@@ -27,6 +27,7 @@ import com.fongmi.android.tv.player.exo.TrackUtil;
 import com.fongmi.android.tv.player.lut.MpvLutShader;
 import com.fongmi.android.tv.player.mpv.MpvConfigStore;
 import com.fongmi.android.tv.player.mpv.MpvAutoControlPolicy;
+import com.fongmi.android.tv.player.mpv.MpvVulkanBackendPolicy;
 import com.fongmi.android.tv.setting.PlayerSetting;
 import com.fongmi.android.tv.setting.MpvPerformanceSetting;
 import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
@@ -49,6 +50,9 @@ public class MpvPlayerEngine implements PlayerEngine {
     private boolean retriedFormat;
     private boolean surfaceDirect;
     private Boolean surfaceDirectOverride;
+    private String vulkanBackendOverride;
+    private String vulkanBackend = MpvVulkanBackendPolicy.AUTO;
+    private boolean vulkanRenderer;
     private final BiConsumer<Integer, Integer> videoSizeProbeListener;
     private int decode;
 
@@ -250,6 +254,15 @@ public class MpvPlayerEngine implements PlayerEngine {
 
     public void setSurfaceDirectOverride(@Nullable Boolean value) {
         surfaceDirectOverride = value;
+    }
+
+    public void setVulkanBackendOverride(@Nullable String value) {
+        vulkanBackendOverride = value;
+    }
+
+    public boolean shouldFallbackVulkanToStable() {
+        return vulkanRenderer && MpvVulkanBackendPolicy.isAutomaticConfig()
+                && !MpvVulkanBackendPolicy.STABLE.equals(vulkanBackend);
     }
 
     public MpvPlayer.AutoCacheBaselineResult applyAutoCacheBaseline(
@@ -542,6 +555,15 @@ public class MpvPlayerEngine implements PlayerEngine {
         boolean nativeVulkan = MPVLib.isBundledVulkanEnabled(App.get());
         boolean deviceVulkan = MPVLib.isDeviceVulkan13Capable(App.get());
         boolean useVulkan = !surfaceDirect && requestVulkan && nativeVulkan && deviceVulkan;
+        vulkanRenderer = useVulkan;
+        String configuredBackend = MpvVulkanBackendPolicy.configuredBackend();
+        boolean automaticBackend = configuredBackend.isEmpty()
+                || MpvVulkanBackendPolicy.AUTO.equals(configuredBackend);
+        String automaticOverride = vulkanBackendOverride != null
+                ? vulkanBackendOverride : MpvVulkanBackendPolicy.automaticOverride();
+        vulkanBackend = automaticBackend && !automaticOverride.isEmpty()
+                ? automaticOverride
+                : configuredBackend.isEmpty() ? MpvVulkanBackendPolicy.AUTO : configuredBackend;
         boolean useGpuNext = !surfaceDirect && (useVulkan || decode != HARD);
         if (requestVulkan && !surfaceDirect && !useVulkan) SpiderDebug.log("player-engine", "mpv render requested=vulkan but unavailable native=%s device=%s; fallback=opengl", nativeVulkan, deviceVulkan);
         SpiderDebug.log("player-engine", "mpv output mode=%s direct=%s render requested=%s nativeVulkan=%s deviceVulkan=%s decode=%s actual=%s/%s", MpvPerformanceSetting.getOutputModeText(), surfaceDirect, requestVulkan ? "vulkan" : "opengl", nativeVulkan, deviceVulkan, decode == HARD ? "hard" : "soft", surfaceDirect ? "surface" : useVulkan ? "vulkan" : "opengl", surfaceDirect ? "mediacodec_embed" : useGpuNext ? "gpu-next" : "gpu");
@@ -563,6 +585,9 @@ public class MpvPlayerEngine implements PlayerEngine {
                 .option("video-sync", MpvPerformanceSetting.getSyncOption())
                 .option("interpolation", MpvPerformanceSetting.isInterpolation() ? "yes" : "no")
                 .option("hls-bitrate", MpvPerformanceSetting.getHlsBitrateOption());
+        if (useVulkan && automaticBackend && !automaticOverride.isEmpty()) {
+            builder.option(MpvVulkanBackendPolicy.OPTION, automaticOverride);
+        }
         applySoftDecodeOptions(builder);
         if (surfaceDirect) {
             builder.vo("mediacodec_embed")

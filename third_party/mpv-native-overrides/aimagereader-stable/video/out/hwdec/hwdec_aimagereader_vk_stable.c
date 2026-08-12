@@ -491,12 +491,14 @@ static VkFormat choose_output_format(
     bool high_depth = source_is_high_depth(p, desc, props, data_space);
     const VkFormat high_depth_candidates[] = {
         VK_FORMAT_A2B10G10R10_UNORM_PACK32,
+        VK_FORMAT_A2R10G10B10_UNORM_PACK32,
         VK_FORMAT_R16G16B16A16_SFLOAT,
         VK_FORMAT_R8G8B8A8_UNORM,
     };
     const VkFormat low_depth_candidates[] = {
         VK_FORMAT_R8G8B8A8_UNORM,
         VK_FORMAT_A2B10G10R10_UNORM_PACK32,
+        VK_FORMAT_A2R10G10B10_UNORM_PACK32,
         VK_FORMAT_R16G16B16A16_SFLOAT,
     };
     const VkFormat *candidates =
@@ -968,6 +970,7 @@ static int output_sample_depth(VkFormat format)
 {
     switch (format) {
     case VK_FORMAT_A2B10G10R10_UNORM_PACK32:
+    case VK_FORMAT_A2R10G10B10_UNORM_PACK32:
         return 10;
     case VK_FORMAT_R16G16B16A16_SFLOAT:
         return 16;
