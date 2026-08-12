@@ -112,6 +112,11 @@ public interface PlayerEngine {
         return "";
     }
 
+    /** Renderer-specific GPU timing/load. Implementations must label non-system estimates. */
+    default String getGpuLoadDiagnostics() {
+        return "";
+    }
+
     /** Source-track identity and runtime decode/output facts for the selected video track. */
     default VideoPlaybackDetails getVideoPlaybackDetails() {
         return VideoPlaybackDetails.empty();

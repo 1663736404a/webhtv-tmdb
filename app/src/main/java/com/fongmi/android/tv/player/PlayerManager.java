@@ -627,6 +627,10 @@ public class PlayerManager implements ParseCallback {
         return engine == null ? "" : engine.getRuntimeDiagnostics();
     }
 
+    public String getGpuLoadDiagnostics() {
+        return engine == null ? "" : engine.getGpuLoadDiagnostics();
+    }
+
     public PlayerEngine.VideoPlaybackDetails getVideoPlaybackDetails() {
         return engine == null
                 ? PlayerEngine.VideoPlaybackDetails.empty()

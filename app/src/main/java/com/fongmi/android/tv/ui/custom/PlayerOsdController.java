@@ -27,7 +27,9 @@ import androidx.media3.common.Tracks;
 import com.fongmi.android.tv.App;
 import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.player.DolbyVisionFormatLabel;
+import com.fongmi.android.tv.player.GpuLoadMonitor;
 import com.fongmi.android.tv.player.PlayerManager;
+import com.fongmi.android.tv.player.PlaybackDiagnosticsSourcePolicy;
 import com.fongmi.android.tv.player.PlaybackRoute;
 import com.fongmi.android.tv.player.engine.PlayerCacheState;
 import com.fongmi.android.tv.player.engine.PlayerEngine;
@@ -300,6 +302,7 @@ public class PlayerOsdController {
     }
 
     private DiagnosticsText getDiagnostics(PlayerManager player) {
+        GpuLoadMonitor.process().requestSample();
         PlaybackAnalyticsListener.Snapshot snapshot = player.isExo() ? PlaybackAnalyticsListener.getSnapshot() : PlaybackAnalyticsListener.Snapshot.empty();
         Format video = snapshot.videoFormat() != null ? snapshot.videoFormat() : snapshot.errorFormat() != null ? snapshot.errorFormat() : player.getVideoFormat();
         Format audio = snapshot.audioFormat();
@@ -313,7 +316,8 @@ public class PlayerOsdController {
                 TextUtils.isEmpty(networkProtection) ? "" : networkProtection,
                 "可支撑 " + new DecimalFormat("0.00x").format(player.getNetworkProtectionSupportedSpeed()),
                 "当前 " + new DecimalFormat("0.00x").format(player.getEffectiveSpeed()));
-        String network = player.isExo() ? join(" / ",
+        boolean localSource = PlaybackDiagnosticsSourcePolicy.isLocal(player.getUrl());
+        String network = localSource ? "本地文件 / 不检测网速" : player.isExo() ? join(" / ",
                 consumption > 0 ? "消费需求 " + formatBitrate(consumption) : "",
                 stableThroughput > 0 ? "稳定吞吐 " + formatBitrate(stableThroughput) : "",
                 stableThroughput > 0 && consumption > 0 ? "网络余量 " + formatSignedBitrate(stableThroughput - consumption) : "")
@@ -322,6 +326,7 @@ public class PlayerOsdController {
         String nativeCache = player.isMpv() ? summarizeNativeCache(player.getCacheState()) : "";
         String renderDiagnostics = player.isMpv() ? player.getRenderDiagnostics() : "";
         String runtimeDiagnostics = player.isMpv() ? player.getRuntimeDiagnostics() : "";
+        String gpuLoad = getGpuLoadText(player);
         String frameTiming = player.isExo() ? summarizeFrameTiming() : "";
         PlayerEngine.VideoPlaybackDetails videoDetails =
                 player.getVideoPlaybackDetails();
@@ -345,14 +350,15 @@ public class PlayerOsdController {
                 row("视频", videoText),
                 row("音频", audioText),
                 row("网络", network),
-                player.isExo() ? row("保流畅", strategy) : "",
+                player.isExo() && !localSource ? row("保流畅", strategy) : "",
                 TextUtils.isEmpty(nativeCache) ? "" : row("MPV缓存", nativeCache),
                 TextUtils.isEmpty(renderDiagnostics) ? "" : row("MPV渲染", renderDiagnostics),
                 TextUtils.isEmpty(runtimeDiagnostics) ? "" : row("MPV运行", runtimeDiagnostics),
+                row("GPU负载", gpuLoad),
                 TextUtils.isEmpty(frameTiming) ? "" : row("帧调度", frameTiming),
                 row("播放", playback),
                 row("配置", playerText),
-                row("结论", getDiagnosis(player, snapshot, video, audioTrack)));
+                row("结论", getDiagnosis(player, snapshot, video, audioTrack, localSource)));
         String extra = join("\n",
                 row("设备", getDeviceText()),
                 row("系统", getSystemText()),
@@ -363,20 +369,35 @@ public class PlayerOsdController {
         return new DiagnosticsText(main, extra);
     }
 
-    private String getDiagnosis(PlayerManager player, PlaybackAnalyticsListener.Snapshot snapshot, Format video, AudioTrackState audioTrack) {
+    private String getDiagnosis(PlayerManager player, PlaybackAnalyticsListener.Snapshot snapshot, Format video, AudioTrackState audioTrack, boolean localSource) {
         if (isDecodeError(snapshot) && player.isHardDecode()) return "硬件解码失败：设备可能不支持该视频编码、分辨率、帧率或规格";
         if (!TextUtils.isEmpty(snapshot.errorCode())) return "播放器报错，先看错误行";
         if (audioTrack.hasTracks() && audioTrack.isUnsupported()) return "音频轨不支持：" + summarizeAudioFormat(audioTrack.format()) + " / " + supportText(audioTrack.support());
         if (player.isExo() && audioTrack.hasTracks() && !audioTrack.selected() && snapshot.audioFormat() == null && player.getPlaybackState() == androidx.media3.common.Player.STATE_READY) return "已发现音轨但未选中，可能无声";
         if (player.isExo() && audioTrack.hasTracks() && TextUtils.isEmpty(snapshot.audioDecoderName()) && player.getPlaybackState() == androidx.media3.common.Player.STATE_READY) return "已发现音轨但 decoder 未初始化，可能无声";
-        long mediaBitrate = getMediaBitrate(video, snapshot.audioFormat() != null ? snapshot.audioFormat() : audioTrack.format());
-        long availableBitrate = snapshot.bandwidthEstimate() > 0 ? snapshot.bandwidthEstimate() : lastSpeedKBps * 1024 * 8;
-        if (availableBitrate > 0 && mediaBitrate > 0 && availableBitrate < mediaBitrate * 13 / 10) return "网速可能低于资源码率";
-        if (player.isLoading() && player.getBufferedDuration() < 3000) return "缓冲偏少，可能是网络或源响应慢";
+        if (!localSource) {
+            long mediaBitrate = getMediaBitrate(video, snapshot.audioFormat() != null ? snapshot.audioFormat() : audioTrack.format());
+            long availableBitrate = snapshot.bandwidthEstimate() > 0 ? snapshot.bandwidthEstimate() : lastSpeedKBps * 1024 * 8;
+            if (availableBitrate > 0 && mediaBitrate > 0 && availableBitrate < mediaBitrate * 13 / 10) return "网速可能低于资源码率";
+            if (player.isLoading() && player.getBufferedDuration() < 3000) return "缓冲偏少，可能是网络或源响应慢";
+        }
         if (player.getDroppedFrames() >= 60) return "掉帧较多，可能是解码或渲染压力";
-        if (formatBitrateValue(video) >= 30_000_000) return "资源码率较高，对网络和解码要求高";
+        if (!localSource && formatBitrateValue(video) >= 30_000_000) return "资源码率较高，对网络和解码要求高";
         if (player.isExo() && audioTrack.hasTracks() && snapshot.audioFormat() == null) return "正在等待音频轨信息";
         return "正常";
+    }
+
+    private String getGpuLoadText(PlayerManager player) {
+        GpuLoadMonitor.Snapshot system = GpuLoadMonitor.process().snapshot();
+        if (system.available()) {
+            return String.format(Locale.US, "当前 %.0f%% / 10秒 %.0f%%（系统）",
+                    system.percent(), system.averagePercent());
+        }
+        String renderer = player.getGpuLoadDiagnostics();
+        if (!TextUtils.isEmpty(renderer)) return renderer;
+        return system.status() == GpuLoadMonitor.Status.PENDING
+                ? "正在检测"
+                : "当前设备不支持读取";
     }
 
     private String getErrorText(PlayerManager player, PlaybackAnalyticsListener.Snapshot snapshot) {

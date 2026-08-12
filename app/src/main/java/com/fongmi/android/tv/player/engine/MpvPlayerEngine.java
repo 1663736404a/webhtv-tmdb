@@ -337,6 +337,11 @@ public class MpvPlayerEngine implements PlayerEngine {
     }
 
     @Override
+    public String getGpuLoadDiagnostics() {
+        return player.getGpuLoadDiagnostics();
+    }
+
+    @Override
     public VideoPlaybackDetails getVideoPlaybackDetails() {
         MpvPlayer.VideoTrackDiagnostics details =
                 player.getSelectedVideoTrackDiagnostics();

@@ -156,6 +156,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     private final MpvCacheTimeState cacheTimeState;
     private final MpvSeekPositionState seekPositionState;
     private final MpvMediaReplacementCoordinator mediaReplacementCoordinator;
+    private final MpvGpuLoadTracker gpuLoadTracker;
     private final List<String> recentLogs;
     private final List<ParcelFileDescriptor> contentFds;
     @Nullable
@@ -248,6 +249,8 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     private int videoReconfigCount;
     private int currentChapter;
     private int cachedCacheBufferingState;
+    private long lastGpuLoadSampleMs;
+    private String cachedGpuLoadDiagnostics = "";
     private int surfaceWidth;
     private int surfaceHeight;
     private String attachedVo;
@@ -298,6 +301,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
                 config.demuxerHysteresisSeconds());
         seekPositionState = new MpvSeekPositionState();
         mediaReplacementCoordinator = new MpvMediaReplacementCoordinator();
+        gpuLoadTracker = new MpvGpuLoadTracker();
         stateRefreshRunnable = this::refreshPlaybackState;
         endFileValidationRunnable = this::validateEarlyEndFile;
         loadStartRetryRunnable = this::retryLoadIfNotStarted;
@@ -945,6 +949,25 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
                 formatDisplayFps(),
                 formatDisplaySync(),
                 formatShader());
+    }
+
+    /** GPU timestamp estimate for this MPV renderer; this is not whole-device GPU utilization. */
+    public String getGpuLoadDiagnostics() {
+        if (!initialized) return "";
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastGpuLoadSampleMs < 800) return cachedGpuLoadDiagnostics;
+        lastGpuLoadSampleMs = now;
+        String passes = stringProperty("vo-passes", "");
+        if (TextUtils.isEmpty(passes)) return cachedGpuLoadDiagnostics = "";
+        double displayFps = cachedDisplayFps > 0
+                ? cachedDisplayFps : cachedEstimatedDisplayFps;
+        MpvGpuLoadTracker.Snapshot snapshot = gpuLoadTracker.update(
+                passes, cachedContentFrameRate, displayFps);
+        if (!snapshot.available()) return cachedGpuLoadDiagnostics = "";
+        return cachedGpuLoadDiagnostics = Double.isFinite(snapshot.loadPercent())
+                ? String.format(Locale.US, "当前 %.0f%% / 10秒 %.0f%%（渲染估算）",
+                snapshot.loadPercent(), snapshot.averagePercent())
+                : "等待帧率数据（渲染估算）";
     }
 
     /** Cached values from mpv runtime property observers; never falls back to requested config. */
@@ -3819,6 +3842,9 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         cachedMistimedFrames = 0;
         cachedDelayedFrames = 0;
         cachedDisplaySyncActive = false;
+        lastGpuLoadSampleMs = 0;
+        cachedGpuLoadDiagnostics = "";
+        gpuLoadTracker.reset();
     }
 
     private String stringValue(@Nullable Object value, String fallback) {
