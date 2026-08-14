@@ -263,7 +263,7 @@ public final class MpvPerformanceSetting {
 
     public static int getVulkanBackend() {
         return normalizeVulkanBackend(Prefers.getInt(
-                KEY_VULKAN_BACKEND, VULKAN_BACKEND_LEGACY));
+                KEY_VULKAN_BACKEND, VULKAN_BACKEND_DIRECT));
     }
 
     public static void putVulkanBackend(int value) {
@@ -317,7 +317,7 @@ public final class MpvPerformanceSetting {
         Prefers.put(KEY_VERBOSE_LOG, false);
         Prefers.put(KEY_FRAME_RATE, FRAME_RATE_SEAMLESS);
         Prefers.put(KEY_HLS_BITRATE, HLS_HIGHEST);
-        Prefers.put(KEY_VULKAN_BACKEND, VULKAN_BACKEND_LEGACY);
+        Prefers.put(KEY_VULKAN_BACKEND, VULKAN_BACKEND_DIRECT);
         applyRebufferPreset(PlaybackPerformanceSetting.PROFILE_RECOMMENDED);
     }
 
@@ -331,7 +331,7 @@ public final class MpvPerformanceSetting {
         Prefers.put(KEY_VERBOSE_LOG, false);
         Prefers.put(KEY_FRAME_RATE, FRAME_RATE_SEAMLESS);
         Prefers.put(KEY_HLS_BITRATE, HLS_HIGHEST);
-        Prefers.put(KEY_VULKAN_BACKEND, VULKAN_BACKEND_LEGACY);
+        Prefers.put(KEY_VULKAN_BACKEND, VULKAN_BACKEND_DIRECT);
         applyRebufferPreset(PlaybackPerformanceSetting.PROFILE_AUTO);
     }
 
@@ -349,7 +349,7 @@ public final class MpvPerformanceSetting {
         Prefers.put(KEY_VERBOSE_LOG, false);
         Prefers.put(KEY_FRAME_RATE, FRAME_RATE_OFF);
         Prefers.put(KEY_HLS_BITRATE, HLS_8_MBPS);
-        Prefers.put(KEY_VULKAN_BACKEND, VULKAN_BACKEND_LEGACY);
+        Prefers.put(KEY_VULKAN_BACKEND, VULKAN_BACKEND_DIRECT);
         applyRebufferPreset(PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT);
     }
 
