@@ -147,6 +147,14 @@ contains_string() {
   fi
 }
 
+reject_string() {
+  local file="$1"
+  local value="$2"
+  if strings "$file" | grep -Fq "$value"; then
+    die "obsolete string '$value' present in $file"
+  fi
+}
+
 verify_abi() {
   local abi="$1"
   local flavor="$2"
@@ -184,7 +192,8 @@ verify_abi() {
   contains_string "$directory/libmpv.so" "android-osd-wid"
   contains_string "$directory/libmpv.so" "Direct Dolby Vision initialization failed"
   contains_string "$directory/libmpv.so" "video output has no queue-safe EL decoder"
-  contains_string "$directory/libmpv.so" "Using device native output sample rate for passthrough compatibility"
+  reject_string "$directory/libmpv.so" "Using device native output sample rate for passthrough compatibility"
+  contains_string "$directory/libmpv.so" "Using 7.1 IEC61937 carrier mask for TrueHD"
   contains_string "$directory/libmpv.so" "WebHTV Vulkan auto backend prefers direct AHardwareBuffer sampling"
   contains_string "$directory/libmpv.so" "WebHTV Vulkan auto uses a queue-safe four-output bounded-fence pool"
   contains_string "$directory/libmpv.so" "CPU-precomputed UV transform"

@@ -44,7 +44,7 @@ third_party/mpv-native-lock.json
 | MPV | `FongMi/mpv@cca559b41ceb0bb7731cf6ef2e1f33276cd30c42`（`0.41.0-940-gcca559b41`） |
 | MediaCodec/Vulkan | FongMi 分支内建 AImageReader/AHardwareBuffer OpenGL/Vulkan 后端、sync-fd、HDR/Dolby Vision 和双 Surface OSD；不再叠加旧 `fd679c81` 或 transient patch |
 | Dolby Vision双层硬解 | `third_party/patches/mpv-android-dovi-el-surface.patch`：把 GPU 杜比元数据处理与独立增强层解码拆成两项能力；Android AImageReader 只提供单路生产者 Surface，因此 `gpu-next` 保留 DV5 映射、DV 来源识别与 HDR10 基础层回退，但不启动第二个无 Surface 的 `mediacodec-copy`；非 Android 输出仍可显式声明 EL 合成能力 |
-| AudioTrack音频直通 | `third_party/patches/mpv-audiotrack-native-passthrough-rate.patch`：恢复 main 已验证的行为，SPDIF/IEC61937 同样采用设备原生输出采样率，避免老机顶盒以 192 kHz 建轨后功放无法锁定 Dolby 音频 |
+| AudioTrack音频直通 | 保留 FongMi MPV 的 passthrough carrier rate 修复：PCM 可跟随设备原生采样率，SPDIF/IEC61937 必须保留编码器声明的载波采样率；E-AC3、TrueHD、DTS-HD 使用 192 kHz，不能改写为常见的 48 kHz，否则 MPV 会判定格式不一致并回退 PCM。`mpv-audiotrack-truehd-channel-mask.patch` 参考 VLC 的成熟 Android AudioTrack 实现，为 TrueHD 的 8-channel carrier 使用 7.1 mask，其他 IEC61937 格式继续使用 stereo carrier mask。App 侧直接复用 Media3 `AudioCapabilities` 生成 `audio-spdif`，与 Exo 使用同一套 HDMI/ARC/eARC 能力发现。 |
 | Vulkan硬解稳定性与功耗 | `auto` 通过 `mpv-android-vulkan-smart-backend.patch` 恢复优先 direct AHardwareBuffer 采样，避免 HDR 默认执行全分辨率转换；direct 不支持时回退 queue-safe stable pool，再回退通用 conversion。显式 `stable` 保留给问题驱动，App 在自动模式发生视频输出错误或已识别首帧超时时会重建为 stable，并按设备环境记忆。stable 额外尝试两种 packed RGB10 storage 格式，最后才扩大到 RGBA16F。 |
 | Matroska代理Seek | `third_party/patches/mpv-matroska-segment-end.patch`，可Seek但HTTP总长度未知时使用MKV自身声明的Segment边界读取SeekHead/Cues |
 | FFmpeg | `FongMi/FFmpeg@04482c8d13ac27b2a9fe93f5d388929eef8af5f4`（9.0 fongmi） |
@@ -156,7 +156,7 @@ scripts/build_mpv_native.sh --abi arm64-v8a --jobs 8 --work-dir /tmp/webhtv-mpv-
 3. 在独立 Python venv 中安装固定版本 Meson/Ninja及 MbedTLS 生成工具依赖。
 4. 下载构建框架和每个固定 commit，初始化 MbedTLS、FreeType、libplacebo 子模块，并校验所有发行 tar 包 SHA-256。
 5. 对固定 FFmpeg commit 应用 `third_party/patches/ffmpeg-webhtv-proxy-range.patch`，只接受App内部代理写入的精确Range起点标记，使缺少`Content-Range`的206响应仍能按请求偏移重连；它不会制造未知的资源总长度。同时应用 `third_party/patches/ffmpeg-mediacodec-port-starvation.patch`，对 MediaCodec 输入、输出端同时不可用的状态采用短时有界等待并把控制权交还 mpv，避免新版 FFmpeg 在 `EAGAIN` 循环中永久占住 core thread。
-6. 固定 MPV 到 FongMi 完整分支；该分支已经包含 AImageReader OpenGL/Vulkan、sync-fd、HDR/Dolby Vision、双 Surface OSD、直播状态和 Android helper scheme。WebHTV 继续应用 `third_party/patches/mpv-stream-cb-disc-controls.patch`、`third_party/patches/mpv-android-dovi-el-surface.patch`、`third_party/patches/mpv-audiotrack-native-passthrough-rate.patch`、`third_party/patches/mpv-android-vulkan-conversion-default.patch`、`third_party/patches/mpv-aimagereader-stable-flow.patch` 与 `third_party/patches/mpv-matroska-segment-end.patch`。其中 Dolby Vision 补丁拆分 GPU 元数据映射与独立 EL 解码能力：Android `gpu-next` 继续保留 DV5 映射、DV 来源显示和 DV7 基础层 HDR10 回退，但不再启动会造成端口饥饿的第二个无 Surface 解码器；AudioTrack 补丁恢复 main 的设备原生采样率直通行为，避免老机顶盒功放无法锁定 Dolby 音频；Vulkan 补丁让自动模式恢复优先 GPU conversion，AImageReader 补丁按 `v5.5.6-202608072014` 的稳定语义释放 MediaCodec 输出并按回调序列领取最新图像，不再用 pending-frame 和严格纳秒时间戳拦截首帧，同时保留 compute 到 fragment 的回退。
+6. 固定 MPV 到 FongMi 完整分支；该分支已经包含 AImageReader OpenGL/Vulkan、sync-fd、HDR/Dolby Vision、双 Surface OSD、直播状态、Android helper scheme，以及直通时保留 SPDIF/IEC61937 载波采样率的 AudioTrack 修复。WebHTV 继续应用 `third_party/patches/mpv-stream-cb-disc-controls.patch`、`third_party/patches/mpv-android-dovi-el-surface.patch`、`third_party/patches/mpv-audiotrack-truehd-channel-mask.patch`、`third_party/patches/mpv-android-vulkan-conversion-default.patch`、`third_party/patches/mpv-aimagereader-stable-flow.patch` 与 `third_party/patches/mpv-matroska-segment-end.patch`。其中 Dolby Vision 补丁拆分 GPU 元数据映射与独立 EL 解码能力：Android `gpu-next` 继续保留 DV5 映射、DV 来源识别与 HDR10 基础层回退，但不启动会造成端口饥饿的第二个无 Surface 解码器；AudioTrack 补丁参考 VLC，为 TrueHD 选择 7.1 carrier mask；Vulkan 补丁让自动模式恢复优先 GPU conversion，AImageReader 补丁按 `v5.5.6-202608072014` 的稳定语义释放 MediaCodec 输出并按回调序列领取最新图像，不再用 pending-frame 和严格纳秒时间戳拦截首帧，同时保留 compute 到 fragment 的回退。
 7. 按依赖顺序构建字符集/压缩库、MbedTLS、dav1d、libxml2、FreeType、libaribcaption、FFmpeg、字体栈、shaderc、libplacebo、curl+nghttp2、libbluray、libarchive、DVD 库、rubberband 和 MPV。
 8. 把 FFmpeg 的文件名、ELF `SONAME` 和 `DT_NEEDED` 从 `libav*`/`libsw*` 等长修改为 `libmv*`/`libmw*`。
 9. 使用 NDK `llvm-strip --strip-unneeded` 处理最终库。
@@ -230,7 +230,7 @@ bash gradlew :app:assembleMobileArm64_v8aRelease -PfastRelease=true
 - Vulkan 硬解时确认 `hwdec-current=mediacodec`，默认 `auto` 日志应出现 `WebHTV Vulkan auto backend prefers direct AHardwareBuffer sampling` 和 `Using Vulkan YCbCr AHardwareBuffer sampling`；仅 direct 不支持或自动恢复后才应出现 stable conversion，且不得无条件回退到 `mediacodec-copy`。
 - Dolby Vision Profile 7 REMUX 在 OpenGL `vo=gpu` 下确认只有基础层解码器连接 AImageReader、`hwdec-current=mediacodec` 且能持续出帧；在 `gpu-next` 下确认增强层不会复用基础层 Surface，系统日志不得出现 `connect: already connected` 或 MediaCodec `-22`。
 - 电视直出/Dolby Vision 使用独立视频 Surface 和透明 OSD Surface，字幕与控制层可见，退出或换集不死锁。
-- MPV 音频直通在 HDMI 功放链路分别验证 AC3、E-AC3 与 TrueHD/Atmos，确认功放能锁定格式并亮灯；日志应出现设备原生输出采样率，不得回退为 PCM。
+- MPV 音频直通在 HDMI 功放链路分别验证 AC3、E-AC3 与 TrueHD/Atmos，确认功放能锁定格式并亮灯；E-AC3、DTS-HD、TrueHD 日志应保持 IEC61937 的 192 kHz 载波采样率，不得改写为设备常见的 48 kHz，也不得回退为 PCM。
 - MMT/TLV、TTML/ARIB 字幕、AV3A、Blu-ray/DVD ISO、压缩包播放入口分别做功能回归。
 - 文本字幕、图形字幕以及播放中切换。
 - 使用缺少部分中文字形的 SSA/ASS 字幕确认可逐字回退，不出现 `□`；同时确认媒体内嵌字体仍生效。

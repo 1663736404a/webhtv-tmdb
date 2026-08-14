@@ -117,6 +117,10 @@ public interface PlayerEngine {
         return "";
     }
 
+    /** Enables renderer-specific sampling only while the diagnostics panel is visible. */
+    default void setGpuLoadDiagnosticsEnabled(boolean enabled) {
+    }
+
     /** Source-track identity and runtime decode/output facts for the selected video track. */
     default VideoPlaybackDetails getVideoPlaybackDetails() {
         return VideoPlaybackDetails.empty();

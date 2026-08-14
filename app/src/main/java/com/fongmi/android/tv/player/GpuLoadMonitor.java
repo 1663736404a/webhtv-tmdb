@@ -7,9 +7,7 @@ import com.fongmi.android.tv.utils.Task;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -19,15 +17,19 @@ public final class GpuLoadMonitor {
 
     private static final long SAMPLE_INTERVAL_MS = 900;
     private static final long REDISCOVERY_INTERVAL_MS = 30_000;
-    private static final int AVERAGE_WINDOW = 10;
+    private static final long LOAD_WINDOW_MS = 10_000;
     private static final GpuLoadMonitor INSTANCE = new GpuLoadMonitor();
 
+    private final Object stateLock = new Object();
     private final AtomicBoolean sampling = new AtomicBoolean();
-    private final Deque<Double> recentLoads = new ArrayDeque<>();
+    private final TimedPercentageWindow loadWindow =
+            new TimedPercentageWindow(LOAD_WINDOW_MS);
     private volatile Snapshot snapshot = Snapshot.pending();
     private volatile Source source;
-    private double recentLoadSum;
+    private boolean active;
+    private long generation;
     private long lastRequestMs;
+    private long lastSampleAtMs;
     private long lastDiscoveryMs;
     private int consecutiveFailures;
 
@@ -38,16 +40,49 @@ public final class GpuLoadMonitor {
         return INSTANCE;
     }
 
+    public void start() {
+        synchronized (stateLock) {
+            if (active) return;
+            active = true;
+            generation++;
+            lastRequestMs = 0;
+            lastSampleAtMs = 0;
+            consecutiveFailures = 0;
+            loadWindow.reset();
+            snapshot = Snapshot.pending();
+        }
+    }
+
+    public void stop() {
+        synchronized (stateLock) {
+            if (!active) return;
+            active = false;
+            generation++;
+            lastRequestMs = 0;
+            lastSampleAtMs = 0;
+            lastDiscoveryMs = 0;
+            loadWindow.reset();
+            snapshot = Snapshot.pending();
+            source = null;
+        }
+    }
+
     /** Schedules one non-blocking sample. Call only while diagnostics are visible. */
     public void requestSample() {
-        long now = SystemClock.elapsedRealtime();
-        long interval = source == null ? REDISCOVERY_INTERVAL_MS : SAMPLE_INTERVAL_MS;
-        if ((lastRequestMs > 0 && now - lastRequestMs < interval)
-                || !sampling.compareAndSet(false, true)) return;
-        lastRequestMs = now;
+        long token;
+        synchronized (stateLock) {
+            if (!active) return;
+            long now = SystemClock.elapsedRealtime();
+            long interval = source == null
+                    ? REDISCOVERY_INTERVAL_MS : SAMPLE_INTERVAL_MS;
+            if ((lastRequestMs > 0 && now - lastRequestMs < interval)
+                    || !sampling.compareAndSet(false, true)) return;
+            lastRequestMs = now;
+            token = generation;
+        }
         Task.executor().execute(() -> {
             try {
-                sampleInBackground();
+                sampleInBackground(token);
             } finally {
                 sampling.set(false);
             }
@@ -58,43 +93,62 @@ public final class GpuLoadMonitor {
         return snapshot;
     }
 
-    private void sampleInBackground() {
+    private void sampleInBackground(long token) {
         long now = SystemClock.elapsedRealtime();
-        Source current = source;
-        if (current == null && (lastDiscoveryMs == 0
-                || now - lastDiscoveryMs >= REDISCOVERY_INTERVAL_MS)) {
-            lastDiscoveryMs = now;
-            current = discover();
-            source = current;
+        Source current;
+        boolean shouldDiscover;
+        synchronized (stateLock) {
+            if (!active || token != generation) return;
+            current = source;
+            shouldDiscover = current == null && (lastDiscoveryMs == 0
+                    || now - lastDiscoveryMs >= REDISCOVERY_INTERVAL_MS);
+            if (shouldDiscover) lastDiscoveryMs = now;
+        }
+        if (shouldDiscover) {
+            current = discover(token);
+            synchronized (stateLock) {
+                if (!active || token != generation) return;
+                source = current;
+            }
         }
         if (current == null) {
-            snapshot = Snapshot.unsupported();
+            synchronized (stateLock) {
+                if (active && token == generation) snapshot = Snapshot.unsupported();
+            }
             return;
         }
         try {
             Double percent = current.readPercent();
             if (percent == null || !Double.isFinite(percent)) return;
             percent = Math.max(0, Math.min(100, percent));
-            recentLoads.addLast(percent);
-            recentLoadSum += percent;
-            while (recentLoads.size() > AVERAGE_WINDOW) {
-                recentLoadSum -= recentLoads.removeFirst();
+            long sampledAt = SystemClock.elapsedRealtime();
+            long frequencyHz = current.readFrequencyHz();
+            synchronized (stateLock) {
+                if (!active || token != generation) return;
+                long duration = lastSampleAtMs > 0
+                        ? Math.max(0, sampledAt - lastSampleAtMs) : 0;
+                lastSampleAtMs = sampledAt;
+                loadWindow.add(sampledAt, duration, percent);
+                TimedPercentageWindow.Stats stats = loadWindow.snapshot(sampledAt);
+                consecutiveFailures = 0;
+                snapshot = new Snapshot(Status.AVAILABLE, percent,
+                        stats.average(), stats.peak(), frequencyHz,
+                        current.label(), sampledAt, stats.sampleCount());
             }
-            consecutiveFailures = 0;
-            snapshot = new Snapshot(Status.AVAILABLE, percent,
-                    recentLoadSum / Math.max(1, recentLoads.size()),
-                    current.readFrequencyHz(), current.label());
         } catch (Throwable ignored) {
-            if (++consecutiveFailures >= 3) {
-                source = null;
-                recentLoads.clear();
-                recentLoadSum = 0;
-                snapshot = Snapshot.unsupported();
+            synchronized (stateLock) {
+                if (!active || token != generation) return;
+                if (++consecutiveFailures >= 3) {
+                    source = null;
+                    loadWindow.reset();
+                    lastSampleAtMs = 0;
+                    snapshot = Snapshot.unsupported();
+                }
             }
         }
     }
 
-    private Source discover() {
+    private Source discover(long token) {
         List<Source> candidates = new ArrayList<>();
         candidates.add(Source.percent("/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage",
                 "/sys/class/kgsl/kgsl-3d0/devfreq/cur_freq", "KGSL"));
@@ -108,6 +162,9 @@ public final class GpuLoadMonitor {
                 "", "Mali"));
         discoverDevfreq(candidates);
         for (Source candidate : candidates) {
+            synchronized (stateLock) {
+                if (!active || token != generation) return null;
+            }
             try {
                 Double value = candidate.readPercent();
                 if ((value != null && Double.isFinite(value))
@@ -157,14 +214,15 @@ public final class GpuLoadMonitor {
     }
 
     public record Snapshot(Status status, double percent, double averagePercent,
-                           long frequencyHz, String source) {
+                           double peakPercent, long frequencyHz, String source,
+                           long sampledAtElapsedMs, int sampleCount) {
 
         static Snapshot pending() {
-            return new Snapshot(Status.PENDING, 0, 0, 0, "");
+            return new Snapshot(Status.PENDING, 0, 0, 0, 0, "", -1, 0);
         }
 
         static Snapshot unsupported() {
-            return new Snapshot(Status.UNSUPPORTED, 0, 0, 0, "");
+            return new Snapshot(Status.UNSUPPORTED, 0, 0, 0, 0, "", -1, 0);
         }
 
         public boolean available() {

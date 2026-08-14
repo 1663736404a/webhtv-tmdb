@@ -251,6 +251,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     private int cachedCacheBufferingState;
     private long lastGpuLoadSampleMs;
     private String cachedGpuLoadDiagnostics = "";
+    private boolean gpuLoadDiagnosticsEnabled;
     private int surfaceWidth;
     private int surfaceHeight;
     private String attachedVo;
@@ -954,7 +955,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
 
     /** GPU timestamp estimate for this MPV renderer; this is not whole-device GPU utilization. */
     public String getGpuLoadDiagnostics() {
-        if (!initialized) return "";
+        if (!initialized || !gpuLoadDiagnosticsEnabled) return "";
         long now = SystemClock.elapsedRealtime();
         if (now - lastGpuLoadSampleMs < 800) return cachedGpuLoadDiagnostics;
         lastGpuLoadSampleMs = now;
@@ -963,12 +964,28 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         double displayFps = cachedDisplayFps > 0
                 ? cachedDisplayFps : cachedEstimatedDisplayFps;
         MpvGpuLoadTracker.Snapshot snapshot = gpuLoadTracker.update(
-                passes, cachedContentFrameRate, displayFps);
+                passes, cachedContentFrameRate, displayFps, now);
         if (!snapshot.available()) return cachedGpuLoadDiagnostics = "";
+        String timing = joinParts(
+                snapshot.freshNs() > 0 ? String.format(Locale.US, "渲染 %.2fms",
+                        snapshot.freshNs() / 1_000_000.0) : "",
+                snapshot.redrawNs() > 0 ? String.format(Locale.US, "重绘 %.2fms",
+                        snapshot.redrawNs() / 1_000_000.0) : "");
         return cachedGpuLoadDiagnostics = Double.isFinite(snapshot.loadPercent())
-                ? String.format(Locale.US, "当前 %.0f%% / 10秒 %.0f%%（渲染估算）",
-                snapshot.loadPercent(), snapshot.averagePercent())
-                : "等待帧率数据（渲染估算）";
+                ? joinParts(timing,
+                        String.format(Locale.US, "帧预算 %.0f%%",
+                                snapshot.loadPercent()),
+                        String.format(Locale.US, "预算峰值 %.0f%%",
+                                snapshot.peakPercent()))
+                : joinParts("等待帧率数据", timing);
+    }
+
+    public void setGpuLoadDiagnosticsEnabled(boolean enabled) {
+        if (gpuLoadDiagnosticsEnabled == enabled) return;
+        gpuLoadDiagnosticsEnabled = enabled;
+        lastGpuLoadSampleMs = 0;
+        cachedGpuLoadDiagnostics = "";
+        gpuLoadTracker.reset();
     }
 
     /** Cached values from mpv runtime property observers; never falls back to requested config. */

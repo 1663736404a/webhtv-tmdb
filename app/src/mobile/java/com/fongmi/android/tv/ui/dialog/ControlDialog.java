@@ -130,7 +130,6 @@ public class ControlDialog extends BaseBottomSheetDialog implements ParseAdapter
         setControlPadding();
         setSheetBackground();
         binding.decode.setText(parent.control.action.decode.getText());
-        binding.playParams.setSelected(parent.control.action.playParams.isSelected());
         setLut();
         binding.ending.setText(parent.control.action.ending.getText());
         binding.opening.setText(parent.control.action.opening.getText());
@@ -161,7 +160,6 @@ public class ControlDialog extends BaseBottomSheetDialog implements ParseAdapter
         for (TextView view : speeds) view.setOnClickListener(this::setSpeedPreset);
         for (TextView view : scales) view.setOnClickListener(this::setScale);
         binding.reset.setOnClickListener(v -> dismiss(parent.control.action.reset));
-        binding.fullscreen.setOnClickListener(v -> dismiss(parent.control.fullscreen));
         binding.text.setOnClickListener(v -> onTrack(binding.text));
         binding.audio.setOnClickListener(v -> onTrack(binding.audio));
         binding.video.setOnClickListener(v -> onTrack(binding.video));
@@ -173,10 +171,6 @@ public class ControlDialog extends BaseBottomSheetDialog implements ParseAdapter
         binding.danmaku.setOnClickListener(v -> ((Listener) requireActivity()).onDanmakuPanel());
         binding.repeat.setOnClickListener(v -> active(binding.repeat, parent.control.action.repeat));
         binding.decode.setOnClickListener(v -> click(binding.decode, parent.control.action.decode));
-        binding.playParams.setOnClickListener(v -> {
-            dismissAllowingStateLoss();
-            ((Listener) requireActivity()).onPlayParamsPanel();
-        });
         binding.codecCapability.setOnClickListener(v -> ((Listener) requireActivity()).onCodecCapabilityPanel());
         binding.panDiagnostic.setOnClickListener(v -> onPanDiagnostic());
         binding.lut.setOnClickListener(v -> onLut());

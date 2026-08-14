@@ -29,9 +29,9 @@ import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.player.DolbyVisionFormatLabel;
 import com.fongmi.android.tv.player.GpuLoadMonitor;
 import com.fongmi.android.tv.player.PlayerManager;
+import com.fongmi.android.tv.player.PlaybackPanelResourceMonitor;
 import com.fongmi.android.tv.player.PlaybackDiagnosticsSourcePolicy;
 import com.fongmi.android.tv.player.PlaybackRoute;
-import com.fongmi.android.tv.player.engine.PlayerCacheState;
 import com.fongmi.android.tv.player.engine.PlayerEngine;
 import com.fongmi.android.tv.player.exo.PlaybackAnalyticsListener;
 import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
@@ -73,6 +73,7 @@ public class PlayerOsdController {
     private final Source source;
     private final View root;
     private final float miniSp;
+    private final PlaybackPanelResourceMonitor resourceMonitor;
 
     private final DecimalFormat frameFormat;
     private final DecimalFormat refreshFormat;
@@ -84,6 +85,7 @@ public class PlayerOsdController {
     private boolean controlsVisible;
     private boolean diagnosticsVisible;
     private boolean started;
+    private PlayerManager diagnosticsSamplingPlayer;
 
     public PlayerOsdController(View root, TextView topLeft, TextView topRight, TextView bottomLeft, TextView bottomRight, TextView diagnostics, MiniProgressView miniProgress, Source source, float miniSp) {
         this.timeFormat = new SimpleDateFormat("HH:mm:ss", Locale.getDefault());
@@ -102,6 +104,7 @@ public class PlayerOsdController {
         this.source = source;
         this.root = root;
         this.update = this::update;
+        this.resourceMonitor = new PlaybackPanelResourceMonitor(root.getContext());
         diagnosticsExtra.setVisibility(View.GONE);
         updateDiagnosticsWidth();
     }
@@ -118,6 +121,7 @@ public class PlayerOsdController {
 
     public void stop() {
         started = false;
+        stopDiagnosticsSampling();
         App.removeCallbacks(update);
     }
 
@@ -139,12 +143,14 @@ public class PlayerOsdController {
         boolean next = visible && PlayerSetting.isOsdDiagnostics();
         if (diagnosticsVisible == next) return;
         diagnosticsVisible = next;
+        if (!next) stopDiagnosticsSampling();
         if (started) render();
     }
 
     public void toggleDiagnostics() {
         if (!PlayerSetting.isOsdDiagnostics()) return;
         diagnosticsVisible = !diagnosticsVisible;
+        if (!diagnosticsVisible) stopDiagnosticsSampling();
         if (started) render();
     }
 
@@ -155,11 +161,15 @@ public class PlayerOsdController {
     private boolean render() {
         boolean enabled = PlayerSetting.isOsdEnabled();
         if (!enabled) {
+            stopDiagnosticsSampling();
             root.setVisibility(View.GONE);
             return false;
         }
         root.setVisibility(controlsVisible ? View.GONE : View.VISIBLE);
-        if (controlsVisible) return true;
+        if (controlsVisible) {
+            stopDiagnosticsSampling();
+            return true;
+        }
         setTextSize(miniSp);
         PlayerManager player = source.getPlayer();
         updateSpeed();
@@ -212,9 +222,11 @@ public class PlayerOsdController {
 
     private void setDiagnosticsPanel(PlayerManager player) {
         if (controlsVisible || !PlayerSetting.isOsdDiagnostics() || !diagnosticsVisible || player == null) {
+            stopDiagnosticsSampling();
             diagnosticsPanel.setVisibility(View.GONE);
             return;
         }
+        startDiagnosticsSampling(player);
         DiagnosticsText text = getDiagnostics(player);
         boolean land = isLandscape();
         updateDiagnosticsWidth();
@@ -303,6 +315,7 @@ public class PlayerOsdController {
 
     private DiagnosticsText getDiagnostics(PlayerManager player) {
         GpuLoadMonitor.process().requestSample();
+        resourceMonitor.requestSample();
         PlaybackAnalyticsListener.Snapshot snapshot = player.isExo() ? PlaybackAnalyticsListener.getSnapshot() : PlaybackAnalyticsListener.Snapshot.empty();
         Format video = snapshot.videoFormat() != null ? snapshot.videoFormat() : snapshot.errorFormat() != null ? snapshot.errorFormat() : player.getVideoFormat();
         Format audio = snapshot.audioFormat();
@@ -323,10 +336,13 @@ public class PlayerOsdController {
                 stableThroughput > 0 && consumption > 0 ? "网络余量 " + formatSignedBitrate(stableThroughput - consumption) : "")
                 : join(" / ", "当前 " + emptyDash(lastSpeedText));
         if (TextUtils.isEmpty(network)) network = "待采样";
-        String nativeCache = player.isMpv() ? summarizeNativeCache(player.getCacheState()) : "";
         String renderDiagnostics = player.isMpv() ? player.getRenderDiagnostics() : "";
         String runtimeDiagnostics = player.isMpv() ? player.getRuntimeDiagnostics() : "";
-        String gpuLoad = getGpuLoadText(player);
+        String gpu = join(" / ", getSystemGpuText(),
+                player.getGpuLoadDiagnostics());
+        PlaybackPanelResourceMonitor.Snapshot resources = resourceMonitor.snapshot();
+        String cpu = getCpuText(resources);
+        String memory = getMemoryText(resources);
         String frameTiming = player.isExo() ? summarizeFrameTiming() : "";
         PlayerEngine.VideoPlaybackDetails videoDetails =
                 player.getVideoPlaybackDetails();
@@ -351,10 +367,11 @@ public class PlayerOsdController {
                 row("音频", audioText),
                 row("网络", network),
                 player.isExo() && !localSource ? row("保流畅", strategy) : "",
-                TextUtils.isEmpty(nativeCache) ? "" : row("MPV缓存", nativeCache),
                 TextUtils.isEmpty(renderDiagnostics) ? "" : row("MPV渲染", renderDiagnostics),
                 TextUtils.isEmpty(runtimeDiagnostics) ? "" : row("MPV运行", runtimeDiagnostics),
-                row("GPU负载", gpuLoad),
+                TextUtils.isEmpty(gpu) ? "" : row("GPU", gpu),
+                TextUtils.isEmpty(cpu) ? "" : row("CPU", cpu),
+                TextUtils.isEmpty(memory) ? "" : row("内存", memory),
                 TextUtils.isEmpty(frameTiming) ? "" : row("帧调度", frameTiming),
                 row("播放", playback),
                 row("配置", playerText),
@@ -387,17 +404,78 @@ public class PlayerOsdController {
         return "正常";
     }
 
-    private String getGpuLoadText(PlayerManager player) {
+    private String getSystemGpuText() {
         GpuLoadMonitor.Snapshot system = GpuLoadMonitor.process().snapshot();
-        if (system.available()) {
-            return String.format(Locale.US, "当前 %.0f%% / 10秒 %.0f%%（系统）",
-                    system.percent(), system.averagePercent());
+        if (!system.available()) return "";
+        return join(" / ",
+                String.format(Locale.US, "当前 %.0f%%", system.percent()),
+                String.format(Locale.US, "峰值 %.0f%%", system.peakPercent()),
+                formatGpuFrequency(system.frequencyHz()));
+    }
+
+    private String getCpuText(PlaybackPanelResourceMonitor.Snapshot snapshot) {
+        if (snapshot == null || !snapshot.cpuAvailable()) return "";
+        return String.format(Locale.US,
+                "App 当前 %.0f%% / 10秒 %.0f%% / 峰值 %.0f%%",
+                snapshot.cpuPercent(), snapshot.cpuAveragePercent(),
+                snapshot.cpuPeakPercent());
+    }
+
+    private String getMemoryText(PlaybackPanelResourceMonitor.Snapshot snapshot) {
+        if (snapshot == null || !snapshot.memoryAvailable()) return "";
+        String javaHeap = snapshot.javaHeapUsedBytes() < 0 ? ""
+                : "Java " + formatMemoryBytes(snapshot.javaHeapUsedBytes())
+                + (snapshot.javaHeapLimitBytes() >= 0
+                ? "/" + formatMemoryBytes(snapshot.javaHeapLimitBytes()) : "");
+        String system = snapshot.systemAvailableBytes() < 0 ? ""
+                : "系统可用 " + formatMemoryBytes(snapshot.systemAvailableBytes())
+                + (snapshot.systemTotalBytes() >= 0
+                ? "/" + formatMemoryBytes(snapshot.systemTotalBytes()) : "");
+        return join(" / ",
+                snapshot.pssBytes() >= 0
+                        ? "PSS " + formatMemoryBytes(snapshot.pssBytes()) : "",
+                snapshot.graphicsPssBytes() > 0
+                        ? "图形 " + formatMemoryBytes(snapshot.graphicsPssBytes()) : "",
+                javaHeap,
+                snapshot.nativeHeapBytes() >= 0
+                        ? "Native " + formatMemoryBytes(snapshot.nativeHeapBytes()) : "",
+                system);
+    }
+
+    private String formatGpuFrequency(long frequencyHz) {
+        if (frequencyHz <= 0) return "";
+        if (frequencyHz >= 1_000_000_000L) {
+            return String.format(Locale.US, "%.2fGHz", frequencyHz / 1_000_000_000.0);
         }
-        String renderer = player.getGpuLoadDiagnostics();
-        if (!TextUtils.isEmpty(renderer)) return renderer;
-        return system.status() == GpuLoadMonitor.Status.PENDING
-                ? "正在检测"
-                : "当前设备不支持读取";
+        return String.format(Locale.US, "%.0fMHz", frequencyHz / 1_000_000.0);
+    }
+
+    private String formatMemoryBytes(long bytes) {
+        if (bytes < 0) return "";
+        double mib = bytes / (1024.0 * 1024.0);
+        if (mib >= 1024) return String.format(Locale.US, "%.1fGB", mib / 1024.0);
+        if (mib >= 100) return String.format(Locale.US, "%.0fMB", mib);
+        return String.format(Locale.US, "%.1fMB", mib);
+    }
+
+    private void startDiagnosticsSampling(PlayerManager player) {
+        if (diagnosticsSamplingPlayer != null
+                && diagnosticsSamplingPlayer != player) {
+            diagnosticsSamplingPlayer.setGpuLoadDiagnosticsEnabled(false);
+        }
+        diagnosticsSamplingPlayer = player;
+        player.setGpuLoadDiagnosticsEnabled(true);
+        if (!resourceMonitor.isActive()) resourceMonitor.start();
+        GpuLoadMonitor.process().start();
+    }
+
+    private void stopDiagnosticsSampling() {
+        if (diagnosticsSamplingPlayer != null) {
+            diagnosticsSamplingPlayer.setGpuLoadDiagnosticsEnabled(false);
+            diagnosticsSamplingPlayer = null;
+        }
+        resourceMonitor.stop();
+        GpuLoadMonitor.process().stop();
     }
 
     private String getErrorText(PlayerManager player, PlaybackAnalyticsListener.Snapshot snapshot) {
@@ -618,38 +696,6 @@ public class PlayerOsdController {
 
     private String formatSignedBitrate(long bitsPerSecond) {
         return (bitsPerSecond >= 0 ? "+" : "-") + formatBitrate(Math.abs(bitsPerSecond));
-    }
-
-    private String summarizeNativeCache(PlayerCacheState cache) {
-        if (cache == null || !cache.available()) return "";
-        String runtime = join(" / ",
-                cache.cacheDurationMs() > 0 ? "时长 " + formatDuration(cache.cacheDurationMs()) : "",
-                cache.forwardBytes() > 0 ? "前向 " + formatBytes(cache.forwardBytes()) : "",
-                cache.totalBytes() > 0 ? "总 " + formatBytes(cache.totalBytes()) : "",
-                cache.fileBytes() > 0 ? "临时 " + formatBytes(cache.fileBytes()) : "",
-                cache.rawInputBytesPerSecond() > 0 ? "读速 " + formatByteSpeed(cache.rawInputBytesPerSecond()) : "",
-                cache.bufferingState() > 0 && cache.bufferingState() < 100 ? "填充 " + cache.bufferingState() + "%" : "",
-                cache.idle() ? "idle" : "",
-                cache.underrun() ? "underrun" : "",
-                cache.bofCached() && cache.eofCached() ? "全量缓存" : cache.eofCached() ? "EOF" : "");
-        String config = join(" / ",
-                "cache " + switchText(cache.enabled()),
-                "时间主控 " + cache.timeMaster() + " " + cacheTimeTarget(cache) + "s",
-                "非cache回退 " + cache.readaheadSeconds() + "s",
-                cache.hysteresisSeconds() > 0
-                        ? "批读阈值 " + cache.hysteresisSeconds() + "s"
-                        : "批读 连续",
-                cache.cacheTimeObservedOptions() > 0
-                        ? "参数读回 " + cache.cacheTimeObservedOptions() + "/3"
-                        : "",
-                cache.maxBytes() > 0 ? "上限 " + formatBytes(cache.maxBytes()) : "",
-                cache.maxBackBytes() > 0 ? "回退 " + formatBytes(cache.maxBackBytes()) : "回退 关");
-        return join(" / ", runtime, config);
-    }
-
-    private int cacheTimeTarget(PlayerCacheState cache) {
-        return "demuxer-readahead-secs".equals(cache.timeMaster())
-                ? cache.readaheadSeconds() : cache.cacheSeconds();
     }
 
     private String summarizeFrameTiming() {
