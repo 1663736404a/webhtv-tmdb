@@ -30,6 +30,7 @@ import com.fongmi.android.tv.player.mpv.MpvAutoControlPolicy;
 import com.fongmi.android.tv.player.mpv.MpvVulkanBackendPolicy;
 import com.fongmi.android.tv.setting.PlayerSetting;
 import com.fongmi.android.tv.setting.MpvPerformanceSetting;
+import com.fongmi.android.tv.setting.PlaybackPerformanceCatalog;
 import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
 import com.fongmi.android.tv.utils.ResUtil;
 import com.fongmi.android.tv.utils.Util;
@@ -548,7 +549,9 @@ public class MpvPlayerEngine implements PlayerEngine {
 
     private MpvPlayer buildPlayer(Player.Listener listener) {
         MpvPlayer player = new MpvPlayer(App.get(), buildConfig());
-        if (PlaybackPerformanceSetting.isAuto(PlayerSetting.MPV)) {
+        if (PlaybackPerformanceSetting.isAuto(
+                PlayerSetting.MPV,
+                PlaybackPerformanceCatalog.PRELOAD)) {
             player.updateAutomaticPreloadControl(true, false, false);
         }
         player.setVideoSizeProbeListener(videoSizeProbeListener);
@@ -590,8 +593,12 @@ public class MpvPlayerEngine implements PlayerEngine {
                 .demuxerHysteresisSeconds(MpvPlayerConfig.DEFAULT_DEMUXER_HYSTERESIS_SECONDS)
                 .rebufferMs(MpvPerformanceSetting.getRebufferMs())
                 .performanceOptionsPriority(MpvPerformanceSetting.isPerformancePriority())
-                .automaticCacheTime(PlaybackPerformanceSetting.isAuto(PlayerSetting.MPV))
-                .automaticHlsVariant(PlaybackPerformanceSetting.isAuto(PlayerSetting.MPV))
+                .automaticCacheTime(PlaybackPerformanceSetting.isAuto(
+                        PlayerSetting.MPV,
+                        PlaybackPerformanceCatalog.BUFFER_TIME))
+                .automaticHlsVariant(PlaybackPerformanceSetting.isAuto(
+                        PlayerSetting.MPV,
+                        PlaybackPerformanceCatalog.MPV_HLS_BITRATE))
                 .option("framedrop", MpvPerformanceSetting.getFrameDropOption())
                 .option("video-sync", MpvPerformanceSetting.getSyncOption())
                 .option("interpolation", MpvPerformanceSetting.isInterpolation() ? "yes" : "no")
@@ -644,7 +651,9 @@ public class MpvPlayerEngine implements PlayerEngine {
     }
 
     private long getDemuxerMaxBytes() {
-        if (PlaybackPerformanceSetting.isAuto(PlayerSetting.MPV)) {
+        if (PlaybackPerformanceSetting.isAuto(
+                PlayerSetting.MPV,
+                PlaybackPerformanceCatalog.BUFFER_BYTES)) {
             return MpvAutoControlPolicy.MIN_FORWARD_BYTES;
         }
         int bytes = PlayerSetting.getBufferBytes(PlayerSetting.MPV);
@@ -652,7 +661,9 @@ public class MpvPlayerEngine implements PlayerEngine {
     }
 
     private long getDemuxerMaxBackBytes() {
-        if (PlaybackPerformanceSetting.isAuto(PlayerSetting.MPV)) {
+        if (PlaybackPerformanceSetting.isAuto(
+                PlayerSetting.MPV,
+                PlaybackPerformanceCatalog.BACK_BUFFER)) {
             return MpvAutoControlPolicy.INITIAL_BACK_BYTES;
         }
         if (PlayerSetting.getBackBufferMs(PlayerSetting.MPV) <= 0) return 0;
@@ -667,6 +678,14 @@ public class MpvPlayerEngine implements PlayerEngine {
 
     private int getCacheTargetSeconds() {
         return Math.min(60, Math.max(15, PlayerSetting.getBuffer(PlayerSetting.MPV) * 3));
+    }
+
+    public long getConfiguredForwardCacheBytes() {
+        return getDemuxerMaxBytes();
+    }
+
+    public long getConfiguredBackCacheBytes() {
+        return getDemuxerMaxBackBytes();
     }
 
     private static long formatBitrate(Format format) {

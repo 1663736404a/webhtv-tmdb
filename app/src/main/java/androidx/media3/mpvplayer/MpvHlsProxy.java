@@ -14,6 +14,8 @@ import com.fongmi.android.tv.player.PreloadPausePolicy;
 import com.fongmi.android.tv.player.cache.PlaybackDiskBufferStore;
 import com.fongmi.android.tv.player.mpv.MpvPreloadPolicy;
 import com.fongmi.android.tv.setting.PlayerSetting;
+import com.fongmi.android.tv.setting.PlaybackPerformanceCatalog;
+import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
 import com.fongmi.android.tv.setting.PreloadSetting;
 import com.fongmi.android.tv.setting.Setting;
 import com.github.catvod.crawler.SpiderDebug;
@@ -991,7 +993,9 @@ public final class MpvHlsProxy extends NanoHTTPD {
 
     private synchronized ExecutorService getPreloadExecutor() {
         int threads = MpvPreloadPolicy.resolveExecutorThreads(
-                automaticPreloadMode,
+                PlaybackPerformanceSetting.isAuto(
+                        kernel,
+                        PlaybackPerformanceCatalog.PRELOAD_THREADS),
                 PreloadSetting.getPreloadThreads(kernel));
         if (preloadExecutor != null && preloadThreads == threads) return preloadExecutor;
         releasePreloadExecutor();

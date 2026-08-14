@@ -4,7 +4,10 @@ import android.content.SharedPreferences;
 
 import com.github.catvod.utils.Prefers;
 
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 public class PlaybackPerformanceSetting {
 
@@ -50,6 +53,9 @@ public class PlaybackPerformanceSetting {
     private static final String KEY_SOFT_VIDEO_TUNE = "perf_soft_video_tune";
     private static final String KEY_HIGH_BUFFER = "perf_high_buffer";
     private static final String KEY_BANDWIDTH_METER = "perf_bandwidth_meter";
+    private static final String KEY_AUTO_OVERRIDES_EXO = "perf_exo_auto_overrides_v1";
+    private static final String KEY_AUTO_OVERRIDES_MPV = "perf_mpv_auto_overrides_v1";
+    private static final String KEY_AUTO_OVERRIDES_IJK = "perf_ijk_auto_overrides_v1";
 
     public static void ensureInitialized() {
         PlaybackExperimentSetting.ensureInitialized();
@@ -85,6 +91,7 @@ public class PlaybackPerformanceSetting {
 
     public static void applyAuto() {
         int kernel = PlayerSetting.getPlayer();
+        clearOverrides(kernel);
         applyAutoProfile(kernel);
         putCurrentProfile(PROFILE_AUTO);
     }
@@ -136,7 +143,9 @@ public class PlaybackPerformanceSetting {
     }
 
     public static void applyLightweight() {
-        applyLightweightProfile(PlayerSetting.getPlayer());
+        int kernel = PlayerSetting.getPlayer();
+        clearOverrides(kernel);
+        applyLightweightProfile(kernel);
         putCurrentProfile(PROFILE_LIGHTWEIGHT);
     }
 
@@ -157,12 +166,44 @@ public class PlaybackPerformanceSetting {
 
     public static void markCustom() {
         ensureInitialized();
+        clearOverrides(PlayerSetting.getPlayer());
         putCurrentProfile(PROFILE_CUSTOM);
     }
 
+    public static void markOverride(String optionId) {
+        setOverride(optionId, true);
+    }
+
+    public static synchronized void setOverride(
+            String optionId,
+            boolean overridden) {
+        ensureInitialized();
+        String id = optionId == null ? "" : optionId.trim();
+        if (id.isEmpty()) {
+            markCustom();
+            return;
+        }
+        int kernel = PlayerSetting.getPlayer();
+        if (!isAuto(kernel)) {
+            markCustom();
+            return;
+        }
+        Set<String> overrides = getOverrides(kernel);
+        boolean changed = overridden ? overrides.add(id) : overrides.remove(id);
+        if (!changed) return;
+        SharedPreferences.Editor editor = Prefers.getPrefers().edit();
+        if (overrides.isEmpty()) editor.remove(overrideKey(kernel));
+        else editor.putStringSet(overrideKey(kernel), overrides);
+        editor.apply();
+    }
+
     public static String getProfileName() {
-        return switch (getProfile()) {
-            case PROFILE_AUTO -> "自动";
+        int profile = getProfile();
+        return switch (profile) {
+            case PROFILE_AUTO -> {
+                int count = getOverrideCount(PlayerSetting.getPlayer());
+                yield count == 0 ? "自动" : "自动（已覆盖" + count + "项）";
+            }
             case PROFILE_COMPATIBLE,
                  PROFILE_LIGHTWEIGHT -> "轻量";
             case PROFILE_CUSTOM -> "自定义";
@@ -198,6 +239,35 @@ public class PlaybackPerformanceSetting {
         return getProfile(kernel) == PROFILE_AUTO;
     }
 
+    public static boolean isAuto(String optionId) {
+        return isAuto(PlayerSetting.getPlayer(), optionId);
+    }
+
+    public static boolean isAuto(int kernel, String optionId) {
+        return isAuto(kernel) && !isOverridden(kernel, optionId);
+    }
+
+    public static boolean hasAutomaticOptions(int kernel, String... optionIds) {
+        if (!isAuto(kernel) || optionIds == null) return false;
+        for (String optionId : optionIds) {
+            if (!isOverridden(kernel, optionId)) return true;
+        }
+        return false;
+    }
+
+    public static boolean isOverridden(int kernel, String optionId) {
+        String id = optionId == null ? "" : optionId.trim();
+        return !id.isEmpty() && getOverrides(kernel).contains(id);
+    }
+
+    public static int getOverrideCount(int kernel) {
+        return getOverrides(kernel).size();
+    }
+
+    public static synchronized void clearOverrides(int kernel) {
+        Prefers.remove(overrideKey(kernel));
+    }
+
     public static boolean isCompatible() {
         return isLightweight();
     }
@@ -212,7 +282,7 @@ public class PlaybackPerformanceSetting {
     }
 
     public static void putHighBufferEnabled(boolean value) {
-        putCustom(KEY_HIGH_BUFFER, value);
+        putCustom(KEY_HIGH_BUFFER, value, PlaybackPerformanceCatalog.BUFFER_TIME);
     }
 
     public static boolean isBandwidthMeterEnabled() {
@@ -221,7 +291,7 @@ public class PlaybackPerformanceSetting {
     }
 
     public static void putBandwidthMeterEnabled(boolean value) {
-        putCustom(KEY_BANDWIDTH_METER, value);
+        putCustom(KEY_BANDWIDTH_METER, value, PlaybackPerformanceCatalog.BANDWIDTH_METER);
     }
 
     public static boolean isDynamicSchedulingEnabled() {
@@ -230,7 +300,7 @@ public class PlaybackPerformanceSetting {
     }
 
     public static void putDynamicSchedulingEnabled(boolean value) {
-        putCustom(KEY_DYNAMIC_SCHEDULING, value);
+        putCustom(KEY_DYNAMIC_SCHEDULING, value, PlaybackPerformanceCatalog.DYNAMIC_SCHEDULING);
     }
 
     public static boolean isCodecAsyncQueueingEnabled() {
@@ -239,7 +309,7 @@ public class PlaybackPerformanceSetting {
     }
 
     public static void putCodecAsyncQueueingEnabled(boolean value) {
-        putCustom(KEY_CODEC_ASYNC_QUEUEING, value);
+        putCustom(KEY_CODEC_ASYNC_QUEUEING, value, PlaybackPerformanceCatalog.CODEC_ASYNC);
     }
 
     public static boolean isVideoDurationProgressEnabled() {
@@ -248,7 +318,7 @@ public class PlaybackPerformanceSetting {
     }
 
     public static void putVideoDurationProgressEnabled(boolean value) {
-        putCustom(KEY_VIDEO_DURATION_PROGRESS, value);
+        putCustom(KEY_VIDEO_DURATION_PROGRESS, value, PlaybackPerformanceCatalog.DURATION_PROGRESS);
     }
 
     public static boolean isLateDropInputEnabled() {
@@ -257,7 +327,7 @@ public class PlaybackPerformanceSetting {
     }
 
     public static void putLateDropInputEnabled(boolean value) {
-        putCustom(KEY_LATE_DROP_INPUT, value);
+        putCustom(KEY_LATE_DROP_INPUT, value, PlaybackPerformanceCatalog.LATE_DROP);
     }
 
     public static boolean isTrackLimitEnabled() {
@@ -266,7 +336,7 @@ public class PlaybackPerformanceSetting {
     }
 
     public static void putTrackLimitEnabled(boolean value) {
-        putCustom(KEY_TRACK_LIMIT, value);
+        putCustom(KEY_TRACK_LIMIT, value, PlaybackPerformanceCatalog.TRACK_LIMIT);
     }
 
     public static boolean isAdaptiveDowngradeEnabled() {
@@ -275,7 +345,7 @@ public class PlaybackPerformanceSetting {
     }
 
     public static void putAdaptiveDowngradeEnabled(boolean value) {
-        putCustom(KEY_ADAPTIVE_DOWNGRADE, value);
+        putCustom(KEY_ADAPTIVE_DOWNGRADE, value, PlaybackPerformanceCatalog.ADAPTIVE_DOWNGRADE);
     }
 
     public static boolean isLoadOnlySelectedTracksEnabled() {
@@ -284,7 +354,7 @@ public class PlaybackPerformanceSetting {
     }
 
     public static void putLoadOnlySelectedTracksEnabled(boolean value) {
-        putCustom(KEY_LOAD_ONLY_SELECTED_TRACKS, value);
+        putCustom(KEY_LOAD_ONLY_SELECTED_TRACKS, value, PlaybackPerformanceCatalog.LOAD_SELECTED_TRACKS);
     }
 
     public static boolean isSurfaceFixedSizeEnabled() {
@@ -293,7 +363,7 @@ public class PlaybackPerformanceSetting {
     }
 
     public static void putSurfaceFixedSizeEnabled(boolean value) {
-        putCustom(KEY_SURFACE_FIXED_SIZE, value);
+        putCustom(KEY_SURFACE_FIXED_SIZE, value, PlaybackPerformanceCatalog.SURFACE_FIXED_SIZE);
     }
 
     public static boolean isDecoderFallbackEnabled() {
@@ -302,7 +372,7 @@ public class PlaybackPerformanceSetting {
     }
 
     public static void putDecoderFallbackEnabled(boolean value) {
-        putCustom(KEY_DECODER_FALLBACK, value);
+        putCustom(KEY_DECODER_FALLBACK, value, PlaybackPerformanceCatalog.DECODER_FALLBACK);
     }
 
     public static boolean isDv7Hdr10FallbackEnabled() {
@@ -311,7 +381,7 @@ public class PlaybackPerformanceSetting {
     }
 
     public static void putDv7Hdr10FallbackEnabled(boolean value) {
-        putCustom(KEY_DV7_HDR10_FALLBACK, value);
+        putCustom(KEY_DV7_HDR10_FALLBACK, value, PlaybackPerformanceCatalog.DV7_HDR10_FALLBACK);
     }
 
     public static boolean isSoftVideoTuneEnabled() {
@@ -320,7 +390,7 @@ public class PlaybackPerformanceSetting {
     }
 
     public static void putSoftVideoTuneEnabled(boolean value) {
-        putCustom(KEY_SOFT_VIDEO_TUNE, value);
+        putCustom(KEY_SOFT_VIDEO_TUNE, value, PlaybackPerformanceCatalog.SOFT_VIDEO_TUNE);
     }
 
     public static String getSummary() {
@@ -330,30 +400,33 @@ public class PlaybackPerformanceSetting {
 
     public static String getForwardBufferText() {
         ensureInitialized();
+        int kernel = PlayerSetting.getPlayer();
         return forwardBufferText(
-                PlayerSetting.getPlayer(),
-                getProfile(),
+                kernel,
+                displayProfile(kernel, PlaybackPerformanceCatalog.BUFFER_TIME),
                 PlayerSetting.getBuffer());
     }
 
     public static String getMemoryBufferText() {
         ensureInitialized();
-        if (PlayerSetting.getPlayer() == PlayerSetting.IJK) {
+        int kernel = PlayerSetting.getPlayer();
+        if (kernel == PlayerSetting.IJK) {
             return ijkMemoryBufferText(
-                    getProfile(),
+                    displayProfile(kernel, PlaybackPerformanceCatalog.IJK_BUFFER),
                     IjkPerformanceSetting.getBufferMb());
         }
         return memoryBufferText(
-                PlayerSetting.getPlayer(),
-                getProfile(),
+                kernel,
+                displayProfile(kernel, PlaybackPerformanceCatalog.BUFFER_BYTES),
                 PlayerSetting.getBufferBytesOption());
     }
 
     public static String getPlayedDataRetentionText() {
         ensureInitialized();
+        int kernel = PlayerSetting.getPlayer();
         return playedDataRetentionText(
-                PlayerSetting.getPlayer(),
-                getProfile(),
+                kernel,
+                displayProfile(kernel, PlaybackPerformanceCatalog.BACK_BUFFER),
                 PlayerSetting.getBackBufferOption());
     }
 
@@ -364,21 +437,21 @@ public class PlaybackPerformanceSetting {
 
     public static String getExoStartBufferText() {
         ensureInitialized();
-        return isAuto(PlayerSetting.EXO)
+        return isAuto(PlayerSetting.EXO, PlaybackPerformanceCatalog.EXO_START_BUFFER)
                 ? "自动 · 0.5～8秒"
                 : secondsText(ExoPerformanceSetting.getStartBufferMs());
     }
 
     public static String getExoRebufferText() {
         ensureInitialized();
-        return isAuto(PlayerSetting.EXO)
+        return isAuto(PlayerSetting.EXO, PlaybackPerformanceCatalog.EXO_REBUFFER)
                 ? "自动 · 1～15秒"
                 : secondsText(ExoPerformanceSetting.getRebufferMs());
     }
 
     public static String getExoPrioritizeTimeText() {
         ensureInitialized();
-        return isAuto(PlayerSetting.EXO)
+        return isAuto(PlayerSetting.EXO, PlaybackPerformanceCatalog.EXO_PRIORITIZE_TIME)
                 ? "自动 · 按资源"
                 : onOff(ExoPerformanceSetting.isPrioritizeTime());
     }
@@ -426,10 +499,34 @@ public class PlaybackPerformanceSetting {
         Prefers.put(key, value);
     }
 
-    private static void putCustom(String key, boolean value) {
+    private static void putCustom(String key, boolean value, String optionId) {
         ensureInitialized();
         Prefers.put(key, value);
-        markCustom();
+        markOverride(optionId);
+    }
+
+    private static int displayProfile(int kernel, String optionId) {
+        int profile = getProfile(kernel);
+        return profile == PROFILE_AUTO && isOverridden(kernel, optionId)
+                ? PROFILE_CUSTOM : profile;
+    }
+
+    private static Set<String> getOverrides(int kernel) {
+        try {
+            Set<String> stored = Prefers.getPrefers().getStringSet(
+                    overrideKey(kernel), Collections.emptySet());
+            return stored == null ? new HashSet<>() : new HashSet<>(stored);
+        } catch (ClassCastException ignored) {
+            return new HashSet<>();
+        }
+    }
+
+    private static String overrideKey(int kernel) {
+        return switch (PlayerSetting.sanitizePlayer(kernel)) {
+            case PlayerSetting.MPV -> KEY_AUTO_OVERRIDES_MPV;
+            case PlayerSetting.IJK -> KEY_AUTO_OVERRIDES_IJK;
+            default -> KEY_AUTO_OVERRIDES_EXO;
+        };
     }
 
     private static void migrateProfiles() {

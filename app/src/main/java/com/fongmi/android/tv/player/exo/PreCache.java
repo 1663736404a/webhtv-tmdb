@@ -24,6 +24,7 @@ import com.fongmi.android.tv.player.PlaybackTrace;
 import com.fongmi.android.tv.player.PreloadPausePolicy;
 import com.fongmi.android.tv.player.cache.PlaybackDiskBufferStore;
 import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
+import com.fongmi.android.tv.setting.PlaybackPerformanceCatalog;
 import com.fongmi.android.tv.setting.PlaybackExperimentSetting;
 import com.fongmi.android.tv.player.PlaybackExperimentPolicy;
 import com.fongmi.android.tv.setting.PreloadSetting;
@@ -103,12 +104,22 @@ public class PreCache implements Player.Listener {
         this.playbackTraceId = PlaybackTrace.normalize(playbackTraceId);
         PriorityTaskDataSource.resetDiagnostics();
         if (!PreloadSetting.isPreload(PlayerSetting.EXO) || !canPreCache(mediaItem)) return;
-        boolean automatic = PlaybackPerformanceSetting.isAuto(PlayerSetting.EXO);
+        boolean automaticPreload = PlaybackPerformanceSetting.isAuto(
+                PlayerSetting.EXO,
+                PlaybackPerformanceCatalog.PRELOAD);
+        boolean automaticTuning = PlaybackPerformanceSetting.hasAutomaticOptions(
+                PlayerSetting.EXO,
+                PlaybackPerformanceCatalog.PRELOAD_THREADS,
+                PlaybackPerformanceCatalog.PRELOAD_TIME);
+        boolean automatic = automaticPreload || automaticTuning;
         if (automatic && !PlaybackExperimentSetting.isAllowed(
                 PlaybackExperimentPolicy.Action.EXO_AUTO_PRELOAD)) {
-            PlaybackTrace.log("exo-preload", this.playbackTraceId,
-                    "event=experiment-suppressed action=keep-foreground-only");
-            return;
+            if (!automaticPreload) automatic = false;
+            else {
+                PlaybackTrace.log("exo-preload", this.playbackTraceId,
+                        "event=experiment-suppressed action=keep-foreground-only");
+                return;
+            }
         }
         this.player = player;
         this.handler = new Handler(player.getApplicationLooper());
@@ -694,7 +705,12 @@ public class PreCache implements Player.Listener {
     private Executor getExecutor() {
         int requested = PreloadSetting.getPreloadThreads(PlayerSetting.EXO);
         int count = route == null ? requested : route.effectivePreloadThreads(requested);
-        if (autoPolicy != null) count = route == null ? AutoPreloadPolicy.NORMAL_THREADS : route.effectivePreloadThreads(AutoPreloadPolicy.NORMAL_THREADS);
+        if (autoPolicy != null && PlaybackPerformanceSetting.isAuto(
+                PlayerSetting.EXO,
+                PlaybackPerformanceCatalog.PRELOAD_THREADS)) {
+            count = route == null ? AutoPreloadPolicy.NORMAL_THREADS
+                    : route.effectivePreloadThreads(AutoPreloadPolicy.NORMAL_THREADS);
+        }
         if (executor != null) {
             setEffectiveThreads(count);
             return executor;
@@ -721,7 +737,32 @@ public class PreCache implements Player.Listener {
                 PlaybackAutoContextStore.process().snapshot(),
                 memoryPreloadPaused,
                 lifecycle.hasActiveTask());
-        return autoPolicy.evaluate(lastAutoInputs);
+        return effectiveAutoDecision(autoPolicy.evaluate(lastAutoInputs));
+    }
+
+    private AutoPreloadPolicy.Decision effectiveAutoDecision(
+            AutoPreloadPolicy.Decision decision) {
+        if (decision == null) return null;
+        boolean automaticPreload = PlaybackPerformanceSetting.isAuto(
+                PlayerSetting.EXO,
+                PlaybackPerformanceCatalog.PRELOAD);
+        if (automaticPreload && !decision.enabled()) return decision;
+        int effectiveThreads = PlaybackPerformanceSetting.isAuto(
+                PlayerSetting.EXO,
+                PlaybackPerformanceCatalog.PRELOAD_THREADS)
+                ? Math.max(AutoPreloadPolicy.NORMAL_THREADS, decision.threads())
+                : PreloadSetting.getPreloadThreads(PlayerSetting.EXO);
+        long effectiveDurationMs = PlaybackPerformanceSetting.isAuto(
+                PlayerSetting.EXO,
+                PlaybackPerformanceCatalog.PRELOAD_TIME)
+                ? (decision.durationMs() > 0
+                ? decision.durationMs() : AutoPreloadPolicy.DEGRADED_DURATION_MS)
+                : PreloadSetting.getPreloadDurationMs(PlayerSetting.EXO);
+        return new AutoPreloadPolicy.Decision(
+                effectiveThreads,
+                effectiveDurationMs,
+                decision.mode(),
+                decision.reason());
     }
 
     private PlaybackAutoContext.SessionToken currentAutoSession() {

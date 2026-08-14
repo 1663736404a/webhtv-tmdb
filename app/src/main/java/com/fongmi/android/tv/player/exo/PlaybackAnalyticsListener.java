@@ -19,6 +19,7 @@ import androidx.media3.exoplayer.source.MediaLoadData;
 import androidx.media3.exoplayer.video.VideoFrameMetadataListener;
 
 import com.fongmi.android.tv.setting.ExoPerformanceSetting;
+import com.fongmi.android.tv.setting.PlaybackPerformanceCatalog;
 import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
 import com.fongmi.android.tv.setting.PlayerSetting;
 import com.fongmi.android.tv.player.PlaybackTrace;
@@ -485,12 +486,15 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
             long bufferedDurationMs,
             boolean rebuffering,
             long nowElapsedMs) {
-        if (!PlaybackPerformanceSetting.isAuto(PlayerSetting.EXO)) return;
+        if (!PlaybackPerformanceSetting.hasAutomaticOptions(
+                PlayerSetting.EXO,
+                PlaybackPerformanceCatalog.EXO_START_BUFFER,
+                PlaybackPerformanceCatalog.EXO_REBUFFER)) return;
         ExoPerformanceSetting.refreshAutoSession(playbackTraceId);
         ExoPlaybackThresholdCoordinator.process().observe(
                 ExoPlaybackThresholdCoordinator.captureInputs(
-                        ExoPerformanceSetting.getAutoSessionStartBufferMs(),
-                        ExoPerformanceSetting.getAutoSessionRebufferMs(),
+                        ExoPerformanceSetting.getEffectiveStartBufferMs(),
+                        ExoPerformanceSetting.getEffectiveRebufferMs(),
                         Math.max(0, bufferedDurationMs),
                         -1,
                         rebuffering,

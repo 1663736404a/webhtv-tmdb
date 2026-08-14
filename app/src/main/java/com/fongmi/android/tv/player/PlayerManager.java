@@ -94,9 +94,11 @@ import com.fongmi.android.tv.player.mpv.MpvVulkanBackendPolicy;
 import com.fongmi.android.tv.player.mpv.MpvResourcePressurePolicy;
 import com.fongmi.android.tv.setting.DanmakuSetting;
 import com.fongmi.android.tv.setting.ExoPerformanceSetting;
+import com.fongmi.android.tv.setting.IjkPerformanceSetting;
 import com.fongmi.android.tv.setting.MpvPerformanceSetting;
 import com.fongmi.android.tv.setting.PlaybackExperimentSetting;
 import com.fongmi.android.tv.setting.PlaybackLightweightAssessmentSetting;
+import com.fongmi.android.tv.setting.PlaybackPerformanceCatalog;
 import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
 import com.fongmi.android.tv.setting.PlaybackProfileAbSetting;
 import com.fongmi.android.tv.setting.PlayerSetting;
@@ -1541,8 +1543,20 @@ public class PlayerManager implements ParseCallback {
         if (!(engine instanceof MpvPlayerEngine mpv) || !playbackAutoSession.active()) return;
         long now = SystemClock.elapsedRealtime();
         PlaybackAutoContext context = playbackAutoContextStore.snapshot();
-        boolean automatic = PlaybackPerformanceSetting.isAuto(PlayerSetting.MPV);
-        applyMpvHlsInitialControl(mpv, context, automatic, now);
+        boolean automaticForward = PlaybackPerformanceSetting.isAuto(
+                PlayerSetting.MPV,
+                PlaybackPerformanceCatalog.BUFFER_BYTES);
+        boolean automaticBack = PlaybackPerformanceSetting.isAuto(
+                PlayerSetting.MPV,
+                PlaybackPerformanceCatalog.BACK_BUFFER);
+        boolean automatic = automaticForward || automaticBack;
+        applyMpvHlsInitialControl(
+                mpv,
+                context,
+                PlaybackPerformanceSetting.isAuto(
+                        PlayerSetting.MPV,
+                        PlaybackPerformanceCatalog.MPV_HLS_BITRATE),
+                now);
         MpvAutoControlPolicy.Request request = MpvAutoControlPolicy.requestFrom(
                 context,
                 automatic,
@@ -1573,11 +1587,22 @@ public class PlayerManager implements ParseCallback {
         String applyResult = "not-requested";
         MpvForwardCacheController.Trigger forwardTrigger = null;
         MpvBackCacheController.Trigger backTrigger = null;
+        long targetForwardBytes = automaticForward
+                ? decision.forwardBytes() : mpv.getConfiguredForwardCacheBytes();
+        long targetBackBytes = automaticBack
+                ? decision.backBytes() : mpv.getConfiguredBackCacheBytes();
+        if (targetBackBytes > targetForwardBytes) {
+            if (automaticForward && !automaticBack) {
+                targetForwardBytes = targetBackBytes;
+            } else if (!automaticForward && automaticBack) {
+                targetBackBytes = targetForwardBytes;
+            }
+        }
         if (decision.requestsApply()) {
             started = mpvAutoController.beginApply(playbackAutoSession, decision);
             MpvPlayer.AutoCacheBaselineResult result = started
                     ? mpv.applyAutoCacheBaseline(
-                    playbackTrace.current(), decision.forwardBytes(), decision.backBytes())
+                    playbackTrace.current(), targetForwardBytes, targetBackBytes)
                     : MpvPlayer.AutoCacheBaselineResult.REJECTED;
             applied = result.accepted();
             staged = result.staged();
@@ -1598,15 +1623,15 @@ public class PlayerManager implements ParseCallback {
             boolean preserveForwardTarget = forwardBefore.baselineInitialized();
             boolean preserveBackTarget = backBefore.baselineInitialized();
             mpvForwardCacheController.recordBaseline(
-                    playbackAutoSession, decision.forwardBytes(), preserveForwardTarget);
+                    playbackAutoSession, targetForwardBytes, preserveForwardTarget);
             mpvBackCacheController.recordBaseline(
-                    playbackAutoSession, decision.backBytes(), preserveBackTarget);
+                    playbackAutoSession, targetBackBytes, preserveBackTarget);
             mpvCacheTargetCoordinator.recordBaseline(
-                    playbackAutoSession, decision.forwardBytes(), decision.backBytes());
-            forwardTrigger = preserveForwardTarget
+                    playbackAutoSession, targetForwardBytes, targetBackBytes);
+            forwardTrigger = !automaticForward ? null : preserveForwardTarget
                     ? MpvForwardCacheController.Trigger.REBUILD
                     : MpvForwardCacheController.Trigger.BASELINE;
-            backTrigger = preserveBackTarget
+            backTrigger = !automaticBack ? null : preserveBackTarget
                     ? MpvBackCacheController.Trigger.REBUILD
                     : MpvBackCacheController.Trigger.BASELINE;
         }
@@ -1744,7 +1769,8 @@ public class PlayerManager implements ParseCallback {
         PlaybackAutoContext context = playbackAutoContextStore.snapshot();
         IjkBufferPolicy.Request request = buildIjkBufferRequest(
                 context, now, false);
-        IjkBufferPolicy.Decision policy = IjkBufferPolicy.resolve(request);
+        IjkBufferPolicy.Decision policy = mergeIjkBufferDecision(
+                IjkBufferPolicy.resolve(request));
         IjkBufferController.Decision decision =
                 ijkBufferController.stageInitial(
                         playbackAutoSession, context.session(), policy);
@@ -1755,10 +1781,10 @@ public class PlayerManager implements ParseCallback {
                 ijkDecodePressureController.stageInitial(
                         playbackAutoSession,
                         context.session(),
-                        PlaybackPerformanceSetting.isAuto(PlayerSetting.IJK));
-        if (PlaybackPerformanceSetting.isAuto(PlayerSetting.IJK)) {
+                        hasAutomaticIjkDecodeOptions());
+        if (hasAutomaticIjkDecodeOptions()) {
             ijk.stageAutomaticDecodeControlConfig(
-                    decodeDecision.targetConfig());
+                    mergeIjkDecodeConfig(decodeDecision.targetConfig()));
         }
         publishIjkBufferDecision(
                 decision, request, IjkBufferController.Trigger.INITIAL,
@@ -1773,15 +1799,22 @@ public class PlayerManager implements ParseCallback {
 
     private void restoreIjkStagedBufferConfig() {
         if (!(engine instanceof IjkPlayerEngine ijk)
-                || !PlaybackPerformanceSetting.isAuto(PlayerSetting.IJK)
+                || !PlaybackPerformanceSetting.hasAutomaticOptions(
+                PlayerSetting.IJK,
+                PlaybackPerformanceCatalog.IJK_BUFFER,
+                PlaybackPerformanceCatalog.IJK_WATER,
+                PlaybackPerformanceCatalog.IJK_PICTURE_QUEUE,
+                PlaybackPerformanceCatalog.IJK_SOFT_TUNE)
                 || !playbackAutoSession.active()) return;
         IjkBufferController.Snapshot snapshot = ijkBufferController.snapshot();
         if (!playbackAutoSession.equals(snapshot.session())) return;
-        ijk.stageAutomaticInputBufferConfig(snapshot.stagedConfig());
+        ijk.stageAutomaticInputBufferConfig(
+                mergeIjkBufferConfig(snapshot.stagedConfig()));
         IjkDecodePressureController.Snapshot decode =
                 ijkDecodePressureController.snapshot();
         if (playbackAutoSession.equals(decode.session())) {
-            ijk.stageAutomaticDecodeControlConfig(decode.stagedConfig());
+            ijk.stageAutomaticDecodeControlConfig(
+                    mergeIjkDecodeConfig(decode.stagedConfig()));
         }
     }
 
@@ -1802,7 +1835,8 @@ public class PlayerManager implements ParseCallback {
         PlaybackAutoContext context = playbackAutoContextStore.snapshot();
         IjkBufferPolicy.Request request = buildIjkBufferRequest(
                 context, now, true);
-        IjkBufferPolicy.Decision policy = IjkBufferPolicy.resolve(request);
+        IjkBufferPolicy.Decision policy = mergeIjkBufferDecision(
+                IjkBufferPolicy.resolve(request));
         IjkBufferController.Decision decision = ijkBufferController.evaluate(
                 playbackAutoSession,
                 context.session(),
@@ -1835,7 +1869,8 @@ public class PlayerManager implements ParseCallback {
                         playbackAutoSession, decision);
                 if (applyStarted) {
                     ijk.stageAutomaticInputBufferConfig(
-                            ijkBufferController.snapshot().stagedConfig());
+                            mergeIjkBufferConfig(
+                                    ijkBufferController.snapshot().stagedConfig()));
                     pendingIjkBufferDecision = decision;
                     boolean restartStarted = restartIjkBuffer(ijk, decision);
                     applySucceeded = restartStarted
@@ -1851,7 +1886,8 @@ public class PlayerManager implements ParseCallback {
         }
         if (policy.managed()) {
             ijk.stageAutomaticInputBufferConfig(
-                    ijkBufferController.snapshot().stagedConfig());
+                    mergeIjkBufferConfig(
+                            ijkBufferController.snapshot().stagedConfig()));
         }
         publishIjkBufferDecision(
                 decision, request, trigger, applyStarted,
@@ -1887,6 +1923,21 @@ public class PlayerManager implements ParseCallback {
         boolean streamUsable = streamFact.isUsable(now);
         PlaybackAutoContext.StreamKind stream = streamUsable
                 ? streamFact.value() : PlaybackAutoContext.StreamKind.UNKNOWN;
+        int configuredScene = PlaybackPerformanceSetting.isOverridden(
+                PlayerSetting.IJK,
+                PlaybackPerformanceCatalog.IJK_SCENE)
+                ? IjkPerformanceSetting.getScene()
+                : IjkPerformanceSetting.SCENE_AUTO;
+        if (configuredScene != IjkPerformanceSetting.SCENE_AUTO) {
+            stream = switch (configuredScene) {
+                case IjkPerformanceSetting.SCENE_VOD ->
+                        PlaybackAutoContext.StreamKind.VOD;
+                case IjkPerformanceSetting.SCENE_LIVE_LOW_LATENCY ->
+                        PlaybackAutoContext.StreamKind.LOW_LATENCY_LIVE;
+                default -> PlaybackAutoContext.StreamKind.LIVE;
+            };
+            streamUsable = true;
+        }
         boolean segmented = protocol == PlaybackAutoContext.Protocol.HLS
                 || protocol == PlaybackAutoContext.Protocol.DASH;
         if (!streamUsable && allowEngineScene && !segmented
@@ -1902,7 +1953,10 @@ public class PlayerManager implements ParseCallback {
         boolean snapshotUsable = snapshotFact.isUsable(now)
                 && snapshotFact.value().hasEvidence();
         return new IjkBufferPolicy.Request(
-                PlaybackPerformanceSetting.isAuto(PlayerSetting.IJK),
+                PlaybackPerformanceSetting.hasAutomaticOptions(
+                        PlayerSetting.IJK,
+                        PlaybackPerformanceCatalog.IJK_BUFFER,
+                        PlaybackPerformanceCatalog.IJK_WATER),
                 isIjk(),
                 protocolUsable,
                 protocol,
@@ -1922,6 +1976,44 @@ public class PlayerManager implements ParseCallback {
                 liveLagFact.isUsable(now) ? liveLagFact.value() : -1);
     }
 
+    private IjkBufferPolicy.Config mergeIjkBufferConfig(
+            IjkBufferPolicy.Config automatic) {
+        IjkBufferPolicy.Config safe = automatic == null
+                ? IjkBufferPolicy.safeInitialConfig() : automatic;
+        int bufferMb = PlaybackPerformanceSetting.isAuto(
+                PlayerSetting.IJK,
+                PlaybackPerformanceCatalog.IJK_BUFFER)
+                ? safe.bufferMb() : IjkPerformanceSetting.getBufferMb();
+        if (PlaybackPerformanceSetting.isAuto(
+                PlayerSetting.IJK,
+                PlaybackPerformanceCatalog.IJK_WATER)) {
+            return new IjkBufferPolicy.Config(
+                    bufferMb,
+                    safe.firstWaterMs(),
+                    safe.nextWaterMs(),
+                    safe.lastWaterMs());
+        }
+        return new IjkBufferPolicy.Config(
+                bufferMb,
+                IjkPerformanceSetting.getFirstWaterMs(),
+                IjkPerformanceSetting.getNextWaterMs(),
+                IjkPerformanceSetting.getLastWaterMs());
+    }
+
+    private IjkBufferPolicy.Decision mergeIjkBufferDecision(
+            IjkBufferPolicy.Decision decision) {
+        IjkBufferPolicy.Decision safe = decision == null
+                ? IjkBufferPolicy.resolve(null) : decision;
+        return new IjkBufferPolicy.Decision(
+                safe.managed(),
+                mergeIjkBufferConfig(safe.target()),
+                safe.reason(),
+                safe.memoryCeilingMb(),
+                safe.liveLagHigh(),
+                safe.targetOffsetMs(),
+                safe.mediaDemandBytes());
+    }
+
     private void evaluateIjkRealtimeRecovery(long nowElapsedMs) {
         if (!(engine instanceof IjkPlayerEngine ijk)
                 || !playbackAutoSession.active()) return;
@@ -1932,8 +2024,10 @@ public class PlayerManager implements ParseCallback {
         boolean protocolUsable = protocolFact.isUsable(now);
         PlaybackAutoContext.Protocol protocol = protocolUsable
                 ? protocolFact.value() : PlaybackAutoContext.Protocol.UNKNOWN;
-        boolean automatic = PlaybackPerformanceSetting.isAuto(
-                PlayerSetting.IJK) && experimentAllowed(
+        boolean automatic = PlaybackPerformanceSetting.hasAutomaticOptions(
+                PlayerSetting.IJK,
+                PlaybackPerformanceCatalog.IJK_BUFFER,
+                PlaybackPerformanceCatalog.IJK_WATER) && experimentAllowed(
                 PlaybackExperimentPolicy.Action.IJK_REALTIME_REBUILD);
         boolean realtime = protocol == PlaybackAutoContext.Protocol.RTSP
                 || protocol == PlaybackAutoContext.Protocol.RTMP;
@@ -1985,7 +2079,8 @@ public class PlayerManager implements ParseCallback {
                     pendingIjkBufferDecision = reloadGate;
                     pendingIjkRealtimeRecoveryDecision = decision;
                     ijk.stageAutomaticInputBufferConfig(
-                            ijkBufferController.snapshot().stagedConfig());
+                            mergeIjkBufferConfig(
+                                    ijkBufferController.snapshot().stagedConfig()));
                     restartStarted = restartIjkRealtimeRecovery(
                             ijk, reloadGate, decision);
                     if (!restartStarted) {
@@ -2025,7 +2120,7 @@ public class PlayerManager implements ParseCallback {
                 && decodeFact.isUsable(now);
         IjkDecodePressurePolicy.Input policyInput =
                 new IjkDecodePressurePolicy.Input(
-                        PlaybackPerformanceSetting.isAuto(PlayerSetting.IJK)
+                        isIjkDecodePressureAutomatic()
                                 && experimentAllowed(
                                 PlaybackExperimentPolicy.Action.IJK_DECODE_REBUILD),
                         isIjk(),
@@ -2055,7 +2150,8 @@ public class PlayerManager implements ParseCallback {
                                 playbackAutoSession,
                                 context.session(),
                                 policyInput,
-                                ijk.getAppliedDecodeControlConfig(),
+                                automaticIjkDecodeView(
+                                        ijk.getAppliedDecodeControlConfig()),
                                 reloadState.applyInProgress(),
                                 now));
 
@@ -2079,14 +2175,17 @@ public class PlayerManager implements ParseCallback {
                     pendingIjkBufferDecision = reloadGate;
                     pendingIjkDecodePressureDecision = decision;
                     ijk.stageAutomaticInputBufferConfig(
-                            ijkBufferController.snapshot().stagedConfig());
+                            mergeIjkBufferConfig(
+                                    ijkBufferController.snapshot().stagedConfig()));
                     ijk.stageAutomaticDecodeControlConfig(
-                            ijkDecodePressureController.snapshot()
-                                    .stagedConfig());
+                            mergeIjkDecodeConfig(
+                                    ijkDecodePressureController.snapshot()
+                                            .stagedConfig()));
                     restartStarted = restartIjkDecodePressure(
                             ijk, reloadGate, decision);
                     boolean applied = restartStarted
-                            && decision.targetConfig().equals(
+                            && mergeIjkDecodeConfig(
+                            decision.targetConfig()).equals(
                             ijk.getAppliedDecodeControlConfig());
                     if (!applied) {
                         completeIjkBufferManagedReload(
@@ -2099,9 +2198,10 @@ public class PlayerManager implements ParseCallback {
                 }
             }
         }
-        if (PlaybackPerformanceSetting.isAuto(PlayerSetting.IJK)) {
+        if (hasAutomaticIjkDecodeOptions()) {
             ijk.stageAutomaticDecodeControlConfig(
-                    ijkDecodePressureController.snapshot().stagedConfig());
+                    mergeIjkDecodeConfig(
+                            ijkDecodePressureController.snapshot().stagedConfig()));
         }
         publishIjkDecodePressureDecision(
                 decision,
@@ -2109,6 +2209,51 @@ public class PlayerManager implements ParseCallback {
                 actionStarted,
                 restartStarted,
                 now);
+    }
+
+    private boolean hasAutomaticIjkDecodeOptions() {
+        return PlaybackPerformanceSetting.hasAutomaticOptions(
+                PlayerSetting.IJK,
+                PlaybackPerformanceCatalog.IJK_PICTURE_QUEUE,
+                PlaybackPerformanceCatalog.IJK_SOFT_TUNE);
+    }
+
+    private boolean isIjkDecodePressureAutomatic() {
+        return PlaybackPerformanceSetting.isAuto(
+                PlayerSetting.IJK,
+                PlaybackPerformanceCatalog.IJK_SOFT_TUNE);
+    }
+
+    private IjkDecodePressurePolicy.Config automaticIjkDecodeView(
+            IjkDecodePressurePolicy.Config applied) {
+        IjkDecodePressurePolicy.Config safe = applied == null
+                ? IjkDecodePressurePolicy.automaticInitialConfig()
+                : applied;
+        return new IjkDecodePressurePolicy.Config(
+                IjkDecodePressurePolicy.AUTOMATIC_PICTURE_QUEUE,
+                safe.tuneMode());
+    }
+
+    private IjkDecodePressurePolicy.Config mergeIjkDecodeConfig(
+            IjkDecodePressurePolicy.Config automatic) {
+        IjkDecodePressurePolicy.Config safe = automatic == null
+                ? IjkDecodePressurePolicy.automaticInitialConfig()
+                : automatic;
+        int pictureQueue = PlaybackPerformanceSetting.isAuto(
+                PlayerSetting.IJK,
+                PlaybackPerformanceCatalog.IJK_PICTURE_QUEUE)
+                ? safe.pictureQueue() : IjkPerformanceSetting.getPictureQueue();
+        IjkDecodePressurePolicy.TuneMode tune = PlaybackPerformanceSetting.isAuto(
+                PlayerSetting.IJK,
+                PlaybackPerformanceCatalog.IJK_SOFT_TUNE)
+                ? safe.tuneMode() : switch (IjkPerformanceSetting.getSoftTuneMode()) {
+            case IjkPerformanceSetting.SOFT_TUNE_AGGRESSIVE ->
+                    IjkDecodePressurePolicy.TuneMode.AGGRESSIVE;
+            case IjkPerformanceSetting.SOFT_TUNE_MILD ->
+                    IjkDecodePressurePolicy.TuneMode.MILD;
+            default -> IjkDecodePressurePolicy.TuneMode.OFF;
+        };
+        return new IjkDecodePressurePolicy.Config(pictureQueue, tune);
     }
 
     private boolean isIjkPlaybackActive() {
@@ -2284,12 +2429,19 @@ public class PlayerManager implements ParseCallback {
                         playbackAutoSession, succeeded);
             }
             if (engine instanceof IjkPlayerEngine ijk
-                    && PlaybackPerformanceSetting.isAuto(PlayerSetting.IJK)
+                    && PlaybackPerformanceSetting.hasAutomaticOptions(
+                    PlayerSetting.IJK,
+                    PlaybackPerformanceCatalog.IJK_BUFFER,
+                    PlaybackPerformanceCatalog.IJK_WATER,
+                    PlaybackPerformanceCatalog.IJK_PICTURE_QUEUE,
+                    PlaybackPerformanceCatalog.IJK_SOFT_TUNE)
                     && playbackAutoSession.active()) {
                 ijk.stageAutomaticInputBufferConfig(
-                        ijkBufferController.snapshot().stagedConfig());
+                        mergeIjkBufferConfig(
+                                ijkBufferController.snapshot().stagedConfig()));
                 ijk.stageAutomaticDecodeControlConfig(
-                        ijkDecodePressureController.snapshot().stagedConfig());
+                        mergeIjkDecodeConfig(
+                                ijkDecodePressureController.snapshot().stagedConfig()));
             }
             String domain = recovery != null ? "ijk-realtime"
                     : decode != null ? "ijk-decode" : "ijk-buffer";
@@ -3365,7 +3517,16 @@ public class PlayerManager implements ParseCallback {
         if (!(engine instanceof MpvPlayerEngine mpv) || !playbackAutoSession.active()) return;
         long now = Math.max(0, nowElapsedMs);
         PlaybackAutoContext context = playbackAutoContextStore.snapshot();
-        boolean automatic = PlaybackPerformanceSetting.isAuto(PlayerSetting.MPV);
+        boolean automaticForward = PlaybackPerformanceSetting.isAuto(
+                PlayerSetting.MPV,
+                PlaybackPerformanceCatalog.BUFFER_BYTES);
+        boolean automaticBack = PlaybackPerformanceSetting.isAuto(
+                PlayerSetting.MPV,
+                PlaybackPerformanceCatalog.BACK_BUFFER);
+        boolean automaticPreload = PlaybackPerformanceSetting.isAuto(
+                PlayerSetting.MPV,
+                PlaybackPerformanceCatalog.PRELOAD);
+        boolean automatic = automaticForward || automaticBack || automaticPreload;
         boolean performancePriority = MpvPerformanceSetting.isPerformancePriority();
         MpvForwardCacheController.Snapshot forwardBefore = mpvForwardCacheController.snapshot();
         MpvBackCacheController.Snapshot backBefore = mpvBackCacheController.snapshot();
@@ -3403,22 +3564,25 @@ public class PlayerManager implements ParseCallback {
                 resourceDecision,
                 resourcePreloadChanged,
                 now);
-        evaluateMpvPreload(mpv, context, resourceDecision, automatic,
+        evaluateMpvPreload(mpv, context, resourceDecision, automaticPreload,
                 performancePriority, now);
         MpvForwardCachePolicy.Assessment forwardAssessment = MpvForwardCachePolicy.assess(
                 context,
-                automatic,
+                automaticForward,
                 isMpv(),
                 performancePriority,
                 baseline,
                 now);
-        MpvForwardCacheController.Decision forwardDecision = forwardTrigger == null
+        MpvForwardCacheController.Decision forwardDecision = !automaticForward
+                || forwardTrigger == null
                 ? null : mpvForwardCacheController.evaluate(
                 playbackAutoSession, context.session(), forwardAssessment, resourceDecision,
                 forwardTrigger, now);
         MpvForwardCacheController.Snapshot forwardEvaluated =
                 mpvForwardCacheController.snapshot();
-        long currentForward = forwardEvaluated.controlledTargetBytes() > 0
+        long currentForward = !automaticForward
+                ? mpv.getConfiguredForwardCacheBytes()
+                : forwardEvaluated.controlledTargetBytes() > 0
                 ? forwardEvaluated.controlledTargetBytes() : baseline;
         long targetForward = forwardDecision != null && forwardDecision.requestsApply()
                 ? forwardDecision.targetBytes() : currentForward;
@@ -3428,7 +3592,7 @@ public class PlayerManager implements ParseCallback {
                 && backBefore.controlledTargetBytes() > 0;
         MpvBackCachePolicy.Request backRequest = MpvBackCachePolicy.requestFrom(
                 context,
-                automatic,
+                automaticBack,
                 isMpv(),
                 performancePriority,
                 seekableForBack,
@@ -3438,15 +3602,24 @@ public class PlayerManager implements ParseCallback {
                 now);
         MpvBackCachePolicy.Assessment backAssessment =
                 MpvBackCachePolicy.resolve(backRequest);
-        MpvBackCacheController.Decision backDecision = backTrigger == null
+        MpvBackCacheController.Decision backDecision = !automaticBack
+                || backTrigger == null
                 ? null : mpvBackCacheController.evaluate(
                 playbackAutoSession, context.session(), backAssessment, resourceDecision,
                 backTrigger, seekObservation, now);
         MpvBackCacheController.Snapshot backEvaluated = mpvBackCacheController.snapshot();
-        long currentBack = backEvaluated.controlledTargetBytes() >= 0
+        long currentBack = !automaticBack
+                ? mpv.getConfiguredBackCacheBytes()
+                : backEvaluated.controlledTargetBytes() >= 0
                 ? backEvaluated.controlledTargetBytes() : 0;
         long targetBack = backDecision != null && backDecision.requestsApply()
                 ? backDecision.targetBytes() : currentBack;
+        if (automaticForward && !automaticBack && targetBack > targetForward) {
+            targetForward = targetBack;
+        } else if (!automaticForward && automaticBack
+                && targetBack > targetForward) {
+            targetBack = targetForward;
+        }
 
         boolean cacheExpansionAllowed = experimentAllowed(
                 PlaybackExperimentPolicy.Action.MPV_CACHE_EXPANSION);
@@ -5865,7 +6038,9 @@ public class PlayerManager implements ParseCallback {
                 && player.getPlaybackState() == Player.STATE_BUFFERING;
         MpvHlsVariantController.RuntimeObservation observation =
                 new MpvHlsVariantController.RuntimeObservation(
-                        PlaybackPerformanceSetting.isAuto(PlayerSetting.MPV)
+                        PlaybackPerformanceSetting.isAuto(
+                                PlayerSetting.MPV,
+                                PlaybackPerformanceCatalog.MPV_HLS_BITRATE)
                                 && experimentAllowed(
                                 PlaybackExperimentPolicy.Action.MPV_HLS_RUNTIME_RELOAD),
                         isMpv(),

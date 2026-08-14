@@ -54,8 +54,11 @@ public final class MpvPerformanceSetting {
     }
 
     public static void putOutputMode(int value) {
-        Prefers.put(KEY_OUTPUT_MODE, clamp(value, OUTPUT_AUTO, OUTPUT_SURFACE_DIRECT));
-        PlaybackPerformanceSetting.markCustom();
+        int mode = clamp(value, OUTPUT_AUTO, OUTPUT_SURFACE_DIRECT);
+        Prefers.put(KEY_OUTPUT_MODE, mode);
+        PlaybackPerformanceSetting.setOverride(
+                PlaybackPerformanceCatalog.MPV_OUTPUT,
+                mode != OUTPUT_AUTO);
     }
 
     public static String getOutputModeText() {
@@ -84,8 +87,11 @@ public final class MpvPerformanceSetting {
     }
 
     public static void putHwdecMode(int value) {
-        Prefers.put(KEY_HWDEC, clamp(value, HWDEC_AUTO, HWDEC_COPY));
-        PlaybackPerformanceSetting.markCustom();
+        int mode = clamp(value, HWDEC_AUTO, HWDEC_COPY);
+        Prefers.put(KEY_HWDEC, mode);
+        PlaybackPerformanceSetting.setOverride(
+                PlaybackPerformanceCatalog.MPV_HWDEC,
+                mode != HWDEC_AUTO);
     }
 
     public static String getHwdecOption() {
@@ -110,7 +116,7 @@ public final class MpvPerformanceSetting {
 
     public static void putSyncMode(int value) {
         Prefers.put(KEY_SYNC, clamp(value, SYNC_AUDIO, SYNC_DISPLAY_RESAMPLE));
-        PlaybackPerformanceSetting.markCustom();
+        PlaybackPerformanceSetting.markOverride(PlaybackPerformanceCatalog.MPV_SYNC);
     }
 
     public static String getSyncOption() {
@@ -127,7 +133,7 @@ public final class MpvPerformanceSetting {
 
     public static void putFrameDropMode(int value) {
         Prefers.put(KEY_FRAME_DROP, clamp(value, FRAME_DROP_OUTPUT, FRAME_DROP_DECODER));
-        PlaybackPerformanceSetting.markCustom();
+        PlaybackPerformanceSetting.markOverride(PlaybackPerformanceCatalog.MPV_FRAME_DROP);
     }
 
     public static String getFrameDropOption() {
@@ -152,7 +158,7 @@ public final class MpvPerformanceSetting {
 
     public static void putInterpolation(boolean value) {
         Prefers.put(KEY_INTERPOLATION, value);
-        PlaybackPerformanceSetting.markCustom();
+        PlaybackPerformanceSetting.markOverride(PlaybackPerformanceCatalog.MPV_INTERPOLATION);
     }
 
     public static int getSoftTuneMode() {
@@ -161,7 +167,7 @@ public final class MpvPerformanceSetting {
 
     public static void putSoftTuneMode(int value) {
         Prefers.put(KEY_SOFT_TUNE, clamp(value, SOFT_TUNE_OFF, SOFT_TUNE_AGGRESSIVE));
-        PlaybackPerformanceSetting.markCustom();
+        PlaybackPerformanceSetting.markOverride(PlaybackPerformanceCatalog.MPV_SOFT_TUNE);
     }
 
     public static String getSoftTuneText() {
@@ -182,7 +188,7 @@ public final class MpvPerformanceSetting {
 
     public static void putFrameRateMode(int value) {
         Prefers.put(KEY_FRAME_RATE, clamp(value, FRAME_RATE_OFF, FRAME_RATE_SEAMLESS));
-        PlaybackPerformanceSetting.markCustom();
+        PlaybackPerformanceSetting.markOverride(PlaybackPerformanceCatalog.MPV_FRAME_RATE);
     }
 
     public static String getFrameRateText() {
@@ -195,7 +201,7 @@ public final class MpvPerformanceSetting {
 
     public static void putHlsBitrateMode(int value) {
         Prefers.put(KEY_HLS_BITRATE, clamp(value, HLS_HIGHEST, HLS_LOWEST));
-        PlaybackPerformanceSetting.markCustom();
+        PlaybackPerformanceSetting.markOverride(PlaybackPerformanceCatalog.MPV_HLS_BITRATE);
     }
 
     public static String getHlsBitrateOption() {
@@ -209,7 +215,9 @@ public final class MpvPerformanceSetting {
 
     public static String getHlsBitrateText() {
         return getHlsBitrateText(
-                PlaybackPerformanceSetting.isAuto(PlayerSetting.MPV));
+                PlaybackPerformanceSetting.isAuto(
+                        PlayerSetting.MPV,
+                        PlaybackPerformanceCatalog.MPV_HLS_BITRATE));
     }
 
     public static String getHlsBitrateText(boolean automatic) {
@@ -229,7 +237,7 @@ public final class MpvPerformanceSetting {
 
     public static void putRebufferMs(int value) {
         Prefers.put(KEY_REBUFFER_MS, normalizeRebuffer(value));
-        PlaybackPerformanceSetting.markCustom();
+        PlaybackPerformanceSetting.markOverride(PlaybackPerformanceCatalog.MPV_REBUFFER);
     }
 
     public static int nextRebufferMs() {
@@ -251,6 +259,7 @@ public final class MpvPerformanceSetting {
 
     public static void putOptionPriority(int value) {
         Prefers.put(KEY_OPTION_PRIORITY, clamp(value, PRIORITY_PERFORMANCE, PRIORITY_CONFIG));
+        PlaybackPerformanceSetting.markOverride(PlaybackPerformanceCatalog.MPV_OPTION_PRIORITY);
     }
 
     public static boolean isPerformancePriority() {
@@ -268,7 +277,7 @@ public final class MpvPerformanceSetting {
 
     public static void putVulkanBackend(int value) {
         Prefers.put(KEY_VULKAN_BACKEND, normalizeVulkanBackend(value));
-        PlaybackPerformanceSetting.markCustom();
+        PlaybackPerformanceSetting.markOverride(PlaybackPerformanceCatalog.MPV_VULKAN_BACKEND);
     }
 
     public static int nextVulkanBackend() {
@@ -304,7 +313,7 @@ public final class MpvPerformanceSetting {
 
     public static void putVerboseLog(boolean value) {
         Prefers.put(KEY_VERBOSE_LOG, value);
-        PlaybackPerformanceSetting.markCustom();
+        PlaybackPerformanceSetting.markOverride(PlaybackPerformanceCatalog.MPV_VERBOSE_LOG);
     }
 
     public static void applyRecommended() {
