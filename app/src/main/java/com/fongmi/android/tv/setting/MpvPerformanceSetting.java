@@ -317,6 +317,7 @@ public final class MpvPerformanceSetting {
     }
 
     public static void applyRecommended() {
+        PlayerSetting.putMpvRender(PlayerSetting.MPV_RENDER_OPENGL);
         Prefers.put(KEY_OUTPUT_MODE, OUTPUT_AUTO);
         Prefers.put(KEY_HWDEC, HWDEC_AUTO);
         Prefers.put(KEY_SYNC, SYNC_AUDIO);
@@ -331,6 +332,7 @@ public final class MpvPerformanceSetting {
     }
 
     public static void applyAuto() {
+        PlayerSetting.putMpvRender(PlayerSetting.MPV_RENDER_OPENGL);
         Prefers.put(KEY_OUTPUT_MODE, OUTPUT_AUTO);
         Prefers.put(KEY_HWDEC, HWDEC_AUTO);
         Prefers.put(KEY_SYNC, SYNC_AUDIO);
@@ -349,6 +351,7 @@ public final class MpvPerformanceSetting {
     }
 
     public static void applyLightweight() {
+        PlayerSetting.putMpvRender(PlayerSetting.MPV_RENDER_OPENGL);
         Prefers.put(KEY_OUTPUT_MODE, OUTPUT_AUTO);
         Prefers.put(KEY_HWDEC, HWDEC_AUTO);
         Prefers.put(KEY_SYNC, SYNC_AUDIO);

@@ -837,7 +837,7 @@ public class ExoUtil {
                         eventListener,
                         frameSchedulingDecision,
                         PlaybackPerformanceSetting
-                                .isDv7Hdr10FallbackEnabled(),
+                        .isDv7FallbackAllowed(),
                         dolbyVisionPlaybackState));
             } catch (Throwable ignored) {
             }

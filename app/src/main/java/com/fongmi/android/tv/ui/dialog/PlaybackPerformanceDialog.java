@@ -411,6 +411,10 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                         .setTag(profile), false);
             }
         }
+        for (int index = 0; index < profiles.length; index++) {
+            TabLayout.Tab tab = tabs.getTabAt(index);
+            if (tab != null) tab.setText(profileLabel(profiles[index]));
+        }
         int position = profilePosition(PlaybackPerformanceSetting.getProfile());
         tabs.selectTab(position < 0 ? null : tabs.getTabAt(position));
         syncingProfileTabs = false;
@@ -443,11 +447,18 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                 PlaybackPerformanceSetting.isRecommendedMerged());
     }
 
-    private int profileLabel(int profile) {
+    private CharSequence profileLabel(int profile) {
         return switch (profile) {
             case PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT ->
-                    R.string.player_performance_lightweight;
-            default -> R.string.player_performance_auto;
+                    getString(R.string.player_performance_lightweight);
+            default -> {
+                int overrideCount = PlaybackPerformanceSetting.getOverrideCount(
+                        PlayerSetting.getPlayer());
+                yield overrideCount == 0
+                        ? getString(R.string.player_performance_auto)
+                        : getString(R.string.player_performance_auto)
+                        + " · 已改" + overrideCount + "项";
+            }
         };
     }
 
@@ -457,7 +468,7 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
         PlaybackPerformanceUiPolicy.Split split = optionSplit();
         addHeader(getString(R.string.player_performance_common_section));
         for (PlaybackPerformanceOption option : split.common()) {
-            addRow(option.title(), optionValue(option.id()),
+            addRow(option.id(), option.title(), optionValue(option.id()),
                     optionAction(option.id()));
         }
         String section = "";
@@ -466,7 +477,8 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
                 section = option.section();
                 addHeader(section);
             }
-            addRow(option.title(), optionValue(option.id()), optionAction(option.id()));
+            addRow(option.id(), option.title(), optionValue(option.id()),
+                    optionAction(option.id()));
         }
     }
 
@@ -532,7 +544,10 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
             case PlaybackPerformanceCatalog.LATE_DROP -> onOff(PlaybackPerformanceSetting.isLateDropInputEnabled());
             case PlaybackPerformanceCatalog.SURFACE_FIXED_SIZE -> onOff(PlaybackPerformanceSetting.isSurfaceFixedSizeEnabled());
             case PlaybackPerformanceCatalog.DECODER_FALLBACK -> onOff(PlaybackPerformanceSetting.isDecoderFallbackEnabled());
-            case PlaybackPerformanceCatalog.DV7_HDR10_FALLBACK -> onOff(PlaybackPerformanceSetting.isDv7Hdr10FallbackEnabled());
+            case PlaybackPerformanceCatalog.DV7_HDR10_FALLBACK ->
+                    PlayerSetting.getPlayer() == PlayerSetting.MPV
+                            ? onOff(PlaybackPerformanceSetting.isDv7Hdr10FallbackEnabled())
+                            : PlaybackPerformanceSetting.getDv7HandlingText();
             case PlaybackPerformanceCatalog.SOFT_VIDEO_TUNE -> onOff(PlaybackPerformanceSetting.isSoftVideoTuneEnabled());
             case PlaybackPerformanceCatalog.AUDIO_PASSTHROUGH -> onOff(PlayerSetting.isAudioPassThrough());
             case PlaybackPerformanceCatalog.PREFER_AAC -> onOff(PlayerSetting.isPreferAAC());
@@ -610,7 +625,19 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
             case PlaybackPerformanceCatalog.LATE_DROP -> () -> toggle(PlaybackPerformanceSetting::isLateDropInputEnabled, PlaybackPerformanceSetting::putLateDropInputEnabled);
             case PlaybackPerformanceCatalog.SURFACE_FIXED_SIZE -> () -> toggle(PlaybackPerformanceSetting::isSurfaceFixedSizeEnabled, PlaybackPerformanceSetting::putSurfaceFixedSizeEnabled);
             case PlaybackPerformanceCatalog.DECODER_FALLBACK -> () -> toggle(PlaybackPerformanceSetting::isDecoderFallbackEnabled, PlaybackPerformanceSetting::putDecoderFallbackEnabled);
-            case PlaybackPerformanceCatalog.DV7_HDR10_FALLBACK -> () -> toggle(PlaybackPerformanceSetting::isDv7Hdr10FallbackEnabled, PlaybackPerformanceSetting::putDv7Hdr10FallbackEnabled);
+            case PlaybackPerformanceCatalog.DV7_HDR10_FALLBACK -> () -> {
+                if (PlayerSetting.getPlayer() == PlayerSetting.MPV) {
+                    toggle(PlaybackPerformanceSetting::isDv7Hdr10FallbackEnabled,
+                            PlaybackPerformanceSetting::putDv7Hdr10FallbackEnabled);
+                    return;
+                }
+                int mode = PlaybackPerformanceSetting.getDv7HandlingMode();
+                PlaybackPerformanceSetting.putDv7HandlingMode(
+                        mode == PlaybackPerformanceSetting.DV7_HANDLING_P81
+                                ? PlaybackPerformanceSetting.DV7_HANDLING_HDR10
+                                : PlaybackPerformanceSetting.DV7_HANDLING_P81);
+                refresh();
+            };
             case PlaybackPerformanceCatalog.SOFT_VIDEO_TUNE -> () -> toggle(PlaybackPerformanceSetting::isSoftVideoTuneEnabled, PlaybackPerformanceSetting::putSoftVideoTuneEnabled);
             case PlaybackPerformanceCatalog.AUDIO_PASSTHROUGH -> () -> togglePlayer(id, PlayerSetting::isAudioPassThrough, PlayerSetting::putAudioPassThrough);
             case PlaybackPerformanceCatalog.PREFER_AAC -> () -> togglePlayer(id, PlayerSetting::isPreferAAC, PlayerSetting::putPreferAAC);
@@ -760,7 +787,9 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
         list.addView(header, params);
     }
 
-    private void addRow(String label, String value, Runnable action) {
+    private void addRow(String id, String label, String value, Runnable action) {
+        boolean overridden = PlaybackPerformanceSetting.isOverridden(
+                PlayerSetting.getPlayer(), id);
         MaterialButton button = new MaterialButton(requireContext());
         button.setAllCaps(false);
         button.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
@@ -771,24 +800,31 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
         button.setText(label + "    " + value);
         button.setTextSize(14);
         button.setTextColor(ColorStateList.valueOf(Color.parseColor("#202124")));
-        button.setBackgroundTintList(ColorStateList.valueOf(Color.WHITE));
+        button.setBackgroundTintList(ColorStateList.valueOf(overridden
+                ? Color.parseColor("#E8F0FE") : Color.WHITE));
         button.setCornerRadius(dp(6));
-        button.setStrokeColor(ColorStateList.valueOf(Color.parseColor("#C4C7C5")));
+        button.setStrokeColor(ColorStateList.valueOf(Color.parseColor(overridden
+                ? "#8AB4F8" : "#C4C7C5")));
         button.setStrokeWidth(dp(1));
         button.setFocusable(true);
         button.setFocusableInTouchMode(Util.isLeanback());
         button.setEnabled(action != null);
-        button.setOnFocusChangeListener((view, hasFocus) -> styleRow(button, action != null, hasFocus));
+        button.setOnFocusChangeListener((view, hasFocus) ->
+                styleRow(button, action != null, overridden, hasFocus));
         if (action != null) button.setOnClickListener(view -> action.run());
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48));
         params.bottomMargin = dp(7);
         list.addView(button, params);
     }
 
-    private void styleRow(MaterialButton button, boolean enabled, boolean focused) {
+    private void styleRow(MaterialButton button, boolean enabled,
+                          boolean overridden, boolean focused) {
         int text = focused ? Color.WHITE : enabled ? Color.parseColor("#202124") : Color.parseColor("#5F6368");
-        int bg = focused ? Color.parseColor("#1A73E8") : Color.WHITE;
-        int stroke = focused ? Color.parseColor("#1A73E8") : Color.parseColor("#C4C7C5");
+        int bg = focused ? Color.parseColor("#1A73E8")
+                : overridden ? Color.parseColor("#E8F0FE") : Color.WHITE;
+        int stroke = focused ? Color.parseColor("#1A73E8")
+                : overridden ? Color.parseColor("#8AB4F8")
+                : Color.parseColor("#C4C7C5");
         button.setTextColor(ColorStateList.valueOf(text));
         button.setBackgroundTintList(ColorStateList.valueOf(bg));
         button.setStrokeColor(ColorStateList.valueOf(stroke));
@@ -890,8 +926,15 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
     }
 
     private String mpvRenderText() {
-        if (PlayerSetting.getMpvRender() == PlayerSetting.MPV_RENDER_VULKAN) return isMpvVulkanAvailable() ? "Vulkan" : "Vulkan（实际回退 OpenGL）";
-        return isMpvVulkanAvailable() ? "OpenGL" : "OpenGL（Vulkan 不可用）";
+        boolean automatic = PlaybackPerformanceSetting.isAuto(
+                PlayerSetting.MPV, PlaybackPerformanceCatalog.MPV_RENDER);
+        if (PlayerSetting.getMpvRender() == PlayerSetting.MPV_RENDER_VULKAN) {
+            return isMpvVulkanAvailable()
+                    ? "Vulkan" : "Vulkan（实际回退 OpenGL）";
+        }
+        String value = isMpvVulkanAvailable()
+                ? "OpenGL" : "OpenGL（Vulkan 不可用）";
+        return automatic ? "自动 · " + value : value;
     }
 
     private boolean isMpvVulkanAvailable() {

@@ -203,7 +203,13 @@ public class MediaSourceFactory implements MediaSource.Factory {
     }
 
     private ExtractorsFactory getExtractorsFactory() {
-        if (extractorsFactory == null) extractorsFactory = new DefaultExtractorsFactory().setTsExtractorFlags(FLAG_ENABLE_HDMV_DTS_AUDIO_STREAMS).setTsExtractorTimestampSearchBytes(TsExtractor.DEFAULT_TIMESTAMP_SEARCH_BYTES * 10);
+        if (extractorsFactory == null) {
+            ExtractorsFactory defaults = new DefaultExtractorsFactory()
+                    .setTsExtractorFlags(FLAG_ENABLE_HDMV_DTS_AUDIO_STREAMS)
+                    .setTsExtractorTimestampSearchBytes(
+                            TsExtractor.DEFAULT_TIMESTAMP_SEARCH_BYTES * 10);
+            extractorsFactory = new DolbyVisionP81ExtractorsFactory(defaults);
+        }
         return extractorsFactory;
     }
 

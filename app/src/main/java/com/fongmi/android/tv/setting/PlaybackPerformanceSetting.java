@@ -17,6 +17,9 @@ public class PlaybackPerformanceSetting {
     public static final int PROFILE_LIGHTWEIGHT = 3;
     public static final int PROFILE_AUTO = 4;
 
+    public static final int DV7_HANDLING_P81 = 0;
+    public static final int DV7_HANDLING_HDR10 = 1;
+
     public static final String KEY_PROFILE = "playback_performance_profile";
     private static final String KEY_PROFILE_MIGRATED = "playback_performance_profile_per_kernel";
     private static final String KEY_PROFILE_EXO = "perf_exo_profile";
@@ -48,8 +51,9 @@ public class PlaybackPerformanceSetting {
     private static final String KEY_LOAD_ONLY_SELECTED_TRACKS = "perf_load_only_selected_tracks";
     private static final String KEY_SURFACE_FIXED_SIZE = "perf_surface_fixed_size";
     private static final String KEY_DECODER_FALLBACK = "perf_decoder_fallback";
-    private static final String KEY_DV7_HDR10_FALLBACK =
+    private static final String KEY_DV7_HDR10_FALLBACK_LEGACY =
             "perf_dv7_hdr10_fallback";
+    private static final String KEY_DV7_HANDLING = "perf_dv7_handling";
     private static final String KEY_SOFT_VIDEO_TUNE = "perf_soft_video_tune";
     private static final String KEY_HIGH_BUFFER = "perf_high_buffer";
     private static final String KEY_BANDWIDTH_METER = "perf_bandwidth_meter";
@@ -377,11 +381,43 @@ public class PlaybackPerformanceSetting {
 
     public static boolean isDv7Hdr10FallbackEnabled() {
         ensureInitialized();
-        return Prefers.getBoolean(KEY_DV7_HDR10_FALLBACK, true);
+        if (PlayerSetting.getPlayer() == PlayerSetting.MPV) {
+            return Prefers.getBoolean(KEY_DV7_HDR10_FALLBACK_LEGACY, true);
+        }
+        return getDv7HandlingMode() == DV7_HANDLING_HDR10;
     }
 
     public static void putDv7Hdr10FallbackEnabled(boolean value) {
-        putCustom(KEY_DV7_HDR10_FALLBACK, value, PlaybackPerformanceCatalog.DV7_HDR10_FALLBACK);
+        if (PlayerSetting.getPlayer() == PlayerSetting.MPV) {
+            putCustom(KEY_DV7_HDR10_FALLBACK_LEGACY, value,
+                    PlaybackPerformanceCatalog.DV7_HDR10_FALLBACK);
+        } else {
+            putDv7HandlingMode(value ? DV7_HANDLING_HDR10 : DV7_HANDLING_P81);
+        }
+    }
+
+    public static int getDv7HandlingMode() {
+        ensureInitialized();
+        return clampDv7Handling(Prefers.getInt(KEY_DV7_HANDLING, DV7_HANDLING_P81));
+    }
+
+    public static boolean isDv7P81Enabled() {
+        return getDv7HandlingMode() == DV7_HANDLING_P81;
+    }
+
+    /** HDR10 remains an emergency path when P8.1 conversion or decoding is unavailable. */
+    public static boolean isDv7FallbackAllowed() {
+        ensureInitialized();
+        return true;
+    }
+
+    public static String getDv7HandlingText() {
+        return getDv7HandlingMode() == DV7_HANDLING_P81
+                ? "升级P8.1" : "降级HDR10";
+    }
+
+    public static void putDv7HandlingMode(int mode) {
+        putCustom(KEY_DV7_HANDLING, clampDv7Handling(mode), PlaybackPerformanceCatalog.DV7_HDR10_FALLBACK);
     }
 
     public static boolean isSoftVideoTuneEnabled() {
@@ -467,7 +503,7 @@ public class PlaybackPerformanceSetting {
                 + preloadDetailText()
                 + "\nMediaCodec异步：" + onOff(isCodecAsyncQueueingEnabled()) + "，动态调度：" + onOff(isDynamicSchedulingEnabled())
                 + "\n解码耗时推进：" + onOff(isVideoDurationProgressEnabled()) + "，输入丢帧阈值：" + onOff(isLateDropInputEnabled())
-                + "\nDV7回退HDR10：" + onOff(isDv7Hdr10FallbackEnabled())
+                + "\nDV7处理：" + getDv7HandlingText()
                 + "\n只加载选中轨道：" + onOff(isLoadOnlySelectedTracksEnabled()) + "，Surface固定尺寸：" + onOff(isSurfaceFixedSizeEnabled())
                 + "\n动态网络保护：" + ExoPerformanceSetting.getNetworkProtectionText()
                 + "\n音频直通：" + onOff(PlayerSetting.isAudioPassThrough()) + "，AAC优先：" + onOff(PlayerSetting.isPreferAAC())
@@ -485,7 +521,7 @@ public class PlaybackPerformanceSetting {
         put(KEY_LOAD_ONLY_SELECTED_TRACKS, true);
         put(KEY_SURFACE_FIXED_SIZE, true);
         put(KEY_DECODER_FALLBACK, true);
-        put(KEY_DV7_HDR10_FALLBACK, true);
+        put(KEY_DV7_HANDLING, DV7_HANDLING_P81);
         put(KEY_SOFT_VIDEO_TUNE, true);
         put(KEY_HIGH_BUFFER, true);
         put(KEY_BANDWIDTH_METER, true);
@@ -495,11 +531,25 @@ public class PlaybackPerformanceSetting {
         return profile == PROFILE_COMPATIBLE || profile == PROFILE_CUSTOM || profile == PROFILE_LIGHTWEIGHT || profile == PROFILE_AUTO ? profile : PROFILE_RECOMMENDED;
     }
 
+    private static int clampDv7Handling(int mode) {
+        return mode == DV7_HANDLING_HDR10 ? DV7_HANDLING_HDR10 : DV7_HANDLING_P81;
+    }
+
     private static void put(String key, boolean value) {
         Prefers.put(key, value);
     }
 
+    private static void put(String key, int value) {
+        Prefers.put(key, value);
+    }
+
     private static void putCustom(String key, boolean value, String optionId) {
+        ensureInitialized();
+        Prefers.put(key, value);
+        markOverride(optionId);
+    }
+
+    private static void putCustom(String key, int value, String optionId) {
         ensureInitialized();
         Prefers.put(key, value);
         markOverride(optionId);
