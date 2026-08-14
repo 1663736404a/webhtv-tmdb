@@ -49,9 +49,17 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
     private static volatile Boolean converterAvailable;
 
     private final ExtractorsFactory delegate;
+    @Nullable private final ExoDolbyVisionPlaybackState playbackState;
 
     DolbyVisionP81ExtractorsFactory(ExtractorsFactory delegate) {
+        this(delegate, null);
+    }
+
+    DolbyVisionP81ExtractorsFactory(
+            ExtractorsFactory delegate,
+            @Nullable ExoDolbyVisionPlaybackState playbackState) {
         this.delegate = delegate;
+        this.playbackState = playbackState;
     }
 
     @Override
@@ -76,7 +84,7 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
                         MatroskaExtractor.FLAG_EMIT_RAW_SUBTITLE_DATA,
                         true);
             }
-            wrapped[i] = new DolbyVisionExtractor(extractor);
+            wrapped[i] = new DolbyVisionExtractor(extractor, playbackState);
         }
         return wrapped;
     }
@@ -154,9 +162,13 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
     private static final class DolbyVisionExtractor implements Extractor {
 
         private final Extractor delegate;
+        @Nullable private final ExoDolbyVisionPlaybackState playbackState;
 
-        DolbyVisionExtractor(Extractor delegate) {
+        DolbyVisionExtractor(
+                Extractor delegate,
+                @Nullable ExoDolbyVisionPlaybackState playbackState) {
             this.delegate = delegate;
+            this.playbackState = playbackState;
         }
 
         @Override
@@ -166,7 +178,7 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
 
         @Override
         public void init(ExtractorOutput output) {
-            delegate.init(new DolbyVisionExtractorOutput(output));
+            delegate.init(new DolbyVisionExtractorOutput(output, playbackState));
         }
 
         @Override
@@ -195,16 +207,20 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
             implements ExtractorOutput {
 
         private final ExtractorOutput delegate;
+        @Nullable private final ExoDolbyVisionPlaybackState playbackState;
 
-        DolbyVisionExtractorOutput(ExtractorOutput delegate) {
+        DolbyVisionExtractorOutput(
+                ExtractorOutput delegate,
+                @Nullable ExoDolbyVisionPlaybackState playbackState) {
             this.delegate = delegate;
+            this.playbackState = playbackState;
         }
 
         @Override
         public TrackOutput track(int id, int type) {
             TrackOutput output = delegate.track(id, type);
             return type == C.TRACK_TYPE_VIDEO
-                    ? new DolbyVisionTrackOutput(output) : output;
+                    ? new DolbyVisionTrackOutput(output, playbackState) : output;
         }
 
         @Override
@@ -222,6 +238,7 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
 
         private final TrackOutput delegate;
         private final ParsableByteArray outputData = new ParsableByteArray();
+        @Nullable private final ExoDolbyVisionPlaybackState playbackState;
 
         private ByteBuffer pending = ByteBuffer.allocateDirect(1024 * 1024);
         private byte[] inputScratch = new byte[16 * 1024];
@@ -229,8 +246,11 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
         @Nullable private HevcFrameTransformer transformer;
         private boolean converting;
 
-        DolbyVisionTrackOutput(TrackOutput delegate) {
+        DolbyVisionTrackOutput(
+                TrackOutput delegate,
+                @Nullable ExoDolbyVisionPlaybackState playbackState) {
             this.delegate = delegate;
+            this.playbackState = playbackState;
         }
 
         @Override
@@ -243,7 +263,11 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
             converting = shouldConvert(format);
             transformer = converting
                     ? new HevcFrameTransformer(P81_STRATEGY) : null;
-            delegate.format(converting ? asProfile81(format) : format);
+            Format output = converting ? asProfile81(format) : format;
+            delegate.format(output);
+            if (converting && playbackState != null) {
+                playbackState.activateP81(format, output);
+            }
         }
 
         @Override
@@ -313,6 +337,7 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
                     outputLength = transformer.transformFrame(
                             pending, sampleLength);
                 } catch (Throwable error) {
+                    if (playbackState != null) playbackState.reset();
                     throw new IllegalStateException(
                             "DV7 to P8.1 conversion failed", error);
                 }

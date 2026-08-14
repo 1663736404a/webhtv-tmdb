@@ -575,15 +575,17 @@ public class ExoPlayerEngine implements PlayerEngine {
                 PlaybackAnalyticsListener.getPlaybackTraceId());
         ExoDolbyVisionPlaybackState.Snapshot fallback =
                 dolbyVisionPlaybackState.snapshot();
+        boolean transformed = fallback.hdr10FallbackActive()
+                || fallback.p81ConversionActive();
         Format selected = TrackUtil.explicitlySelectedFormat(
                 getCurrentTracks(), C.TRACK_TYPE_VIDEO);
         Format runtime = currentAnalyticsSession
                 ? analytics.videoFormat() : null;
-        Format source = fallback.hdr10FallbackActive()
+        Format source = transformed
                 && fallback.sourceFormat() != null
                 ? fallback.sourceFormat()
                 : selected != null ? selected : runtime;
-        Format output = fallback.hdr10FallbackActive()
+        Format output = transformed
                 && fallback.outputFormat() != null
                 ? fallback.outputFormat()
                 : runtime != null ? runtime : player.getVideoFormat();
@@ -602,7 +604,8 @@ public class ExoPlayerEngine implements PlayerEngine {
                 currentAnalyticsSession ? analytics.videoDecoderName() : "",
                 "",
                 output == null ? null : output.colorInfo,
-                fallback.hdr10FallbackActive());
+                fallback.hdr10FallbackActive(),
+                fallback.p81ConversionActive());
     }
 
     @Override

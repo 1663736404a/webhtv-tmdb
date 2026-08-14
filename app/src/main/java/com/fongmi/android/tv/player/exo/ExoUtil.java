@@ -171,7 +171,8 @@ public class ExoUtil {
                         decoderOutput,
                         schedulingSettings,
                         dolbyVisionPlaybackState))
-                .setMediaSourceFactory(buildMediaSourceFactory())
+                .setMediaSourceFactory(buildMediaSourceFactory(
+                        dolbyVisionPlaybackState))
                 .setVideoChangeFrameRateStrategy(ExoPerformanceSetting.getFrameRateStrategy());
         if (PlaybackPerformanceSetting.isHighBufferEnabled()) builder.setLoadControl(buildEnhancedLoadControl());
         else ExoPlaybackDiagnostics.logDefaultLoadControl(PlaybackPerformanceSetting.getProfile(PlayerSetting.EXO));
@@ -734,8 +735,9 @@ public class ExoUtil {
         return builder.build();
     }
 
-    private static MediaSource.Factory buildMediaSourceFactory() {
-        return new MediaSourceFactory();
+    private static MediaSource.Factory buildMediaSourceFactory(
+            @Nullable ExoDolbyVisionPlaybackState dolbyVisionPlaybackState) {
+        return new MediaSourceFactory(dolbyVisionPlaybackState);
     }
 
     private static MediaItem.RequestMetadata buildRequestMetadata(PlaySpec spec) {

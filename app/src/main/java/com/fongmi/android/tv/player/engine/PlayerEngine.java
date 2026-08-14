@@ -245,7 +245,22 @@ public interface PlayerEngine {
             String decoderName,
             String hwdecCurrent,
             ColorInfo outputColorInfo,
-            boolean dolbyVisionHdr10Fallback) {
+            boolean dolbyVisionHdr10Fallback,
+            boolean dolbyVisionP81Conversion) {
+
+        public VideoPlaybackDetails(
+                String sourceCodecs,
+                int dolbyVisionProfile,
+                int dolbyVisionLevel,
+                String decodedCodec,
+                String decoderName,
+                String hwdecCurrent,
+                ColorInfo outputColorInfo,
+                boolean dolbyVisionHdr10Fallback) {
+            this(sourceCodecs, dolbyVisionProfile, dolbyVisionLevel,
+                    decodedCodec, decoderName, hwdecCurrent, outputColorInfo,
+                    dolbyVisionHdr10Fallback, false);
+        }
 
         public VideoPlaybackDetails {
             sourceCodecs = sourceCodecs == null ? "" : sourceCodecs;
@@ -262,7 +277,7 @@ public interface PlayerEngine {
             return hasDolbyVisionSource() || !sourceCodecs.isEmpty()
                     || !decodedCodec.isEmpty() || !decoderName.isEmpty()
                     || !hwdecCurrent.isEmpty() || outputColorInfo != null
-                    || dolbyVisionHdr10Fallback;
+                    || dolbyVisionHdr10Fallback || dolbyVisionP81Conversion;
         }
 
         public static VideoPlaybackDetails empty() {
