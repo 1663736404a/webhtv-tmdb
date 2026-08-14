@@ -15,6 +15,19 @@ public class MpvVulkanBackendPolicyTest {
     @Test
     public void explicitUserBackendAlwaysWins() {
         assertEquals("direct", MpvVulkanBackendPolicy.resolve("direct", true));
+        assertEquals("legacy", MpvVulkanBackendPolicy.resolve("legacy", true));
         assertEquals("fragment", MpvVulkanBackendPolicy.resolve("fragment", true));
+    }
+
+    @Test
+    public void selectedPriorityControlsConflictingBackend() {
+        assertEquals("legacy", MpvVulkanBackendPolicy.resolveConfigured(
+                "legacy", "direct", true));
+        assertEquals("direct", MpvVulkanBackendPolicy.resolveConfigured(
+                "legacy", "direct", false));
+        assertEquals("fragment", MpvVulkanBackendPolicy.resolveConfigured(
+                "", "fragment", true));
+        assertEquals("legacy", MpvVulkanBackendPolicy.resolveConfigured(
+                "legacy", "", false));
     }
 }

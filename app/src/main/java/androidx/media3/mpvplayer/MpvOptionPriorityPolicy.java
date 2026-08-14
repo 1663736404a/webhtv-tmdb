@@ -82,4 +82,15 @@ final class MpvOptionPriorityPolicy {
     static String priorityName(boolean performanceOptionsPriority) {
         return performanceOptionsPriority ? "performance" : "mpv.conf";
     }
+
+    static String resolveVideoOutput(boolean performanceOptionsPriority,
+                                     String appVideoOutput,
+                                     String configuredVideoOutput) {
+        if (!performanceOptionsPriority
+                && configuredVideoOutput != null
+                && !configuredVideoOutput.isEmpty()) {
+            return configuredVideoOutput;
+        }
+        return appVideoOutput;
+    }
 }

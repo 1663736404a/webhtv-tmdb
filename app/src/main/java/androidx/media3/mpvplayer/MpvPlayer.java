@@ -254,6 +254,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     private int surfaceWidth;
     private int surfaceHeight;
     private String attachedVo;
+    private String effectiveVo;
     private String lastFailureLog;
     private int lastEndFileReason;
     private int lastEndFileError;
@@ -1285,6 +1286,10 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         setRuntimeString("force-window", "no");
         setRuntimeString("idle", "yes");
         int overlayCount = applyPerformanceOptionOverlay();
+        effectiveVo = MpvOptionPriorityPolicy.resolveVideoOutput(
+                config.performanceOptionsPriority(),
+                config.vo(),
+                stringProperty("vo", ""));
         boolean autoCacheApplied = applyAutoCacheBaselineToNative();
         boolean autoHlsApplied = applyAutoHlsBitrateToNative();
         if (!autoCacheBaselineState.snapshot().isEmpty()) {
@@ -2064,7 +2069,11 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     }
 
     private boolean requiresOsdSurface() {
-        return "mediacodec_embed".equals(config.vo());
+        return "mediacodec_embed".equals(videoOutputVo());
+    }
+
+    private String videoOutputVo() {
+        return TextUtils.isEmpty(effectiveVo) ? config.vo() : effectiveVo;
     }
 
     private void createOsdSurfaceView(SurfaceView videoView) {
@@ -2121,15 +2130,16 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
             boolean sameVideoSurface = surfaceAttached && attachedSurface == surface;
             boolean sameOsdSurface = !requiresOsdSurface()
                     || (osdSurfaceAttached && attachedOsdSurface == osdSurface);
+            String targetVo = videoOutputVo();
             if (sameVideoSurface && sameOsdSurface) {
                 applyAndroidSurfaceSize();
                 applyAndroidOsdSurfaceSize();
                 applySurfaceFrameRate();
-                if (!TextUtils.equals(attachedVo, config.vo())) {
-                    if (enqueueMpvCommand("set", "vo", config.vo())) attachedVo = config.vo();
+                if (!TextUtils.equals(attachedVo, targetVo)) {
+                    if (enqueueMpvCommand("set", "vo", targetVo)) attachedVo = targetVo;
                 }
-                Log.d(SIZE_TAG, "mpv resize attached surface cached=" + surfaceWidth + "x" + surfaceHeight + " vo=" + config.vo());
-                SpiderDebug.log("mpv", "surface resized surface=%s size=%dx%d vo=%s", surface, surfaceWidth, surfaceHeight, config.vo());
+                Log.d(SIZE_TAG, "mpv resize attached surface cached=" + surfaceWidth + "x" + surfaceHeight + " vo=" + targetVo);
+                SpiderDebug.log("mpv", "surface resized surface=%s size=%dx%d vo=%s", surface, surfaceWidth, surfaceHeight, targetVo);
                 return;
             }
             if (surfaceAttached || osdSurfaceAttached) detachMpvSurface();
@@ -2145,9 +2155,9 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
             applyAndroidOsdSurfaceSize();
             applySurfaceFrameRate();
             enqueueMpvCommand("set", "force-window", "yes");
-            if (enqueueMpvCommand("set", "vo", config.vo())) attachedVo = config.vo();
-            Log.d(SIZE_TAG, "mpv bind surface valid=" + surface.isValid() + " cached=" + surfaceWidth + "x" + surfaceHeight + " vo=" + config.vo());
-            SpiderDebug.log("mpv", "surface attached video=%s osd=%s size=%dx%d vo=%s", surface, osdSurface, surfaceWidth, surfaceHeight, config.vo());
+            if (enqueueMpvCommand("set", "vo", targetVo)) attachedVo = targetVo;
+            Log.d(SIZE_TAG, "mpv bind surface valid=" + surface.isValid() + " cached=" + surfaceWidth + "x" + surfaceHeight + " vo=" + targetVo);
+            SpiderDebug.log("mpv", "surface attached video=%s osd=%s size=%dx%d vo=%s", surface, osdSurface, surfaceWidth, surfaceHeight, targetVo);
         } catch (Throwable e) {
             fail(mpvError(ERROR_VIDEO_OUTPUT_FAILED, e.getMessage(), e), PlaybackException.ERROR_CODE_VIDEO_FRAME_PROCESSING_FAILED);
         }
@@ -2443,6 +2453,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
             attachedSurface = null;
             attachedOsdSurface = null;
             attachedVo = null;
+            effectiveVo = null;
             stopping = false;
             loadStarted = false;
             loadStartRetryCount = 0;

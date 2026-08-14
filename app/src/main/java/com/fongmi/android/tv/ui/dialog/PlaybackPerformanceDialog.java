@@ -533,6 +533,7 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
             case PlaybackPerformanceCatalog.VIDEO_SOFT_PREFER -> onOff(PlayerSetting.isVideoPrefer());
             case PlaybackPerformanceCatalog.MPV_OUTPUT -> MpvPerformanceSetting.getOutputModeText();
             case PlaybackPerformanceCatalog.MPV_RENDER -> mpvRenderText();
+            case PlaybackPerformanceCatalog.MPV_VULKAN_BACKEND -> MpvPerformanceSetting.getVulkanBackendText();
             case PlaybackPerformanceCatalog.MPV_HWDEC -> MpvPerformanceSetting.getHwdecText();
             case PlaybackPerformanceCatalog.MPV_FRAME_RATE -> MpvPerformanceSetting.getFrameRateText();
             case PlaybackPerformanceCatalog.MPV_HLS_BITRATE -> MpvPerformanceSetting.getHlsBitrateText();
@@ -615,6 +616,11 @@ public final class PlaybackPerformanceDialog extends DialogFragment {
             case PlaybackPerformanceCatalog.MPV_RENDER -> !isMpvVulkanAvailable() && PlayerSetting.getMpvRender() == PlayerSetting.MPV_RENDER_OPENGL ? null : () -> {
                 PlayerSetting.putMpvRender(PlayerSetting.getMpvRender() == PlayerSetting.MPV_RENDER_OPENGL ? PlayerSetting.MPV_RENDER_VULKAN : PlayerSetting.MPV_RENDER_OPENGL);
                 PlaybackPerformanceSetting.markCustom();
+                refresh();
+            };
+            case PlaybackPerformanceCatalog.MPV_VULKAN_BACKEND -> () -> {
+                MpvPerformanceSetting.putVulkanBackend(
+                        MpvPerformanceSetting.nextVulkanBackend());
                 refresh();
             };
             case PlaybackPerformanceCatalog.MPV_HWDEC -> () -> {

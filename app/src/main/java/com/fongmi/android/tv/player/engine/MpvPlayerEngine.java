@@ -562,6 +562,7 @@ public class MpvPlayerEngine implements PlayerEngine {
         boolean useVulkan = !surfaceDirect && requestVulkan && nativeVulkan && deviceVulkan;
         vulkanRenderer = useVulkan;
         String configuredBackend = MpvVulkanBackendPolicy.configuredBackend();
+        String appBackendOverride = MpvVulkanBackendPolicy.appOverride();
         boolean automaticBackend = configuredBackend.isEmpty()
                 || MpvVulkanBackendPolicy.AUTO.equals(configuredBackend);
         String automaticOverride = vulkanBackendOverride != null
@@ -590,7 +591,9 @@ public class MpvPlayerEngine implements PlayerEngine {
                 .option("video-sync", MpvPerformanceSetting.getSyncOption())
                 .option("interpolation", MpvPerformanceSetting.isInterpolation() ? "yes" : "no")
                 .option("hls-bitrate", MpvPerformanceSetting.getHlsBitrateOption());
-        if (useVulkan && automaticBackend && !automaticOverride.isEmpty()) {
+        if (useVulkan && !appBackendOverride.isEmpty()) {
+            builder.option(MpvVulkanBackendPolicy.OPTION, appBackendOverride);
+        } else if (useVulkan && automaticBackend && !automaticOverride.isEmpty()) {
             builder.option(MpvVulkanBackendPolicy.OPTION, automaticOverride);
         }
         applySoftDecodeOptions(builder);
@@ -607,7 +610,18 @@ public class MpvPlayerEngine implements PlayerEngine {
             // The legacy gpu renderer restores the original pre-Dolby-Vision
             // color representation. Software-decoded Profile 5 frames need
             // gpu-next/libplacebo to apply their per-frame DOVI mapping.
-            builder.vo("gpu-next");
+            builder.vo("gpu-next")
+                    .gpuContext("android")
+                    .gpuApi("opengl")
+                    .openglEs(true);
+        } else {
+            // Keep the OpenGL override complete. Leaving gpu-api empty would
+            // allow gpu-api=vulkan from mpv.conf to survive the performance
+            // overlay and create an invalid android + Vulkan mixed context.
+            builder.vo("gpu")
+                    .gpuContext("android")
+                    .gpuApi("opengl")
+                    .openglEs(true);
         }
         return builder.build();
     }

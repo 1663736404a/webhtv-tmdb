@@ -26,6 +26,12 @@ public final class MpvPerformanceSetting {
     public static final int HLS_LOWEST = 3;
     public static final int PRIORITY_PERFORMANCE = 0;
     public static final int PRIORITY_CONFIG = 1;
+    // Kept only to migrate the temporary four-choice test build. Formal UI
+    // exposes direct / legacy / stable, and old "auto" values become legacy.
+    public static final int VULKAN_BACKEND_AUTO = 0;
+    public static final int VULKAN_BACKEND_DIRECT = 1;
+    public static final int VULKAN_BACKEND_LEGACY = 2;
+    public static final int VULKAN_BACKEND_STABLE = 3;
 
     private static final String KEY_OUTPUT_MODE = "perf_mpv_output_mode";
     private static final String KEY_HWDEC = "perf_mpv_hwdec";
@@ -38,6 +44,7 @@ public final class MpvPerformanceSetting {
     private static final String KEY_HLS_BITRATE = "perf_mpv_hls_bitrate";
     private static final String KEY_REBUFFER_MS = "perf_mpv_rebuffer_ms";
     private static final String KEY_OPTION_PRIORITY = "perf_mpv_option_priority";
+    private static final String KEY_VULKAN_BACKEND = "perf_mpv_vulkan_backend";
 
     private MpvPerformanceSetting() {
     }
@@ -254,6 +261,47 @@ public final class MpvPerformanceSetting {
         return isPerformancePriority() ? "播放性能优先" : "mpv.conf优先";
     }
 
+    public static int getVulkanBackend() {
+        return normalizeVulkanBackend(Prefers.getInt(
+                KEY_VULKAN_BACKEND, VULKAN_BACKEND_LEGACY));
+    }
+
+    public static void putVulkanBackend(int value) {
+        Prefers.put(KEY_VULKAN_BACKEND, normalizeVulkanBackend(value));
+        PlaybackPerformanceSetting.markCustom();
+    }
+
+    public static int nextVulkanBackend() {
+        return switch (getVulkanBackend()) {
+            case VULKAN_BACKEND_DIRECT -> VULKAN_BACKEND_LEGACY;
+            case VULKAN_BACKEND_LEGACY -> VULKAN_BACKEND_STABLE;
+            default -> VULKAN_BACKEND_DIRECT;
+        };
+    }
+
+    public static String getVulkanBackendOption() {
+        return vulkanBackendOption(getVulkanBackend());
+    }
+
+    static String vulkanBackendOption(int value) {
+        return switch (normalizeVulkanBackend(value)) {
+            case VULKAN_BACKEND_DIRECT -> "direct";
+            case VULKAN_BACKEND_STABLE -> "stable";
+            default -> "legacy";
+        };
+    }
+
+    public static String getVulkanBackendText() {
+        return getVulkanBackendOption();
+    }
+
+    private static int normalizeVulkanBackend(int value) {
+        return switch (value) {
+            case VULKAN_BACKEND_DIRECT, VULKAN_BACKEND_STABLE -> value;
+            default -> VULKAN_BACKEND_LEGACY;
+        };
+    }
+
     public static void putVerboseLog(boolean value) {
         Prefers.put(KEY_VERBOSE_LOG, value);
         PlaybackPerformanceSetting.markCustom();
@@ -269,6 +317,7 @@ public final class MpvPerformanceSetting {
         Prefers.put(KEY_VERBOSE_LOG, false);
         Prefers.put(KEY_FRAME_RATE, FRAME_RATE_SEAMLESS);
         Prefers.put(KEY_HLS_BITRATE, HLS_HIGHEST);
+        Prefers.put(KEY_VULKAN_BACKEND, VULKAN_BACKEND_LEGACY);
         applyRebufferPreset(PlaybackPerformanceSetting.PROFILE_RECOMMENDED);
     }
 
@@ -282,6 +331,7 @@ public final class MpvPerformanceSetting {
         Prefers.put(KEY_VERBOSE_LOG, false);
         Prefers.put(KEY_FRAME_RATE, FRAME_RATE_SEAMLESS);
         Prefers.put(KEY_HLS_BITRATE, HLS_HIGHEST);
+        Prefers.put(KEY_VULKAN_BACKEND, VULKAN_BACKEND_LEGACY);
         applyRebufferPreset(PlaybackPerformanceSetting.PROFILE_AUTO);
     }
 
@@ -299,6 +349,7 @@ public final class MpvPerformanceSetting {
         Prefers.put(KEY_VERBOSE_LOG, false);
         Prefers.put(KEY_FRAME_RATE, FRAME_RATE_OFF);
         Prefers.put(KEY_HLS_BITRATE, HLS_8_MBPS);
+        Prefers.put(KEY_VULKAN_BACKEND, VULKAN_BACKEND_LEGACY);
         applyRebufferPreset(PlaybackPerformanceSetting.PROFILE_LIGHTWEIGHT);
     }
 
