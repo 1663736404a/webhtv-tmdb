@@ -9,22 +9,17 @@ import org.junit.Test;
 public class CompatFfmpegAudioRendererTest {
 
     @Test
-    public void multichannelPcmExceedsDeviceLimit_downmixesToStereo() {
-        assertEquals(2, CompatFfmpegAudioRenderer.resolveOutputChannelCount(6, 2, true, true));
+    public void supportedMultichannelPcm_isPreserved() {
+        assertEquals(6, CompatFfmpegAudioRenderer.resolveOutputChannelCount(6, true, true));
     }
 
     @Test
     public void unsupportedMultichannelPcm_downmixesToStereo() {
-        assertEquals(2, CompatFfmpegAudioRenderer.resolveOutputChannelCount(6, 8, false, true));
-    }
-
-    @Test
-    public void supportedMultichannelPcm_isPreserved() {
-        assertEquals(6, CompatFfmpegAudioRenderer.resolveOutputChannelCount(6, 8, true, true));
+        assertEquals(2, CompatFfmpegAudioRenderer.resolveOutputChannelCount(6, false, true));
     }
 
     @Test
     public void noSupportedPcmOutput_rejectsFormat() {
-        assertEquals(Format.NO_VALUE, CompatFfmpegAudioRenderer.resolveOutputChannelCount(6, 2, false, false));
+        assertEquals(Format.NO_VALUE, CompatFfmpegAudioRenderer.resolveOutputChannelCount(6, false, false));
     }
 }

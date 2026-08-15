@@ -5,7 +5,6 @@ import static androidx.media3.exoplayer.audio.AudioSink.SINK_FORMAT_SUPPORTED_DI
 import android.content.Context;
 import android.os.Handler;
 
-import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.C;
 import androidx.media3.common.Format;
 import androidx.media3.common.MimeTypes;
@@ -14,7 +13,6 @@ import androidx.media3.common.util.TraceUtil;
 import androidx.media3.common.util.Util;
 import androidx.media3.decoder.CryptoConfig;
 import androidx.media3.exoplayer.RendererCapabilities;
-import androidx.media3.exoplayer.audio.AudioCapabilities;
 import androidx.media3.exoplayer.audio.AudioRendererEventListener;
 import androidx.media3.exoplayer.audio.AudioSink;
 import androidx.media3.exoplayer.audio.DecoderAudioRenderer;
@@ -65,9 +63,9 @@ public final class CompatFfmpegAudioRenderer extends DecoderAudioRenderer<Ffmpeg
         int initialInputBufferSize = decodeFormat.maxInputSize != Format.NO_VALUE ? decodeFormat.maxInputSize : DEFAULT_INPUT_BUFFER_SIZE;
         int outputChannelCount = getOutputChannelCount(decodeFormat);
         if (SpiderDebug.isEnabled()) {
-            SpiderDebug.log("exo-audio", "ffmpeg output mime=%s sourceChannels=%d outputChannels=%d maxDeviceChannels=%d downmix=%s",
+            SpiderDebug.log("exo-audio", "ffmpeg output mime=%s sourceChannels=%d outputChannels=%d downmix=%s",
                     decodeFormat.sampleMimeType, decodeFormat.channelCount, outputChannelCount,
-                    getMaxDeviceChannelCount(), outputChannelCount == STEREO_CHANNEL_COUNT && decodeFormat.channelCount > STEREO_CHANNEL_COUNT);
+                    outputChannelCount == STEREO_CHANNEL_COUNT && decodeFormat.channelCount > STEREO_CHANNEL_COUNT);
         }
         FfmpegAudioDecoder decoder = new FfmpegAudioDecoder(decodeFormat, NUM_BUFFERS, NUM_BUFFERS, initialInputBufferSize, shouldOutputFloat(decodeFormat, outputChannelCount), outputChannelCount);
         TraceUtil.endSection();
@@ -119,35 +117,13 @@ public final class CompatFfmpegAudioRenderer extends DecoderAudioRenderer<Ffmpeg
                 || sinkSupportsFormat(format, C.ENCODING_PCM_FLOAT, format.channelCount);
         boolean stereoSupported = sinkSupportsFormat(format, C.ENCODING_PCM_16BIT, STEREO_CHANNEL_COUNT)
                 || sinkSupportsFormat(format, C.ENCODING_PCM_FLOAT, STEREO_CHANNEL_COUNT);
-        return resolveOutputChannelCount(format.channelCount, getMaxDeviceChannelCount(), sourceSupported, stereoSupported);
+        return resolveOutputChannelCount(format.channelCount, sourceSupported, stereoSupported);
     }
 
-    static int resolveOutputChannelCount(int sourceChannelCount, int maxDeviceChannelCount, boolean sourceSupported, boolean stereoSupported) {
-        if (sourceChannelCount > STEREO_CHANNEL_COUNT
-                && stereoSupported
-                && maxDeviceChannelCount > 0
-                && sourceChannelCount > maxDeviceChannelCount) {
-            return STEREO_CHANNEL_COUNT;
-        }
+    static int resolveOutputChannelCount(int sourceChannelCount, boolean sourceSupported, boolean stereoSupported) {
         if (sourceSupported) return sourceChannelCount;
         if (sourceChannelCount > STEREO_CHANNEL_COUNT && stereoSupported) return STEREO_CHANNEL_COUNT;
         return Format.NO_VALUE;
-    }
-
-    private int getMaxDeviceChannelCount() {
-        if (context == null) return Format.NO_VALUE;
-        try {
-            AudioCapabilities capabilities = AudioCapabilities.getCapabilities(
-                    context.getApplicationContext(), AudioAttributes.DEFAULT, null);
-            int speakerChannels = 0;
-            for (Integer channelMask : capabilities.getSpeakerLayoutChannelMasks()) {
-                if (channelMask != null) speakerChannels = Math.max(
-                        speakerChannels, Integer.bitCount(channelMask));
-            }
-            return speakerChannels > 0 ? speakerChannels : capabilities.getMaxChannelCount();
-        } catch (Throwable ignored) {
-            return Format.NO_VALUE;
-        }
     }
 
     private boolean shouldOutputFloat(Format format, int outputChannelCount) {
