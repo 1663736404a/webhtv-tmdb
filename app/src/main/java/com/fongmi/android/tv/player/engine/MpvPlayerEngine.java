@@ -36,6 +36,7 @@ import com.fongmi.android.tv.utils.ResUtil;
 import com.fongmi.android.tv.utils.Util;
 import com.github.catvod.crawler.SpiderDebug;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
@@ -352,6 +353,9 @@ public class MpvPlayerEngine implements PlayerEngine {
         MpvPlayer.VideoTrackDiagnostics details =
                 player.getSelectedVideoTrackDiagnostics();
         String currentVo = player.getObservedCurrentVideoOutput();
+        boolean fallbackConfigured = isConfiguredDv7Hdr10Fallback(
+                details, isHard(), surfaceDirect,
+                PlaybackPerformanceSetting.isDv7Hdr10FallbackEnabled());
         return new VideoPlaybackDetails(
                 details.sourceCodecs(),
                 details.dolbyVisionProfile(),
@@ -360,7 +364,17 @@ public class MpvPlayerEngine implements PlayerEngine {
                 details.decoderName(),
                 player.getObservedHwdecCurrent(),
                 details.outputColorInfo(),
-                isDolbyVisionHdr10Fallback(details, currentVo));
+                isDolbyVisionHdr10Fallback(details, currentVo)
+                        || fallbackConfigured);
+    }
+
+    static boolean isConfiguredDv7Hdr10Fallback(
+            MpvPlayer.VideoTrackDiagnostics details,
+            boolean hardDecode,
+            boolean directSurface,
+            boolean fallbackEnabled) {
+        return details != null && details.dolbyVisionProfile() == 7
+                && hardDecode && !directSurface && fallbackEnabled;
     }
 
     static boolean isDolbyVisionHdr10Fallback(
@@ -450,16 +464,23 @@ public class MpvPlayerEngine implements PlayerEngine {
 
     private String findMpvTrackId(Track track) {
         if (track == null || track.getFormat() == null) return null;
+        List<Format> candidates = new ArrayList<>();
         for (Tracks.Group group : getCurrentTracks().getGroups()) {
             if (group.getType() != track.getType()) continue;
             for (int i = 0; i < group.length; i++) {
                 if (!group.isTrackSupported(i)) continue;
-                Format format = group.getTrackFormat(i);
-                if (!track.getFormat().equals(PlayerHelper.describeFormat(format))) continue;
-                return parseMpvTrackId(format.id);
+                candidates.add(group.getTrackFormat(i));
             }
         }
-        return null;
+        Format matched = findPersistedMpvTrack(track, candidates);
+        if (matched == null) return null;
+        String id = parseMpvTrackId(matched.id);
+        if (id != null) {
+            SpiderDebug.log("mpv",
+                    "restore persisted track matched type=%d id=%s name=%s format=%s",
+                    track.getType(), id, track.getName(), track.getFormat());
+        }
+        return id;
     }
 
     private String resolveMpvTrackId(Track track) {
@@ -470,7 +491,97 @@ public class MpvPlayerEngine implements PlayerEngine {
         return id != null ? id : findMpvTrackId(track);
     }
 
-    private String parseMpvTrackId(String id) {
+    @Nullable
+    static Format findPersistedMpvTrack(Track track, List<Format> candidates) {
+        if (track == null || track.getFormat() == null
+                || candidates == null || candidates.isEmpty()) return null;
+        List<PersistedTrackCandidate> descriptors = new ArrayList<>();
+        for (Format format : candidates) {
+            descriptors.add(format == null ? null : new PersistedTrackCandidate(
+                    PlayerHelper.describeFormat(format),
+                    format.id,
+                    format.sampleMimeType,
+                    format.codecs,
+                    format.sampleRate,
+                    format.channelCount,
+                    format.language,
+                    format.label));
+        }
+        int index = findPersistedMpvTrackIndex(track.getFormat(), descriptors);
+        return index >= 0 ? candidates.get(index) : null;
+    }
+
+    static int findPersistedMpvTrackIndex(
+            String persisted, List<PersistedTrackCandidate> candidates) {
+        if (persisted == null || candidates == null || candidates.isEmpty()) return -1;
+        int bestIndex = -1;
+        int bestScore = -1;
+        for (int index = 0; index < candidates.size(); index++) {
+            PersistedTrackCandidate candidate = candidates.get(index);
+            if (candidate == null) continue;
+            if (persisted.equals(candidate.description())) return index;
+            int score = persistedTrackMatchScore(persisted, candidate);
+            if (score <= bestScore) continue;
+            bestIndex = index;
+            bestScore = score;
+        }
+        return bestScore >= 40 ? bestIndex : -1;
+    }
+
+    static int persistedTrackMatchScore(
+            String persisted, PersistedTrackCandidate candidate) {
+        if (persisted == null || candidate == null) return -1;
+        boolean persistedHasMime = hasPersistedMimeToken(persisted);
+        if (persistedHasMime && (candidate.sampleMimeType() == null
+                || !hasPersistedToken(persisted, candidate.sampleMimeType()))) return -1;
+        int score = persistedHasMime ? 100 : 0;
+        if (candidate.codecs() != null && hasPersistedToken(persisted, candidate.codecs())) score += 40;
+        if (candidate.sampleRate() > 0 && hasPersistedToken(persisted, String.valueOf(candidate.sampleRate()))) score += 10;
+        if (candidate.channelCount() > 0 && hasPersistedToken(persisted, String.valueOf(candidate.channelCount()))) score += 10;
+        if (candidate.language() != null && hasPersistedToken(persisted, candidate.language())) score += 5;
+        if (candidate.label() != null && hasPersistedToken(persisted, candidate.label())) score += 3;
+        String persistedId = firstPersistedToken(persisted);
+        String candidateId = parseMpvTrackId(candidate.id());
+        if (candidateId != null && candidateId.equals(parseMpvTrackId(persistedId))) score++;
+        return score;
+    }
+
+    record PersistedTrackCandidate(
+            String description,
+            String id,
+            String sampleMimeType,
+            String codecs,
+            int sampleRate,
+            int channelCount,
+            String language,
+            String label) {
+    }
+
+    private static boolean hasPersistedMimeToken(String persisted) {
+        for (String token : persisted.split(",")) {
+            String value = token.trim().toLowerCase(java.util.Locale.US);
+            if (value.startsWith("audio/") || value.startsWith("video/")
+                    || value.startsWith("text/") || value.startsWith("application/")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasPersistedToken(String persisted, String expected) {
+        if (expected == null || expected.isBlank()) return false;
+        for (String token : persisted.split(",")) {
+            if (token.trim().equalsIgnoreCase(expected.trim())) return true;
+        }
+        return false;
+    }
+
+    private static String firstPersistedToken(String persisted) {
+        int comma = persisted.indexOf(',');
+        return (comma < 0 ? persisted : persisted.substring(0, comma)).trim();
+    }
+
+    private static String parseMpvTrackId(String id) {
         if (id == null) return null;
         int index = id.indexOf(':');
         return index >= 0 && index + 1 < id.length() ? id.substring(index + 1) : id;
@@ -602,7 +713,11 @@ public class MpvPlayerEngine implements PlayerEngine {
                 .option("framedrop", MpvPerformanceSetting.getFrameDropOption())
                 .option("video-sync", MpvPerformanceSetting.getSyncOption())
                 .option("interpolation", MpvPerformanceSetting.isInterpolation() ? "yes" : "no")
-                .option("hls-bitrate", MpvPerformanceSetting.getHlsBitrateOption());
+                .option("hls-bitrate", MpvPerformanceSetting.getHlsBitrateOption())
+                .option("demuxer-dovi-profile7",
+                        decode == HARD && !surfaceDirect
+                                && PlaybackPerformanceSetting.isDv7Hdr10FallbackEnabled()
+                                ? "hdr10" : "preserve");
         if (useVulkan && !appBackendOverride.isEmpty()) {
             builder.option(MpvVulkanBackendPolicy.OPTION, appBackendOverride);
         } else if (useVulkan && automaticBackend && !automaticOverride.isEmpty()) {
@@ -646,8 +761,11 @@ public class MpvPlayerEngine implements PlayerEngine {
     }
 
     private String resolveAudioSpdifCodecs() {
-        if (!PlayerSetting.isAudioPassThrough(PlayerSetting.MPV)) return "";
-        return MpvAudioCapabilities.getAudioSpdifCodecs(App.get());
+        boolean enabled = PlayerSetting.isAudioPassThrough(PlayerSetting.MPV);
+        String codecs = enabled ? MpvAudioCapabilities.getAudioSpdifCodecs(App.get()) : "";
+        SpiderDebug.log("mpv-audio", "configured enabled=%s codecs=%s",
+                enabled, codecs.isEmpty() ? "pcm" : codecs);
+        return codecs;
     }
 
     private long getDemuxerMaxBytes() {

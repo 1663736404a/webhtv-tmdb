@@ -366,7 +366,7 @@ keyPassword=your_key_password
 - `third_party/mpv-player-jni`:MPV `libplayer.so` JNI 桥接源码，修改后用 `scripts/build_mpv_player_jni.sh` 重建。
 - `app/src/*/assets/mpv-libs/*`:随 APK 打包的 MPV native 库和 JNI 桥接库。
 - `nextlib-media3ext`:`io.github.anilbeesetti:nextlib-media3ext:1.10.0-0.12.1-fongmi-softload-av3a-r1`，提供 FFmpeg renderer；内置 FongMi FFmpeg `04482c8d13ac27b2a9fe93f5d388929eef8af5f4` 和静态链接的 `libarcdav3a`，Exo 可软解 `audio/av3a`，并在输出设备不接受源多声道 PCM 时下混到立体声。
-- `ExoplayerHdrUtils`:`com.suyashbelekar:exoplayerhdrutils:0.4.0`，提供基于 libdovi 的实时 HEVC RPU 转换。Exo 默认只在设备不能硬解原始 DV7、但能硬解 P8.1 时使用 mode 2 转换并移除增强层；原生 DV7 可用时保持原码流，转换链不可用时继续使用 HDR10 基底层兜底。
+- `ExoplayerHdrUtils`:`com.suyashbelekar:exoplayerhdrutils:0.4.0`，提供基于 libdovi 的实时 HEVC RPU 转换。Exo 默认只在设备不能硬解原始 DV7、但能硬解 P8.1 时使用 mode 2 转换并移除增强层；原生 DV7 可用时保持原码流。P8.1 模式会锁定整次播放且禁止自动 HDR10 降级，无效转换数据会直接触发播放错误；只有用户选择 HDR10 模式时才整次使用 HDR10 基底层。
 
 `settings.gradle` 中的依赖顺序是仓库本地 `third_party/maven`、Maven Central、Google Maven、`app/libs` 和 JitPack。`app/build.gradle` 会强制所有 `androidx.media3` 依赖使用 `1.11.0-alpha01-fongmi`，避免传递依赖拉回官方版本。
 

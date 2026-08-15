@@ -15,7 +15,7 @@ index 3c9ae286e9..2611f297f6 100644
  } MediaCodecH264DecContext;
  
 +#define MEDIACODEC_PORT_RETRY_TIMEOUT_US 8000
-+#define MEDIACODEC_PORT_STARVATION_TIMEOUT_US 250000
++#define MEDIACODEC_PORT_STARVATION_TIMEOUT_US 750000
 +
  static av_cold int mediacodec_decode_close(AVCodecContext *avctx)
  {
@@ -51,12 +51,12 @@ index 3c9ae286e9..2611f297f6 100644
 +                        port_starvation_start_us = now_us;
 +                    } else if (now_us - port_starvation_start_us >=
 +                               MEDIACODEC_PORT_STARVATION_TIMEOUT_US) {
-+                        av_log(avctx, AV_LOG_WARNING,
++                        av_log(avctx, AV_LOG_ERROR,
 +                               "MediaCodec input and output ports remained "
-+                               "unavailable for %d ms; yielding decoder to "
-+                               "avoid core-thread starvation\n",
++                               "unavailable for %d ms; failing hardware "
++                               "decode so the player can fall back\n",
 +                               MEDIACODEC_PORT_STARVATION_TIMEOUT_US / 1000);
-+                        return AVERROR(EAGAIN);
++                        return AVERROR_EXTERNAL;
 +                    }
                      continue;
 +                }

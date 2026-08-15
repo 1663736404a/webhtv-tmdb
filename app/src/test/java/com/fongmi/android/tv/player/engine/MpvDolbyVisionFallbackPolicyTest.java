@@ -27,6 +27,16 @@ public class MpvDolbyVisionFallbackPolicyTest {
                 details(5), "gpu-next"));
     }
 
+    @Test
+    public void configuredFallbackMarksDv7WithoutWaitingForVo() {
+        assertTrue(MpvPlayerEngine.isConfiguredDv7Hdr10Fallback(
+                details(7), true, false, true));
+        assertFalse(MpvPlayerEngine.isConfiguredDv7Hdr10Fallback(
+                details(7), true, true, true));
+        assertFalse(MpvPlayerEngine.isConfiguredDv7Hdr10Fallback(
+                details(5), true, false, true));
+    }
+
     private static MpvPlayer.VideoTrackDiagnostics details(int profile) {
         return new MpvPlayer.VideoTrackDiagnostics(
                 "dvhe.0" + profile + ".06", profile, 6,

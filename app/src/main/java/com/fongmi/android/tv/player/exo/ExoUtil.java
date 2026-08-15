@@ -31,6 +31,7 @@ import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.LoadControl;
 import androidx.media3.exoplayer.Renderer;
 import androidx.media3.exoplayer.RenderersFactory;
+import androidx.media3.exoplayer.audio.AudioCapabilities;
 import androidx.media3.exoplayer.audio.AudioSink;
 import androidx.media3.exoplayer.audio.AudioRendererEventListener;
 import androidx.media3.exoplayer.audio.AudioTrackAudioOutputProvider;
@@ -730,8 +731,16 @@ public class ExoUtil {
     }
 
     private static AudioSink buildAudioSink(Context context, boolean enableFloatOutput, boolean enableAudioOutputPlaybackParams) {
+        boolean passthrough = PlayerSetting.isAudioPassThrough(PlayerSetting.EXO);
+        if (SpiderDebug.isEnabled()) {
+            AudioCapabilities capabilities = AudioCapabilities.getCapabilities(
+                    context.getApplicationContext(), AudioAttributes.DEFAULT, null);
+            SpiderDebug.log("exo-audio",
+                    "configured passthrough=%s maxChannels=%d capabilities=%s",
+                    passthrough, capabilities.getMaxChannelCount(), capabilities);
+        }
         DefaultAudioSink.Builder builder = new DefaultAudioSink.Builder(context).setEnableFloatOutput(enableFloatOutput).setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams);
-        if (!PlayerSetting.isAudioPassThrough(PlayerSetting.EXO)) builder.setAudioOutputProvider(new AudioTrackAudioOutputProvider.Builder(null).build());
+        if (!passthrough) builder.setAudioOutputProvider(new AudioTrackAudioOutputProvider.Builder(null).build());
         return builder.build();
     }
 

@@ -29,6 +29,7 @@ final class MpvOptionPriorityPolicy {
             "demuxer-max-back-bytes",
             "demuxer-readahead-secs",
             "demuxer-hysteresis-secs",
+            "demuxer-dovi-profile7",
             "framedrop",
             "video-sync",
             "interpolation",

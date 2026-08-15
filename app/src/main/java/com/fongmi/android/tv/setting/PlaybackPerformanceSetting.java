@@ -42,6 +42,8 @@ public class PlaybackPerformanceSetting {
             "playback_performance_profile_merge_migrated_mask";
     private static final String KEY_PROFILE_AUTO_LIGHT_MIGRATED =
             "playback_performance_profile_auto_light_v1";
+    private static final String KEY_AUDIO_PASSTHROUGH_DEFAULT_MIGRATED =
+            "playback_performance_audio_passthrough_default_v1";
     private static final String KEY_CODEC_ASYNC_QUEUEING = "perf_codec_async_queueing";
     private static final String KEY_DYNAMIC_SCHEDULING = "perf_dynamic_scheduling";
     private static final String KEY_VIDEO_DURATION_PROGRESS = "perf_video_duration_progress";
@@ -80,6 +82,7 @@ public class PlaybackPerformanceSetting {
         // profile list has been consolidated, otherwise an interrupted old
         // rollback could restore a removed profile behind the new UI.
         migrateAutoLightProfiles();
+        migrateAudioPassthroughDefault();
     }
 
     public static int getProfile() {
@@ -405,10 +408,10 @@ public class PlaybackPerformanceSetting {
         return getDv7HandlingMode() == DV7_HANDLING_P81;
     }
 
-    /** HDR10 remains an emergency path when P8.1 conversion or decoding is unavailable. */
+    /** HDR10 is used only when the user explicitly selects the HDR10 handling mode. */
     public static boolean isDv7FallbackAllowed() {
         ensureInitialized();
-        return true;
+        return getDv7HandlingMode() == DV7_HANDLING_HDR10;
     }
 
     public static String getDv7HandlingText() {
@@ -682,6 +685,31 @@ public class PlaybackPerformanceSetting {
 
     static boolean shouldMigrateMpvAutoBaseline(int profile) {
         return clampProfile(profile) == PROFILE_AUTO;
+    }
+
+    private static synchronized void migrateAudioPassthroughDefault() {
+        if (Prefers.getBoolean(KEY_AUDIO_PASSTHROUGH_DEFAULT_MIGRATED)) return;
+        boolean legacyExplicitOff = Prefers.getPrefers().contains("audio_pass_through")
+                && !Prefers.getBoolean("audio_pass_through", true);
+        for (int kernel : new int[]{PlayerSetting.EXO, PlayerSetting.MPV}) {
+            int profile = rawProfile(kernel);
+            boolean overridden = isOverridden(
+                    kernel, PlaybackPerformanceCatalog.AUDIO_PASSTHROUGH);
+            if (shouldMigrateAudioPassthroughDefault(
+                    profile, overridden, legacyExplicitOff)) {
+                KernelPerformanceSetting.putAudioPassThrough(kernel, true);
+            }
+        }
+        Prefers.put(KEY_AUDIO_PASSTHROUGH_DEFAULT_MIGRATED, true);
+    }
+
+    static boolean shouldMigrateAudioPassthroughDefault(
+            int profile,
+            boolean overridden,
+            boolean legacyExplicitOff) {
+        int normalized = clampProfile(profile);
+        if (legacyExplicitOff || normalized == PROFILE_CUSTOM) return false;
+        return normalized != PROFILE_AUTO || !overridden;
     }
 
     private static synchronized void migrateRecommendedProfileMerge() {

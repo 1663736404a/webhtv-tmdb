@@ -85,6 +85,34 @@ public class DolbyVisionP81ExtractorsFactoryTest {
         assertEquals((byte) 0x99, sample[7 + 7 - 1]);
     }
 
+    @Test
+    public void keepsOnlyLastProfile81RpuPerAccessUnit() {
+        byte[] sample = {
+                0, 0, 0, 1, 0x26, 0x01, 0x11,
+                0, 0, 1, 0x7C, 0x01, 0x22,
+                0, 0, 0, 1, 0x7C, 0x01, 0x33
+        };
+
+        int length = DolbyVisionP81ExtractorsFactory
+                .stripProfile81Nalus(sample, sample.length);
+
+        assertEquals(7 + 7, length);
+        assertEquals(0x26, sample[4]);
+        assertEquals(0x7C, sample[7 + 4]);
+        assertEquals(0x33, sample[length - 1]);
+    }
+
+    @Test
+    public void detectsDecodedPictureAccessUnits() {
+        byte[] picture = {0, 0, 0, 1, 0x26, 0x01, 0x11};
+        byte[] metadataOnly = {0, 0, 0, 1, 0x7C, 0x01, 0x22};
+
+        assertTrue(DolbyVisionP81ExtractorsFactory.containsVclNal(
+                picture, picture.length));
+        assertFalse(DolbyVisionP81ExtractorsFactory.containsVclNal(
+                metadataOnly, metadataOnly.length));
+    }
+
     private static Format format(String codecs) {
         return new Format.Builder()
                 .setSampleMimeType(MimeTypes.VIDEO_DOLBY_VISION)

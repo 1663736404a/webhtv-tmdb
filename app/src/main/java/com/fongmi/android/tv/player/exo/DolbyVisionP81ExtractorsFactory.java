@@ -1,10 +1,10 @@
 package com.fongmi.android.tv.player.exo;
 
 import android.net.Uri;
+import android.os.SystemClock;
 
 import androidx.annotation.Nullable;
 import androidx.media3.common.C;
-import androidx.media3.common.ColorInfo;
 import androidx.media3.common.DataReader;
 import androidx.media3.common.Format;
 import androidx.media3.common.MimeTypes;
@@ -254,7 +254,8 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
         @Nullable private Format sourceFormat;
         private boolean converting;
         private boolean formatDispatched;
-        private boolean hdr10Fallback;
+        private long sampleCount;
+        private long lastDiagnosticLogMs;
 
         DolbyVisionTrackOutput(
                 TrackOutput delegate,
@@ -273,7 +274,8 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
             converting = shouldConvert(format);
             sourceFormat = format;
             formatDispatched = !converting;
-            hdr10Fallback = false;
+            sampleCount = 0;
+            lastDiagnosticLogMs = 0;
             pending.clear();
             transformer = converting
                     ? new HevcFrameTransformer(P81_STRATEGY) : null;
@@ -286,7 +288,7 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
                 int length,
                 boolean allowEndOfInput,
                 int sampleDataPart) throws IOException {
-            if (!converting) {
+            if (!converting || sampleDataPart != SAMPLE_DATA_PART_MAIN) {
                 return delegate.sampleData(
                         input, length, allowEndOfInput, sampleDataPart);
             }
@@ -306,7 +308,7 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
         @Override
         public void sampleData(
                 ParsableByteArray data, int length, int sampleDataPart) {
-            if (!converting) {
+            if (!converting || sampleDataPart != SAMPLE_DATA_PART_MAIN) {
                 delegate.sampleData(data, length, sampleDataPart);
                 return;
             }
@@ -323,19 +325,32 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
                 int offset,
                 @Nullable CryptoData cryptoData) {
             if (!converting || pending.position() == 0) {
-                dispatchFormatIfNeeded(false);
+                dispatchFormatIfNeeded();
                 delegate.sampleMetadata(
                         timeUs, flags, size, offset, cryptoData);
                 return;
             }
 
-            int sampleLength = pending.position();
+            int pendingLength = pending.position();
+            int carrySize = Math.max(0, Math.min(offset, pendingLength));
+            int sampleLength = pendingLength - carrySize;
+            byte[] carry = carrySize == 0 ? null : new byte[carrySize];
+            if (carry != null) {
+                pending.limit(pendingLength).position(sampleLength);
+                pending.get(carry);
+            }
+
             pending = ensureCapacity(pending, sampleLength + TRANSFORM_GROWTH_BYTES);
-            pending.flip();
+            outputScratch = ensureCapacity(outputScratch, sampleLength);
+            pending.limit(sampleLength).position(0);
+            pending.duplicate().get(outputScratch, 0, sampleLength);
+            NalStats sourceStats = SpiderDebug.isEnabled()
+                    ? inspectNalus(outputScratch, sampleLength) : null;
             int outputLength = sampleLength;
             boolean invalidP81 = false;
-            if (!hdr10Fallback && transformer != null && sampleLength > 0) {
+            if (transformer != null && sampleLength > 0) {
                 try {
+                    pending.limit(sampleLength).position(0);
                     outputLength = transformer.transformFrame(
                             pending, sampleLength);
                 } catch (Throwable error) {
@@ -343,49 +358,49 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
                     outputLength = sampleLength;
                     if (SpiderDebug.isEnabled()) {
                         SpiderDebug.log("exo-dv", "DV7 P8.1 conversion failed; "
-                                + "falling back to HDR10 sample error=%s",
+                                + "aborting the locked P8.1 session error=%s",
                                 error.getClass().getSimpleName());
                     }
                 }
             }
 
             outputScratch = ensureCapacity(outputScratch, outputLength);
-            pending.limit(outputLength).position(0);
-            pending.get(outputScratch, 0, outputLength);
-            if (!invalidP81 && !hdr10Fallback && transformer != null) {
-                invalidP81 = isInvalidP81Frame(pending, outputScratch, outputLength);
-                if (invalidP81) {
-                    if (SpiderDebug.isEnabled()) {
-                        SpiderDebug.log("exo-dv", "DV7 P8.1 frame did not produce profile 8 RPU; "
-                                + "stripping DV metadata and continuing as HDR10 sample");
-                    }
-                }
+            if (!invalidP81) {
+                pending.limit(outputLength).position(0);
+                pending.get(outputScratch, 0, outputLength);
             }
-            dispatchFormatIfNeeded(invalidP81);
-            outputLength = hdr10Fallback
-                    ? stripDolbyVisionNalus(outputScratch, outputLength)
-                    : stripProfile81Nalus(outputScratch, outputLength);
+            NalStats transformedStats = SpiderDebug.isEnabled()
+                    ? inspectNalus(outputScratch, outputLength) : null;
+            // Matroska may contain both an in-band RPU and an RPU exposed from
+            // BlockAdditional. The latter is appended last by our Media3 fork.
+            // Keep that authoritative RPU and never feed multiple dynamic
+            // metadata NALs for one access unit to vendor Dolby Vision codecs.
+            outputLength = stripProfile81Nalus(outputScratch, outputLength);
+            if (!invalidP81) {
+                invalidP81 = isInvalidP81Frame(outputScratch, outputLength);
+            }
+            if (invalidP81) {
+                logAuStats(sourceStats, transformedStats,
+                        inspectNalus(outputScratch, outputLength), true);
+                throw new IllegalStateException(
+                        "DV7 P8.1 conversion produced an invalid access unit");
+            }
+            dispatchFormatIfNeeded();
+            logAuStats(sourceStats, transformedStats,
+                    inspectNalus(outputScratch, outputLength), false);
             outputData.reset(outputScratch, outputLength);
             delegate.sampleData(
                     outputData, outputLength, SAMPLE_DATA_PART_MAIN);
             delegate.sampleMetadata(
-                    timeUs, flags, outputLength, offset, cryptoData);
+                    timeUs, flags, outputLength, 0, cryptoData);
 
             pending.clear();
+            if (carry != null) pending.put(carry);
         }
 
-        private void dispatchFormatIfNeeded(boolean invalidP81) {
+        private void dispatchFormatIfNeeded() {
             if (sourceFormat == null) return;
-            if (invalidP81) {
-                if (hdr10Fallback) return;
-                Format output = asHdr10(sourceFormat);
-                delegate.format(output);
-                hdr10Fallback = true;
-                formatDispatched = true;
-                if (playbackState != null) playbackState.activate(sourceFormat, output);
-                return;
-            }
-            if (formatDispatched || hdr10Fallback) return;
+            if (formatDispatched) return;
             Format output = asProfile81(sourceFormat);
             delegate.format(output);
             formatDispatched = true;
@@ -394,17 +409,43 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
             }
         }
 
-        private boolean isInvalidP81Frame(
-                ByteBuffer transformed, byte[] output, int length) {
-            if (!containsNalType(output, length, 62)) return false;
+        private boolean isInvalidP81Frame(byte[] output, int length) {
+            // Parameter-set-only access units do not require dynamic metadata.
+            // Every access unit containing a decoded picture must carry a valid
+            // P8 RPU, otherwise a vendor decoder may output its HDR10 base layer.
+            if (!containsVclNal(output, length)) return false;
+            if (!containsNalType(output, length, 62)) return true;
             try {
                 if (validator == null) validator = new LibDovi();
-                transformed.limit(length).position(0);
-                FrameInfo info = validator.getFrameInfo(transformed, length);
+                pending = ensureCapacity(pending, length);
+                pending.clear();
+                pending.put(output, 0, length);
+                pending.limit(length).position(0);
+                FrameInfo info = validator.getFrameInfo(pending, length);
                 return info == null || info.getDoviProfile() != 8;
             } catch (Throwable error) {
                 return true;
             }
+        }
+
+        private void logAuStats(
+                @Nullable NalStats source,
+                @Nullable NalStats transformed,
+                NalStats output,
+                boolean invalidP81) {
+            if (!SpiderDebug.isEnabled()) return;
+            sampleCount++;
+            long now = SystemClock.elapsedRealtime();
+            boolean anomalousRpuCount = (source != null && source.rpuCount > 1)
+                    || (transformed != null && transformed.rpuCount > 1)
+                    || output.rpuCount > 1;
+            boolean periodic = sampleCount <= 3 || sampleCount % 600 == 0;
+            if (!periodic && !invalidP81
+                    && (!anomalousRpuCount || now - lastDiagnosticLogMs < 5000)) return;
+            lastDiagnosticLogMs = now;
+            SpiderDebug.log("exo-dv", "AU sample=%d source=%s transformed=%s output=%s "
+                            + "locked=P8.1 invalid=%s",
+                    sampleCount, source, transformed, output, invalidP81);
         }
 
         private static ByteBuffer ensureCapacity(
@@ -428,21 +469,26 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
     }
 
     static int stripEnhancementLayerNalus(byte[] data, int length) {
-        return stripNalus(data, length, false, false);
+        return stripNalus(data, length, false, false, false);
     }
 
     static int stripProfile81Nalus(byte[] data, int length) {
-        return stripNalus(data, length, false, true);
+        return stripNalus(data, length, false, true, true);
     }
 
     static int stripDolbyVisionNalus(byte[] data, int length) {
-        return stripNalus(data, length, true, true);
+        return stripNalus(data, length, true, true, false);
     }
 
     private static int stripNalus(
-            byte[] data, int length, boolean stripRpu, boolean stripHdr10Plus) {
+            byte[] data,
+            int length,
+            boolean stripRpu,
+            boolean stripHdr10Plus,
+            boolean keepOnlyLastRpu) {
         int firstStart = findStartCode(data, 0, length);
         if (firstStart < 0) return length;
+        int lastRpuStart = keepOnlyLastRpu ? findLastNalStart(data, length, 62) : -1;
         int writeOffset = 0;
         if (firstStart > 0) {
             System.arraycopy(data, 0, data, 0, firstStart);
@@ -463,6 +509,7 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
                         | ((secondHeader >> 3) & 0x1F);
                 enhancementLayer = nalType == 63 || layerId > 0
                         || (stripRpu && nalType == 62)
+                        || (keepOnlyLastRpu && nalType == 62 && start != lastRpuStart)
                         || (stripHdr10Plus && nalType == 39
                         && isHdr10PlusSei(data, payload, end));
             }
@@ -474,6 +521,67 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
             start = next;
         }
         return writeOffset;
+    }
+
+    private static int findLastNalStart(byte[] data, int length, int expectedType) {
+        int last = -1;
+        int start = findStartCode(data, 0, length);
+        while (start >= 0 && start < length) {
+            int startCodeLength = data[start + 2] == 1 ? 3 : 4;
+            int payload = start + startCodeLength;
+            int next = findStartCode(data, payload + 2, length);
+            int end = next < 0 ? length : next;
+            if (payload + 1 < end) {
+                int nalType = ((data[payload] & 0xFF) & 0x7E) >> 1;
+                if (nalType == expectedType) last = start;
+            }
+            start = next;
+        }
+        return last;
+    }
+
+    private static NalStats inspectNalus(byte[] data, int length) {
+        NalStats stats = new NalStats();
+        int start = findStartCode(data, 0, length);
+        while (start >= 0 && start < length) {
+            int startCodeLength = data[start + 2] == 1 ? 3 : 4;
+            int payload = start + startCodeLength;
+            int next = findStartCode(data, payload + 2, length);
+            int end = next < 0 ? length : next;
+            if (payload + 1 < end) {
+                int firstHeader = data[payload] & 0xFF;
+                int secondHeader = data[payload + 1] & 0xFF;
+                int nalType = (firstHeader & 0x7E) >> 1;
+                int layerId = ((firstHeader & 0x01) << 5)
+                        | ((secondHeader >> 3) & 0x1F);
+                if (nalType <= 31) stats.vclCount++;
+                if (nalType == 62) stats.rpuCount++;
+                if (nalType == 63) stats.type63Count++;
+                if (layerId > 0) stats.enhancementLayerCount++;
+                if (nalType == 39 && isHdr10PlusSei(data, payload, end)) {
+                    stats.hdr10PlusCount++;
+                }
+            }
+            start = next;
+        }
+        return stats;
+    }
+
+    private static final class NalStats {
+
+        int rpuCount;
+        int vclCount;
+        int type63Count;
+        int enhancementLayerCount;
+        int hdr10PlusCount;
+
+        @Override
+        public String toString() {
+            return String.format(Locale.US,
+                    "vcl:%d,rpu:%d,type63:%d,el:%d,hdr10+:%d",
+                    vclCount, rpuCount, type63Count,
+                    enhancementLayerCount, hdr10PlusCount);
+        }
     }
 
     private static boolean containsNalType(byte[] data, int length, int expectedType) {
@@ -492,6 +600,22 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
         return false;
     }
 
+    static boolean containsVclNal(byte[] data, int length) {
+        int start = findStartCode(data, 0, length);
+        while (start >= 0 && start < length) {
+            int startCodeLength = data[start + 2] == 1 ? 3 : 4;
+            int payload = start + startCodeLength;
+            int next = findStartCode(data, payload + 2, length);
+            int end = next < 0 ? length : next;
+            if (payload + 1 < end) {
+                int nalType = ((data[payload] & 0xFF) & 0x7E) >> 1;
+                if (nalType <= 31) return true;
+            }
+            start = next;
+        }
+        return false;
+    }
+
     private static boolean isHdr10PlusSei(byte[] data, int payload, int end) {
         for (int i = payload + 2; i + 5 < end; i++) {
             if ((data[i] & 0xFF) == 0xB5
@@ -502,25 +626,6 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
                     && (data[i + 5] & 0xFF) == 0x04) return true;
         }
         return false;
-    }
-
-    private static Format asHdr10(Format format) {
-        ColorInfo color = format.colorInfo == null
-                ? new ColorInfo.Builder()
-                .setColorSpace(C.COLOR_SPACE_BT2020)
-                .setColorRange(C.COLOR_RANGE_LIMITED)
-                .setColorTransfer(C.COLOR_TRANSFER_ST2084)
-                .build()
-                : format.colorInfo.buildUpon()
-                .setColorSpace(C.COLOR_SPACE_BT2020)
-                .setColorRange(C.COLOR_RANGE_LIMITED)
-                .setColorTransfer(C.COLOR_TRANSFER_ST2084)
-                .build();
-        return format.buildUpon()
-                .setSampleMimeType(MimeTypes.VIDEO_H265)
-                .setCodecs(null)
-                .setColorInfo(color)
-                .build();
     }
 
     private static int findStartCode(byte[] data, int offset, int length) {

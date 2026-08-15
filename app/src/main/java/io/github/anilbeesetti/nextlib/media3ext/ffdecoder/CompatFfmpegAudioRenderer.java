@@ -5,6 +5,7 @@ import static androidx.media3.exoplayer.audio.AudioSink.SINK_FORMAT_SUPPORTED_DI
 import android.content.Context;
 import android.os.Handler;
 
+import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.C;
 import androidx.media3.common.Format;
 import androidx.media3.common.MimeTypes;
@@ -13,18 +14,20 @@ import androidx.media3.common.util.TraceUtil;
 import androidx.media3.common.util.Util;
 import androidx.media3.decoder.CryptoConfig;
 import androidx.media3.exoplayer.RendererCapabilities;
+import androidx.media3.exoplayer.audio.AudioCapabilities;
 import androidx.media3.exoplayer.audio.AudioRendererEventListener;
 import androidx.media3.exoplayer.audio.AudioSink;
 import androidx.media3.exoplayer.audio.DecoderAudioRenderer;
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector;
 import androidx.media3.exoplayer.mediacodec.MediaCodecUtil;
 
+import com.github.catvod.crawler.SpiderDebug;
+
 public final class CompatFfmpegAudioRenderer extends DecoderAudioRenderer<FfmpegAudioDecoder> {
 
     private static final int NUM_BUFFERS = 16;
     private static final int DEFAULT_INPUT_BUFFER_SIZE = 5760;
     private static final int STEREO_CHANNEL_COUNT = 2;
-    private static final String AUDIO_AV3A = "audio/av3a";
     private final Context context;
     private final boolean systemDecoderFallbackOnly;
 
@@ -61,6 +64,11 @@ public final class CompatFfmpegAudioRenderer extends DecoderAudioRenderer<Ffmpeg
         Format decodeFormat = normalizeDecodeFormat(format);
         int initialInputBufferSize = decodeFormat.maxInputSize != Format.NO_VALUE ? decodeFormat.maxInputSize : DEFAULT_INPUT_BUFFER_SIZE;
         int outputChannelCount = getOutputChannelCount(decodeFormat);
+        if (SpiderDebug.isEnabled()) {
+            SpiderDebug.log("exo-audio", "ffmpeg output mime=%s sourceChannels=%d outputChannels=%d maxDeviceChannels=%d downmix=%s",
+                    decodeFormat.sampleMimeType, decodeFormat.channelCount, outputChannelCount,
+                    getMaxDeviceChannelCount(), outputChannelCount == STEREO_CHANNEL_COUNT && decodeFormat.channelCount > STEREO_CHANNEL_COUNT);
+        }
         FfmpegAudioDecoder decoder = new FfmpegAudioDecoder(decodeFormat, NUM_BUFFERS, NUM_BUFFERS, initialInputBufferSize, shouldOutputFloat(decodeFormat, outputChannelCount), outputChannelCount);
         TraceUtil.endSection();
         return decoder;
@@ -107,17 +115,32 @@ public final class CompatFfmpegAudioRenderer extends DecoderAudioRenderer<Ffmpeg
     }
 
     private int getOutputChannelCount(Format format) {
-        if (sinkSupportsFormat(format, C.ENCODING_PCM_16BIT, format.channelCount)
-                || sinkSupportsFormat(format, C.ENCODING_PCM_FLOAT, format.channelCount)) {
-            return format.channelCount;
-        }
-        if (AUDIO_AV3A.equals(format.sampleMimeType)
-                && format.channelCount > STEREO_CHANNEL_COUNT
-                && (sinkSupportsFormat(format, C.ENCODING_PCM_16BIT, STEREO_CHANNEL_COUNT)
-                || sinkSupportsFormat(format, C.ENCODING_PCM_FLOAT, STEREO_CHANNEL_COUNT))) {
+        boolean sourceSupported = sinkSupportsFormat(format, C.ENCODING_PCM_16BIT, format.channelCount)
+                || sinkSupportsFormat(format, C.ENCODING_PCM_FLOAT, format.channelCount);
+        boolean stereoSupported = sinkSupportsFormat(format, C.ENCODING_PCM_16BIT, STEREO_CHANNEL_COUNT)
+                || sinkSupportsFormat(format, C.ENCODING_PCM_FLOAT, STEREO_CHANNEL_COUNT);
+        return resolveOutputChannelCount(format.channelCount, getMaxDeviceChannelCount(), sourceSupported, stereoSupported);
+    }
+
+    static int resolveOutputChannelCount(int sourceChannelCount, int maxDeviceChannelCount, boolean sourceSupported, boolean stereoSupported) {
+        if (sourceChannelCount > STEREO_CHANNEL_COUNT
+                && stereoSupported
+                && maxDeviceChannelCount > 0
+                && sourceChannelCount > maxDeviceChannelCount) {
             return STEREO_CHANNEL_COUNT;
         }
+        if (sourceSupported) return sourceChannelCount;
+        if (sourceChannelCount > STEREO_CHANNEL_COUNT && stereoSupported) return STEREO_CHANNEL_COUNT;
         return Format.NO_VALUE;
+    }
+
+    private int getMaxDeviceChannelCount() {
+        if (context == null) return Format.NO_VALUE;
+        try {
+            return AudioCapabilities.getCapabilities(context.getApplicationContext(), AudioAttributes.DEFAULT, null).getMaxChannelCount();
+        } catch (Throwable ignored) {
+            return Format.NO_VALUE;
+        }
     }
 
     private boolean shouldOutputFloat(Format format, int outputChannelCount) {
