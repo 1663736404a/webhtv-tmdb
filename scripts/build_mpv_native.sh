@@ -575,7 +575,7 @@ verify_directory() {
   grep -Fq "android-osd-wid" <<<"$version_strings" || die "MPV dual-Surface OSD option missing from $directory/libmpv.so"
   grep -Fq "Direct Dolby Vision initialization failed" <<<"$version_strings" || die "MPV direct Dolby Vision fallback missing from $directory/libmpv.so"
   grep -Fq "video output has no queue-safe EL decoder" <<<"$version_strings" || die "MPV Android Dolby Vision EL capability guard missing from $directory/libmpv.so"
-  grep -Fq "DV7 HDR10 fallback: stripping EL/RPU before decoder." <<<"$version_strings" || die "MPV Dolby Vision Profile 7 HDR10 base-layer filter missing from $directory/libmpv.so"
+  grep -Fq "DV7 HDR10 fallback: preserving decoder input and stripping Dolby Vision frame metadata." <<<"$version_strings" || die "MPV Dolby Vision Profile 7 HDR10 frame fallback missing from $directory/libmpv.so"
   if grep -Fq "Using device native output sample rate for passthrough compatibility" <<<"$version_strings"; then
     die "obsolete MPV AudioTrack passthrough native-rate patch present in $directory/libmpv.so"
   fi
