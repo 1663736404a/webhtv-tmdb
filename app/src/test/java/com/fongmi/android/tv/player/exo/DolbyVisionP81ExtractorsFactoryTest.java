@@ -47,6 +47,44 @@ public class DolbyVisionP81ExtractorsFactoryTest {
         assertEquals(0x7C, sample[11]);
     }
 
+    @Test
+    public void stripsLateHdr10PlusMetadataFromProfile81() {
+        byte[] sample = {
+                0, 0, 0, 1, 0x26, 0x01, 0x11,
+                0, 0, 1, 0x7C, 0x01, 0x22,
+                0, 0, 0, 1, 0x4E, 0x01, (byte) 0xB5, 0x00, 0x3C, 0x00, 0x01, 0x04,
+                0x01,
+                0, 0, 0, 1, 0x4E, 0x01, (byte) 0x99
+        };
+
+        int length = DolbyVisionP81ExtractorsFactory
+                .stripProfile81Nalus(sample, sample.length);
+
+        assertEquals(7 + 6 + 7, length);
+        assertEquals(0x7C, sample[7 + 3]);
+        assertEquals(0x4E, sample[7 + 6 + 4]);
+        assertEquals((byte) 0x99, sample[length - 1]);
+    }
+
+    @Test
+    public void stripsDolbyVisionRpuAndHdr10PlusForHdr10Fallback() {
+        byte[] sample = {
+                0, 0, 0, 1, 0x26, 0x01, 0x11,
+                0, 0, 1, 0x7C, 0x01, 0x22,
+                0, 0, 0, 1, 0x4E, 0x01, (byte) 0xB5, 0x00, 0x3C, 0x00, 0x01, 0x04,
+                0x01,
+                0, 0, 0, 1, 0x4E, 0x01, (byte) 0x99
+        };
+
+        int length = DolbyVisionP81ExtractorsFactory
+                .stripDolbyVisionNalus(sample, sample.length);
+
+        assertEquals(7 + 7, length);
+        assertEquals(0x26, sample[4]);
+        assertEquals(0x4E, sample[7 + 4]);
+        assertEquals((byte) 0x99, sample[7 + 7 - 1]);
+    }
+
     private static Format format(String codecs) {
         return new Format.Builder()
                 .setSampleMimeType(MimeTypes.VIDEO_DOLBY_VISION)
