@@ -735,9 +735,18 @@ public class ExoUtil {
         if (SpiderDebug.isEnabled()) {
             AudioCapabilities capabilities = AudioCapabilities.getCapabilities(
                     context.getApplicationContext(), AudioAttributes.DEFAULT, null);
+            int speakerChannels = 0;
+            for (Integer channelMask : capabilities.getSpeakerLayoutChannelMasks()) {
+                if (channelMask != null) speakerChannels = Math.max(
+                        speakerChannels, Integer.bitCount(channelMask));
+            }
             SpiderDebug.log("exo-audio",
-                    "configured passthrough=%s maxChannels=%d capabilities=%s",
-                    passthrough, capabilities.getMaxChannelCount(), capabilities);
+                    "configured passthrough=%s maxChannels=%d speakerChannels=%d speakerMasks=%s ac3=%s",
+                    passthrough,
+                    capabilities.getMaxChannelCount(),
+                    speakerChannels,
+                    capabilities.getSpeakerLayoutChannelMasks(),
+                    capabilities.supportsEncoding(C.ENCODING_AC3));
         }
         DefaultAudioSink.Builder builder = new DefaultAudioSink.Builder(context).setEnableFloatOutput(enableFloatOutput).setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams);
         if (!passthrough) builder.setAudioOutputProvider(new AudioTrackAudioOutputProvider.Builder(null).build());

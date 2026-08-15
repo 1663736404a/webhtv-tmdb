@@ -137,7 +137,14 @@ public final class CompatFfmpegAudioRenderer extends DecoderAudioRenderer<Ffmpeg
     private int getMaxDeviceChannelCount() {
         if (context == null) return Format.NO_VALUE;
         try {
-            return AudioCapabilities.getCapabilities(context.getApplicationContext(), AudioAttributes.DEFAULT, null).getMaxChannelCount();
+            AudioCapabilities capabilities = AudioCapabilities.getCapabilities(
+                    context.getApplicationContext(), AudioAttributes.DEFAULT, null);
+            int speakerChannels = 0;
+            for (Integer channelMask : capabilities.getSpeakerLayoutChannelMasks()) {
+                if (channelMask != null) speakerChannels = Math.max(
+                        speakerChannels, Integer.bitCount(channelMask));
+            }
+            return speakerChannels > 0 ? speakerChannels : capabilities.getMaxChannelCount();
         } catch (Throwable ignored) {
             return Format.NO_VALUE;
         }
