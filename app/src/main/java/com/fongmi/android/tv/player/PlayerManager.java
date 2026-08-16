@@ -4602,7 +4602,7 @@ public class PlayerManager implements ParseCallback {
         boolean subtitleActive = MpvAutoOutputPolicy.requiresGpuSubtitle(externalSubtitleActive, mpvExplicitSubtitlePreference);
         boolean lutOrFilterActive = videoEffectsActive || videoEffectsDirty || lutAllowed && LutSetting.isEnabled() || MpvPerformanceSetting.isInterpolation();
         boolean customGpuProcessing = MpvConfigStore.hasGpuVideoProcessing();
-        boolean forceNativeDv7 = isDv7NativeAttemptRequested();
+        boolean forceNativeDv7 = isDv7NativeAttemptRequested() && !subtitleActive;
         MpvAutoOutputPolicy.Decision decision = forceNativeDv7
                 ? new MpvAutoOutputPolicy.Decision(true,
                 "dv7-native-attempt")
@@ -4651,8 +4651,19 @@ public class PlayerManager implements ParseCallback {
     }
 
     private boolean shouldLeaveAutoSurfaceDirectForSubtitle(List<Track> tracks) {
-        // mediacodec_embed uses a separate transparent OSD Surface, so subtitle
-        // selection no longer requires rebuilding the video through gpu-next.
+        if (!isMpvSurfaceDirect()
+                || MpvPerformanceSetting.getOutputMode()
+                != MpvPerformanceSetting.OUTPUT_AUTO
+                || tracks == null) return false;
+        for (Track track : tracks) {
+            if (track.getType() == C.TRACK_TYPE_TEXT
+                    && track.isSelected()
+                    && !track.isDisabled()) {
+                mpvAutoOutputEvaluated = true;
+                mpvOutputEvaluationSeq++;
+                return true;
+            }
+        }
         return false;
     }
 

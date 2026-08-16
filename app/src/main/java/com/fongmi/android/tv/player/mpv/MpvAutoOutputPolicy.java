@@ -8,6 +8,7 @@ public final class MpvAutoOutputPolicy {
     public static Decision evaluate(int width, int height, boolean hardDecode, boolean leanback, boolean subtitleActive, boolean lutOrFilterActive, boolean customGpuProcessing) {
         if (!leanback) return new Decision(false, "not-tv");
         if (!hardDecode) return new Decision(false, "software-decode");
+        if (subtitleActive) return new Decision(false, "subtitle-active");
         if (lutOrFilterActive) return new Decision(false, "lut-or-filter-active");
         if (customGpuProcessing) return new Decision(false, "custom-gpu-processing");
         return new Decision(true, "tv-hardware-decode");
@@ -27,11 +28,11 @@ public final class MpvAutoOutputPolicy {
     }
 
     public static boolean canEvaluateWithoutTracks(int width, int height, boolean externalSubtitleActive) {
-        return width > 0 && height > 0;
+        return !externalSubtitleActive && width > 0 && height > 0;
     }
 
     public static boolean requiresGpuSubtitle(boolean externalSubtitleActive, boolean userRequestedSubtitle) {
-        return false;
+        return externalSubtitleActive || userRequestedSubtitle;
     }
 
     public enum Transition {

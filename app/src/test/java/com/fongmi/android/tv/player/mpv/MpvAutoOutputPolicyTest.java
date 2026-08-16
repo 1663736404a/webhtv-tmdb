@@ -22,7 +22,7 @@ public class MpvAutoOutputPolicyTest {
 
     @Test
     public void rejectsFeaturesThatNeedGpuComposition() {
-        assertTrue(MpvAutoOutputPolicy.evaluate(3840, 2160, true, true, true, false, false).eligible());
+        assertFalse(MpvAutoOutputPolicy.evaluate(3840, 2160, true, true, true, false, false).eligible());
         assertFalse(MpvAutoOutputPolicy.evaluate(3840, 2160, true, true, false, true, false).eligible());
         assertFalse(MpvAutoOutputPolicy.evaluate(3840, 2160, true, true, false, false, true).eligible());
     }
@@ -35,14 +35,14 @@ public class MpvAutoOutputPolicyTest {
     @Test
     public void evaluatesKnownSizeBeforeTracksAreComplete() {
         assertTrue(MpvAutoOutputPolicy.canEvaluateWithoutTracks(1920, 1080, false));
-        assertTrue(MpvAutoOutputPolicy.canEvaluateWithoutTracks(3840, 2160, true));
+        assertFalse(MpvAutoOutputPolicy.canEvaluateWithoutTracks(3840, 2160, true));
     }
 
     @Test
-    public void subtitlesUseTheDedicatedDirectOutputOsdSurface() {
+    public void subtitlesRequireGpuComposition() {
         assertFalse(MpvAutoOutputPolicy.requiresGpuSubtitle(false, false));
-        assertFalse(MpvAutoOutputPolicy.requiresGpuSubtitle(true, false));
-        assertFalse(MpvAutoOutputPolicy.requiresGpuSubtitle(false, true));
+        assertTrue(MpvAutoOutputPolicy.requiresGpuSubtitle(true, false));
+        assertTrue(MpvAutoOutputPolicy.requiresGpuSubtitle(false, true));
     }
 
     @Test

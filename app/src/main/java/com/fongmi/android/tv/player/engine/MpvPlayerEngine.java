@@ -734,6 +734,7 @@ public class MpvPlayerEngine implements PlayerEngine {
         applySoftDecodeOptions(builder);
         if (surfaceDirect) {
             builder.vo("mediacodec_embed")
+                    .option("sid", "no")
                     .gpuApi("")
                     .openglEs(false);
         } else if (useVulkan) {

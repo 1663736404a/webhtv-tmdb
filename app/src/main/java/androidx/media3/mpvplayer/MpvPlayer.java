@@ -2112,7 +2112,9 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     }
 
     private boolean requiresOsdSurface() {
-        return "mediacodec_embed".equals(videoOutputVo());
+        // Keep mediacodec_embed on the original video-only Surface path. Auto
+        // output switches to the GPU renderer when subtitles are requested.
+        return false;
     }
 
     private String videoOutputVo() {
