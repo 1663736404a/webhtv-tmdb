@@ -116,7 +116,7 @@ index 77f4644..99c3099 100644
      const AVCodecParameters *par_out = s->bsf->par_out;
  
      // Allocate the virtual EL sh_stream.
-@@ -151,55 +161,96 @@ struct sh_stream *mp_dovi_split_el_stream(struct mp_dovi_split *s)
+@@ -151,55 +161,101 @@ struct sh_stream *mp_dovi_split_el_stream(struct mp_dovi_split *s)
      return s ? s->el : NULL;
  }
  
@@ -138,24 +138,34 @@ index 77f4644..99c3099 100644
 -        return NULL;
 +        return SPLIT_PACKET_ERROR;
  
-     // av_bsf_send_packet takes ownership of the packet's buffer, so copy it,
-     // to not steal it from caller.
+-    // av_bsf_send_packet takes ownership of the packet's buffer, so copy it,
+-    // to not steal it from caller.
++    // av_bsf_send_packet takes ownership of the packet reference. Reuse the
++    // demux packet's ref-counted AVBufferRef when available to avoid copying
++    // every 4K access unit; retain a padded-copy fallback for foreign packets.
      AVPacket *copy = av_packet_alloc();
      if (!copy)
 -        return NULL;
+-    int ret = av_new_packet(copy, bl_dp->len);
 +        return SPLIT_PACKET_ERROR;
-     int ret = av_new_packet(copy, bl_dp->len);
++    int ret;
++    if (bl_dp->avpacket && bl_dp->avpacket->data == bl_dp->buffer
++            && bl_dp->avpacket->size == bl_dp->len) {
++        ret = av_packet_ref(copy, bl_dp->avpacket);
++    } else {
++        ret = av_new_packet(copy, bl_dp->len);
++        if (ret >= 0) memcpy(copy->data, bl_dp->buffer, bl_dp->len);
++        if (ret >= 0 && bl_dp->avpacket)
++            ret = av_packet_copy_props(copy, bl_dp->avpacket);
++        copy->flags = bl_dp->keyframe ? AV_PKT_FLAG_KEY : 0;
++    }
      if (ret < 0) {
          av_packet_free(&copy);
 -        return NULL;
 +        return SPLIT_PACKET_ERROR;
      }
-     memcpy(copy->data, bl_dp->buffer, bl_dp->len);
-     copy->flags = bl_dp->keyframe ? AV_PKT_FLAG_KEY : 0;
-+    if (bl_dp->avpacket && av_packet_copy_props(copy, bl_dp->avpacket) < 0) {
-+        av_packet_free(&copy);
-+        return SPLIT_PACKET_ERROR;
-+    }
+-    memcpy(copy->data, bl_dp->buffer, bl_dp->len);
+-    copy->flags = bl_dp->keyframe ? AV_PKT_FLAG_KEY : 0;
  
      ret = av_bsf_send_packet(s->bsf, copy);
      av_packet_free(&copy);

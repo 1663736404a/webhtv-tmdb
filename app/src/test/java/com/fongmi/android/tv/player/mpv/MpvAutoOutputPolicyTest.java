@@ -9,13 +9,15 @@ import org.junit.Test;
 public class MpvAutoOutputPolicyTest {
 
     @Test
-    public void acceptsUltraWideFourKClassVideoOnTvHardwareDecode() {
+    public void acceptsTvHardwareDecodeAtAnyResolution() {
         assertTrue(MpvAutoOutputPolicy.evaluate(3840, 1632, true, true, false, false, false).eligible());
+        assertTrue(MpvAutoOutputPolicy.evaluate(1920, 1080, true, true, false, false, false).eligible());
     }
 
     @Test
-    public void rejectsOrdinaryFullHdVideo() {
-        assertFalse(MpvAutoOutputPolicy.evaluate(1920, 1080, true, true, false, false, false).eligible());
+    public void canStartDirectBeforeVideoSizeIsKnown() {
+        assertTrue(MpvAutoOutputPolicy.canStartSurfaceDirect(true, true, false, false));
+        assertFalse(MpvAutoOutputPolicy.canStartSurfaceDirect(true, true, true, false));
     }
 
     @Test
@@ -31,8 +33,8 @@ public class MpvAutoOutputPolicyTest {
     }
 
     @Test
-    public void waitsForTracksWhenEarlyDecisionCouldLoseFeatures() {
-        assertFalse(MpvAutoOutputPolicy.canEvaluateWithoutTracks(1920, 1080, false));
+    public void evaluatesKnownSizeBeforeTracksAreComplete() {
+        assertTrue(MpvAutoOutputPolicy.canEvaluateWithoutTracks(1920, 1080, false));
         assertTrue(MpvAutoOutputPolicy.canEvaluateWithoutTracks(3840, 2160, true));
     }
 

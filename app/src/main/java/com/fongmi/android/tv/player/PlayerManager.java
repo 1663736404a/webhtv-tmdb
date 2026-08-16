@@ -141,6 +141,7 @@ public class PlayerManager implements ParseCallback {
     private static final long DANMAKU_FORCE_RELOAD_DEBOUNCE_MS = 10000;
     private static final long LIVE_DANMAKU_METRICS_INTERVAL_MS = 15000L;
     private static final long PLAYBACK_TELEMETRY_INTERVAL_MS = 5000L;
+    private static final long MPV_FRAME_TIMING_LOG_INTERVAL_MS = 5000L;
     private static final float[] SPEED_PRESETS = new float[]{0.5f, 0.75f, 1f, 1.2f, 1.25f, 1.5f, 1.75f, 2f, 2.5f, 3f, 5f};
     private static final DecimalFormat SPEED_FORMAT = new DecimalFormat("0.##x");
 
@@ -255,6 +256,7 @@ public class PlayerManager implements ParseCallback {
     private float networkProtectionSpeed = 1f;
     private float networkProtectionSupportedSpeed = 1f;
     private long networkProtectionMediaBitrate;
+    private long lastMpvFrameTimingLogMs;
     private ExoNetworkGuardController.State networkProtectionState = ExoNetworkGuardController.State.NORMAL;
     private ExoNetworkGuardController.ProtectionTier networkProtectionTier = ExoNetworkGuardController.ProtectionTier.NONE;
     private String networkProtectionReason = "waiting";
@@ -4524,20 +4526,27 @@ public class PlayerManager implements ParseCallback {
         resetMpvOutputEvaluationState();
         mpvExplicitSubtitlePreference = hasRequestedSubtitle(Track.find(getKey()));
         if (!(engine instanceof MpvPlayerEngine mpv)) return;
-        if (MpvPerformanceSetting.getOutputMode() == MpvPerformanceSetting.OUTPUT_AUTO
-                && mpv.isSurfaceDirect()) {
-            if (SpiderDebug.isEnabled()) SpiderDebug.log("mpv-output", "preserve direct output for new item reason=auto-sticky");
-            return;
-        }
         mpv.setSurfaceDirectOverride(null);
-        boolean shouldStartDirect = MpvPerformanceSetting.shouldUseSurfaceDirect(false, Util.isLeanback(), engine.isHard());
+        boolean autoDirectEligible = MpvAutoOutputPolicy.canStartSurfaceDirect(
+                engine.isHard(),
+                Util.isLeanback(),
+                MpvAutoOutputPolicy.requiresGpuSubtitle(
+                        spec != null && spec.getSubs() != null && !spec.getSubs().isEmpty(),
+                        mpvExplicitSubtitlePreference)
+                        || videoEffectsActive || videoEffectsDirty || MpvPerformanceSetting.isInterpolation()
+                        || lutAllowed && LutSetting.isEnabled(),
+                MpvConfigStore.hasGpuVideoProcessing());
+        boolean shouldStartDirect = MpvPerformanceSetting.shouldUseSurfaceDirect(
+                autoDirectEligible, Util.isLeanback(), engine.isHard());
         if (mpv.isSurfaceDirect() == shouldStartDirect) return;
         if (SpiderDebug.isEnabled()) SpiderDebug.log("mpv-output", "prepare new item rebuild currentDirect=%s desiredDirect=%s mode=%s", mpv.isSurfaceDirect(), shouldStartDirect, MpvPerformanceSetting.getOutputModeText());
+        mpv.setSurfaceDirectOverride(shouldStartDirect);
         rebuildPlayer();
     }
 
     private void resetMpvOutputRuntime() {
         resetMpvOutputEvaluationState();
+        lastMpvFrameTimingLogMs = 0;
         if (engine instanceof MpvPlayerEngine mpv) mpv.setSurfaceDirectOverride(null);
     }
 
@@ -6380,6 +6389,7 @@ public class PlayerManager implements ParseCallback {
         PlaybackTelemetry.Metric<Long> firstFrame = firstFrameMs < 0 ? PlaybackTelemetry.Metric.unknown()
                 : PlaybackTelemetry.Metric.of(firstFrameMs, PlaybackAutoContext.ValueSource.PLAYER_CALLBACK,
                 PlaybackAutoContext.Confidence.HIGH);
+        logMpvFrameTiming(now);
         return new PlaybackTelemetry.RuntimeObservation(
                 phase,
                 loading,
@@ -6396,6 +6406,24 @@ public class PlayerManager implements ParseCallback {
                         PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH),
                 firstFrame,
                 liveLag);
+    }
+
+    private void logMpvFrameTiming(long now) {
+        if (!SpiderDebug.isEnabled() || !(engine instanceof MpvPlayerEngine mpv)) return;
+        if (now - lastMpvFrameTimingLogMs < MPV_FRAME_TIMING_LOG_INTERVAL_MS) return;
+        lastMpvFrameTimingLogMs = now;
+        MpvPlayer.FrameTimingSnapshot timing = mpv.getFrameTimingSnapshot();
+        PlaybackTrace.log("mpv-frame-timing", playbackTrace.current(),
+                "dec=%d out=%d mistimed=%d delayed=%d avSyncMs=%d contentFps=%.3f displayFps=%.3f direct=%s observed=%s",
+                timing.decoderDroppedFrames(),
+                timing.outputDroppedFrames(),
+                timing.mistimedFrames(),
+                timing.delayedFrames(),
+                Math.round(timing.avSyncSeconds() * 1000.0),
+                timing.contentFrameRate(),
+                timing.displayFrameRate(),
+                mpv.isSurfaceDirect(),
+                timing.observed());
     }
 
     private void evaluateExoRtspLiveLag(

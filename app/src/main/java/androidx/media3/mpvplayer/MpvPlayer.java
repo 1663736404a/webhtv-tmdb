@@ -1019,6 +1019,32 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         return Math.max(0, cachedDecoderDroppedFrames) + Math.max(0, cachedOutputDroppedFrames);
     }
 
+    /** Cached observer values only; this method never queries MPV synchronously. */
+    public FrameTimingSnapshot getFrameTimingSnapshot() {
+        double displayFps = cachedEstimatedDisplayFps > 0
+                ? cachedEstimatedDisplayFps : cachedDisplayFps;
+        return new FrameTimingSnapshot(
+                Math.max(0, cachedDecoderDroppedFrames),
+                Math.max(0, cachedOutputDroppedFrames),
+                Math.max(0, cachedMistimedFrames),
+                Math.max(0, cachedDelayedFrames),
+                cachedAvSyncSeconds,
+                getObservedContentFrameRate(),
+                displayFps > 0 && Double.isFinite(displayFps) ? displayFps : 0,
+                observedDroppedFrames);
+    }
+
+    public record FrameTimingSnapshot(
+            long decoderDroppedFrames,
+            long outputDroppedFrames,
+            long mistimedFrames,
+            long delayedFrames,
+            double avSyncSeconds,
+            float contentFrameRate,
+            double displayFrameRate,
+            boolean observed) {
+    }
+
     public float getObservedContentFrameRate() {
         return cachedContentFrameRate > 0 && Float.isFinite(cachedContentFrameRate) ? cachedContentFrameRate : 0f;
     }

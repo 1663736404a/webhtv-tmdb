@@ -27,6 +27,7 @@ import com.fongmi.android.tv.player.exo.TrackUtil;
 import com.fongmi.android.tv.player.lut.MpvLutShader;
 import com.fongmi.android.tv.player.mpv.MpvConfigStore;
 import com.fongmi.android.tv.player.mpv.MpvAutoControlPolicy;
+import com.fongmi.android.tv.player.mpv.MpvAutoOutputPolicy;
 import com.fongmi.android.tv.player.mpv.MpvVulkanBackendPolicy;
 import com.fongmi.android.tv.setting.PlayerSetting;
 import com.fongmi.android.tv.setting.MpvPerformanceSetting;
@@ -243,6 +244,10 @@ public class MpvPlayerEngine implements PlayerEngine {
                 mediaBitrate > 0 ? mediaBitrate : null,
                 frameRate > 0 ? frameRate : null,
                 player.hasObservedDroppedFrames() ? player.getObservedDroppedFrames() : null);
+    }
+
+    public MpvPlayer.FrameTimingSnapshot getFrameTimingSnapshot() {
+        return player.getFrameTimingSnapshot();
     }
 
     @Override
@@ -671,8 +676,13 @@ public class MpvPlayerEngine implements PlayerEngine {
 
     private MpvPlayerConfig buildConfig() {
         MpvConfigStore.ensureReady();
+        boolean autoDirectEligible = MpvAutoOutputPolicy.canStartSurfaceDirect(
+                decode == HARD,
+                Util.isLeanback(),
+                MpvPerformanceSetting.isInterpolation(),
+                MpvConfigStore.hasGpuVideoProcessing());
         surfaceDirect = surfaceDirectOverride == null
-                ? MpvPerformanceSetting.shouldUseSurfaceDirect(false, Util.isLeanback(), decode == HARD)
+                ? MpvPerformanceSetting.shouldUseSurfaceDirect(autoDirectEligible, Util.isLeanback(), decode == HARD)
                 : surfaceDirectOverride && decode == HARD;
         boolean requestVulkan = PlayerSetting.getMpvRender() == PlayerSetting.MPV_RENDER_VULKAN;
         boolean nativeVulkan = MPVLib.isBundledVulkanEnabled(App.get());
