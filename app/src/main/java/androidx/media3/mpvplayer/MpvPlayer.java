@@ -93,7 +93,9 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     private static final long MAIN_THREAD_WATCHDOG_INTERVAL_MS = 500;
     private static final long MAIN_THREAD_STALL_THRESHOLD_MS = 1500;
     private static final long MAIN_THREAD_STALL_LOG_INTERVAL_MS = 5000;
-    private static final long SLOW_MPV_NATIVE_CALL_THRESHOLD_MS = 100;
+    // A 60 Hz display has only 16.67 ms per frame. Record shorter calls too;
+    // a 100 ms threshold hides the single-frame misses that accumulate into bursts.
+    private static final long SLOW_MPV_NATIVE_CALL_THRESHOLD_MS = 16;
     private static final long END_FILE_VALIDATION_DELAY_MS = 800;
     private static final long LOAD_START_RETRY_DELAY_MS = 1000;
     private static final long MEDIA_REPLACEMENT_STOP_TIMEOUT_MS = 1200;
@@ -154,6 +156,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     private final Handler mainHandler;
     private final Object propertyEventLock;
     private final Map<String, Object> coalescedPropertyEvents;
+    private final Map<String, Integer> cachedVideoIntProperties;
     private final Runnable coalescedPropertyDrainRunnable;
     private final Runnable stateRefreshRunnable;
     private final Runnable mainThreadHeartbeatRunnable;
@@ -287,6 +290,8 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     private double cachedAvSyncSeconds;
     private double cachedDisplayFps;
     private double cachedEstimatedDisplayFps;
+    private double cachedContainerFps;
+    private double cachedEstimatedVfFps;
     private float cachedContentFrameRate;
     private float lastRequestedFrameRate = Float.NaN;
     private int lastFrameRateCompatibility = -1;
@@ -314,6 +319,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         mainHandler = new Handler(Looper.getMainLooper());
         propertyEventLock = new Object();
         coalescedPropertyEvents = new LinkedHashMap<>();
+        cachedVideoIntProperties = new LinkedHashMap<>();
         coalescedPropertyDrainRunnable = this::drainCoalescedPropertyEvents;
         cacheObserverState = new MpvCacheObserverState();
         MpvCacheTimePolicy.Decision initialCacheTimeDecision = MpvCacheTimePolicy.resolve(
@@ -436,6 +442,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         seekPositionState.clear();
         cachedPositionMs = Math.max(0, startPositionMs == C.TIME_UNSET ? 0 : startPositionMs);
         cachedDurationMs = C.TIME_UNSET;
+        resetVideoMetadataCache();
         resetCacheState();
         currentTracks = Tracks.EMPTY;
         selectedVideoTrackDiagnostics = VideoTrackDiagnostics.empty();
@@ -1541,7 +1548,12 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
                     "demuxer-cache-state/total-bytes", "demuxer-cache-state/file-cache-bytes",
                     "avsync", "display-fps", "estimated-display-fps",
                     "decoder-frame-drop-count", "frame-drop-count",
-                    "mistimed-frame-count", "vo-delayed-frame-count" -> true;
+                    "mistimed-frame-count", "vo-delayed-frame-count",
+                    "width", "height", "video-params/w", "video-params/h",
+                    "video-params/dw", "video-params/dh", "video-out-params/w",
+                    "video-out-params/h", "video-out-params/dw", "video-out-params/dh",
+                    "current-tracks/video/demux-w", "current-tracks/video/demux-h",
+                    "container-fps", "estimated-vf-fps" -> true;
             default -> false;
         };
     }
@@ -1582,6 +1594,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         }
         boolean firstObservedCacheMetric = cacheObserverState.record(property, value, SystemClock.elapsedRealtime()) && cacheObserverState.observedCount() == 1;
         if (firstObservedCacheMetric) PlaybackTrace.log("mpv", playbackTraceId, "cache source=observer-first property=%s", property);
+        cacheObservedVideoProperty(property, value);
         boolean stateChanged = false;
         switch (property) {
             case "time-pos", "time-pos/full" -> cachedPositionMs =
@@ -1871,11 +1884,10 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
                 mainHandler.removeCallbacks(endFileValidationRunnable);
                 playbackState = Player.STATE_BUFFERING;
                 loading = true;
-                cachedDurationMs = durationMs();
                 updateVideoSize("event=file-loaded");
                 refreshTracks();
                 refreshChapters();
-                if (shouldCollectDebugDetails()) PlaybackTrace.log("mpv", playbackTraceId, "event=file-loaded duration=%d size=%dx%d path=%s", cachedDurationMs, videoSize.width, videoSize.height, MpvDiagnosticsPolicy.sourceSummary(stringProperty("path", "")));
+                if (shouldCollectDebugDetails()) PlaybackTrace.log("mpv", playbackTraceId, "event=file-loaded duration=%d size=%dx%d path=%s", cachedDurationMs, videoSize.width, videoSize.height, MpvDiagnosticsPolicy.sourceSummary(currentPlayableUri));
                 addSubtitleConfigurations();
                 if (initialSeekPositionMs != C.TIME_UNSET) {
                     long targetPositionMs = initialSeekPositionMs;
@@ -1883,17 +1895,13 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
                     resetCacheTimelineForSeek(targetPositionMs);
                     seekPositionState.begin(
                             targetPositionMs, SystemClock.elapsedRealtime());
-                    long observedPositionMs = doublePropertyMs("time-pos/full",
-                            doublePropertyMs("time-pos", -1));
-                    boolean loadedAtTarget = loadStartPositionMs == targetPositionMs
-                            && observedPositionMs >= 0
-                            && Math.abs(observedPositionMs - targetPositionMs) <= 1500;
+                    boolean loadedAtTarget = loadStartPositionMs == targetPositionMs;
                     if (!loadedAtTarget) {
                         seekMpv(targetPositionMs);
                     } else if (shouldCollectDebugDetails()) {
                         PlaybackTrace.log("mpv", playbackTraceId,
                                 "initial seek embedded target=%d observed=%d",
-                                targetPositionMs, observedPositionMs);
+                                targetPositionMs, cachedPositionMs);
                     }
                 }
                 loadStartPositionMs = C.TIME_UNSET;
@@ -1903,11 +1911,9 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
             }
             case MPVLib.MpvEvent.MPV_EVENT_PLAYBACK_RESTART -> {
                 playbackRestarted = true;
-                if (currentLikelyHls) requestHlsPreload(positionMs());
+                if (currentLikelyHls) requestHlsPreload(cachedPositionMs);
                 updateVideoSize("event=playback-restart");
-                refreshTracks();
-                refreshChapters();
-                if (shouldCollectDebugDetails()) PlaybackTrace.log("mpv", playbackTraceId, "event=playback-restart position=%d duration=%d size=%dx%d", positionMs(), durationMs(), videoSize.width, videoSize.height);
+                if (shouldCollectDebugDetails()) PlaybackTrace.log("mpv", playbackTraceId, "event=playback-restart position=%d duration=%d size=%dx%d", cachedPositionMs, cachedDurationMs, videoSize.width, videoSize.height);
                 if (playbackState != Player.STATE_ENDED) {
                     playbackState = Player.STATE_READY;
                     loading = false;
@@ -2648,6 +2654,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         audioTrackManuallySelected = false;
         cachedPositionMs = 0;
         cachedDurationMs = C.TIME_UNSET;
+        resetVideoMetadataCache();
         resetCacheState();
         currentTracks = Tracks.EMPTY;
         selectedVideoTrackDiagnostics = VideoTrackDiagnostics.empty();
@@ -2834,25 +2841,24 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
 
     @Nullable
     private SizeCandidate candidateFromProperties(String widthProperty, String heightProperty, String source) {
-        int width = intProperty(widthProperty, 0);
-        int height = intProperty(heightProperty, 0);
+        int width = cachedVideoIntProperty(widthProperty, 0);
+        int height = cachedVideoIntProperty(heightProperty, 0);
         return width > 0 && height > 0 ? new SizeCandidate(width, height, source) : null;
     }
 
     @Nullable
     private SizeCandidate candidateFromSelectedVideoTrack() {
-        int count = Math.max(0, intProperty("track-list/count", 0));
         SizeCandidate firstVideo = null;
-        for (int i = 0; i < count; i++) {
-            String prefix = "track-list/" + i + "/";
-            if (!"video".equals(stringProperty(prefix + "type", ""))) continue;
-            if (booleanProperty(prefix + "albumart", false)) continue;
-            int width = intProperty(prefix + "demux-w", 0);
-            int height = intProperty(prefix + "demux-h", 0);
+        for (Tracks.Group group : currentTracks.getGroups()) {
+            if (group.length <= 0) continue;
+            Format format = group.getTrackFormat(0);
+            if (!MimeTypes.isVideo(format.sampleMimeType)) continue;
+            int width = format.width;
+            int height = format.height;
             if (width <= 0 || height <= 0) continue;
-            SizeCandidate candidate = new SizeCandidate(width, height, "track-list/" + i);
+            SizeCandidate candidate = new SizeCandidate(width, height, "tracks-cache");
             if (firstVideo == null) firstVideo = candidate;
-            if (booleanProperty(prefix + "selected", false)) return candidate;
+            if (group.isTrackSelected(0)) return candidate;
         }
         return firstVideo;
     }
@@ -2883,21 +2889,12 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     }
 
     private String size(String label, String widthProperty, String heightProperty) {
-        return label + ":" + intProperty(widthProperty, 0) + "x" + intProperty(heightProperty, 0);
+        return label + ":" + cachedVideoIntProperty(widthProperty, 0) + "x"
+                + cachedVideoIntProperty(heightProperty, 0);
     }
 
     private String selectedTrackSizeText() {
-        int count = Math.max(0, intProperty("track-list/count", 0));
-        String first = "none";
-        for (int i = 0; i < count; i++) {
-            String prefix = "track-list/" + i + "/";
-            if (!"video".equals(stringProperty(prefix + "type", ""))) continue;
-            if (booleanProperty(prefix + "albumart", false)) continue;
-            String text = "track" + i + ":" + intProperty(prefix + "demux-w", 0) + "x" + intProperty(prefix + "demux-h", 0) + ":sel=" + booleanProperty(prefix + "selected", false);
-            if ("none".equals(first)) first = text;
-            if (booleanProperty(prefix + "selected", false)) return text;
-        }
-        return first;
+        return candidateText(candidateFromSelectedVideoTrack());
     }
 
     private record SizeCandidate(int width, int height, String source) {
@@ -3043,7 +3040,8 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
             refreshCacheTimeline();
             cacheObserverState.onPausedTimelineQuery(nowMs);
         }
-        if (!cacheObserverState.shouldQueryFallback(fileLoaded, cacheActive, nowMs)) return;
+        if (!cacheObserverState.shouldQueryFallback(
+                fileLoaded, cacheActive, isPlayingInternal(), nowMs)) return;
         if (!timelineQueried && (cacheObserverState.needsFallback(MpvCacheObserverState.Metric.DURATION, cacheActive, nowMs)
                 || cacheObserverState.needsFallback(MpvCacheObserverState.Metric.END, cacheActive, nowMs))) {
             refreshCacheTimeline();
@@ -3577,19 +3575,10 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     }
 
     private long positionMs() {
-        if (initialized) {
-            long observedPositionMs = Math.max(0, doublePropertyMs(
-                    "time-pos/full", doublePropertyMs("time-pos", cachedPositionMs)));
-            cachedPositionMs = stabilizedPositionMs(observedPositionMs);
-        }
         return cachedPositionMs;
     }
 
     private long durationMs() {
-        if (initialized) {
-            long duration = doublePropertyMs("duration/full", doublePropertyMs("duration", cachedDurationMs));
-            cachedDurationMs = duration > 0 ? duration : C.TIME_UNSET;
-        }
         return cachedDurationMs > 0 ? cachedDurationMs : C.TIME_UNSET;
     }
 
@@ -4054,8 +4043,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     }
 
     private float videoFrameRate() {
-        double fps = doubleProperty("container-fps", 0);
-        if (fps <= 0) fps = doubleProperty("estimated-vf-fps", 0);
+        double fps = cachedContainerFps > 0 ? cachedContainerFps : cachedEstimatedVfFps;
         return fps > 0 ? (float) fps : C.RATE_UNSET;
     }
 
@@ -4280,6 +4268,8 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         cachedAvSyncSeconds = 0;
         cachedDisplayFps = 0;
         cachedEstimatedDisplayFps = 0;
+        cachedContainerFps = 0;
+        cachedEstimatedVfFps = 0;
         cachedContentFrameRate = 0;
         cachedDecoderDroppedFrames = 0;
         cachedOutputDroppedFrames = 0;
@@ -4287,6 +4277,35 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         cachedMistimedFrames = 0;
         cachedDelayedFrames = 0;
         cachedDisplaySyncActive = false;
+    }
+
+    private void resetVideoMetadataCache() {
+        cachedVideoIntProperties.clear();
+        cachedContainerFps = 0;
+        cachedEstimatedVfFps = 0;
+        cachedContentFrameRate = 0;
+    }
+
+    private void cacheObservedVideoProperty(String property, @Nullable Object value) {
+        switch (property) {
+            case "width", "height", "video-params/w", "video-params/h",
+                    "video-params/dw", "video-params/dh", "video-out-params/w",
+                    "video-out-params/h", "video-out-params/dw", "video-out-params/dh",
+                    "current-tracks/video/demux-w", "current-tracks/video/demux-h" -> {
+                if (value instanceof Number number) {
+                    cachedVideoIntProperties.put(property, number.intValue());
+                }
+            }
+            case "container-fps" -> cachedContainerFps = doubleValue(value, cachedContainerFps);
+            case "estimated-vf-fps" -> cachedEstimatedVfFps = doubleValue(value, cachedEstimatedVfFps);
+            default -> {
+            }
+        }
+    }
+
+    private int cachedVideoIntProperty(String property, int fallback) {
+        Integer value = cachedVideoIntProperties.get(property);
+        return value == null ? fallback : value;
     }
 
     private String stringValue(@Nullable Object value, String fallback) {
