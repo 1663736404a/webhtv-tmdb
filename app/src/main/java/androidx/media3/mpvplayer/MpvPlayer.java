@@ -278,6 +278,10 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     private int cachedCacheBufferingState;
     private int surfaceWidth;
     private int surfaceHeight;
+    private int osdSurfaceWidth;
+    private int osdSurfaceHeight;
+    private String appliedAndroidSurfaceSize;
+    private String appliedAndroidOsdSurfaceSize;
     private String attachedVo;
     private String effectiveVo;
     private String lastFailureLog;
@@ -2304,6 +2308,9 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         osdSurfaceHolder = null;
         osdSurfaceView = null;
         osdSurface = null;
+        osdSurfaceWidth = 0;
+        osdSurfaceHeight = 0;
+        appliedAndroidOsdSurfaceSize = null;
     }
 
     private void syncOsdSurfaceRequirementFromMpv() {
@@ -2451,6 +2458,9 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         surface = null;
         surfaceWidth = 0;
         surfaceHeight = 0;
+        osdSurfaceWidth = 0;
+        osdSurfaceHeight = 0;
+        resetAppliedSurfaceSizes();
     }
 
     private void detachMpvSurface() {
@@ -2508,25 +2518,45 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         Log.d(SIZE_TAG, "mpv updateSurfaceSize changed=" + surfaceWidth + "x" + surfaceHeight);
     }
 
+    private void updateOsdSurfaceSize(SurfaceHolder holder) {
+        if (holder == null) return;
+        Rect frame = holder.getSurfaceFrame();
+        if (frame == null) return;
+        updateOsdSurfaceSize(frame.width(), frame.height());
+    }
+
+    private void updateOsdSurfaceSize(int width, int height) {
+        if (width <= 0 || height <= 0) return;
+        osdSurfaceWidth = width;
+        osdSurfaceHeight = height;
+        Log.d(SIZE_TAG, "mpv updateOsdSurfaceSize changed="
+                + osdSurfaceWidth + "x" + osdSurfaceHeight);
+    }
+
     private void applyAndroidSurfaceSize() {
-        if (surfaceWidth > 0 && surfaceHeight > 0) {
-            safeSetPropertyString("android-surface-size", surfaceWidth + "x" + surfaceHeight);
-            Log.d(SIZE_TAG, "mpv android-surface-size=" + surfaceWidth + "x" + surfaceHeight);
-        } else {
-            safeSetPropertyString("android-surface-size", "0x0");
-            Log.d(SIZE_TAG, "mpv android-surface-size=0x0");
-        }
+        String targetVo = videoOutputVo();
+        if (!MpvSurfaceSizePolicy.usesAndroidSurfaceSize(targetVo)) return;
+        String value = MpvSurfaceSizePolicy.sizeValue(surfaceWidth, surfaceHeight);
+        if (value == null || TextUtils.equals(appliedAndroidSurfaceSize, value)) return;
+        if (!enqueueMpvCommand("set", "android-surface-size", value)) return;
+        appliedAndroidSurfaceSize = value;
+        Log.d(SIZE_TAG, "mpv android-surface-size queued=" + value + " vo=" + targetVo);
     }
 
     private void applyAndroidOsdSurfaceSize() {
-        if (!requiresOsdSurface()) return;
-        if (surfaceWidth > 0 && surfaceHeight > 0) {
-            safeSetPropertyString("android-osd-surface-size", surfaceWidth + "x" + surfaceHeight);
-            Log.d(SIZE_TAG, "mpv android-osd-surface-size=" + surfaceWidth + "x" + surfaceHeight);
-        } else {
-            safeSetPropertyString("android-osd-surface-size", "0x0");
-            Log.d(SIZE_TAG, "mpv android-osd-surface-size=0x0");
-        }
+        boolean validSurface = osdSurface != null && osdSurface.isValid();
+        if (!MpvSurfaceSizePolicy.shouldApplyOsdSize(
+                osdSurfaceRequested, validSurface, osdSurfaceWidth, osdSurfaceHeight)) return;
+        String value = MpvSurfaceSizePolicy.sizeValue(osdSurfaceWidth, osdSurfaceHeight);
+        if (TextUtils.equals(appliedAndroidOsdSurfaceSize, value)) return;
+        if (!enqueueMpvCommand("set", "android-osd-surface-size", value)) return;
+        appliedAndroidOsdSurfaceSize = value;
+        Log.d(SIZE_TAG, "mpv android-osd-surface-size queued=" + value);
+    }
+
+    private void resetAppliedSurfaceSizes() {
+        appliedAndroidSurfaceSize = null;
+        appliedAndroidOsdSurfaceSize = null;
     }
 
     private void applySurfaceFrameRate() {
@@ -2618,16 +2648,17 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         @Override
         public void surfaceCreated(SurfaceHolder holder) {
             osdSurface = holder.getSurface();
-            updateSurfaceSize(holder);
+            updateOsdSurfaceSize(holder);
             Log.d(SIZE_TAG, "mpv OSD surfaceCreated frame=" + surfaceFrame(holder)
                     + " valid=" + (osdSurface != null && osdSurface.isValid()));
+            applyAndroidOsdSurfaceSize();
             reconcileOsdSurface();
         }
 
         @Override
         public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
             osdSurface = holder.getSurface();
-            updateSurfaceSize(width, height);
+            updateOsdSurfaceSize(width, height);
             applyAndroidOsdSurfaceSize();
             Log.d(SIZE_TAG, "mpv OSD surfaceChanged format=" + format + " size=" + width + "x" + height);
             reconcileOsdSurface();
@@ -2637,6 +2668,9 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         public void surfaceDestroyed(SurfaceHolder holder) {
             Log.d(SIZE_TAG, "mpv OSD surfaceDestroyed frame=" + surfaceFrame(holder));
             osdSurface = null;
+            osdSurfaceWidth = 0;
+            osdSurfaceHeight = 0;
+            appliedAndroidOsdSurfaceSize = null;
             reconcileOsdSurface();
         }
     };
@@ -2742,6 +2776,9 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
             attachedOsdSurface = null;
             attachedVo = null;
             effectiveVo = null;
+            osdSurfaceWidth = 0;
+            osdSurfaceHeight = 0;
+            resetAppliedSurfaceSizes();
             stopping = false;
             loadStarted = false;
             loadStartRetryCount = 0;
