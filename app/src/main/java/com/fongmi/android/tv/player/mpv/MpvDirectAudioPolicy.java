@@ -1,8 +1,10 @@
 package com.fongmi.android.tv.player.mpv;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.MissingResourceException;
+import java.util.Set;
 
 public final class MpvDirectAudioPolicy {
 
@@ -10,8 +12,16 @@ public final class MpvDirectAudioPolicy {
     }
 
     public static Selection select(List<Candidate> candidates, String currentId) {
+        return select(candidates, currentId, "");
+    }
+
+    public static Selection select(List<Candidate> candidates, String currentId,
+                                   String passthroughCodecs) {
         Candidate current = findById(candidates, currentId);
         if (current == null) return new Selection(currentId, false, "current-track-unavailable");
+        if (supportsPassthrough(current, passthroughCodecs)) {
+            return new Selection(current.id(), false, "current-track-passthrough");
+        }
         if (isStereo(current)) return new Selection(current.id(), false, "current-track-stereo");
 
         Candidate stereo = bestCandidate(candidates, current, true);
@@ -21,6 +31,25 @@ public final class MpvDirectAudioPolicy {
         Candidate efficient = bestCandidate(candidates, current, false);
         if (efficient != null) return new Selection(efficient.id(), true, "same-language-efficient");
         return new Selection(current.id(), false, "no-compatible-alternative");
+    }
+
+    private static boolean supportsPassthrough(Candidate candidate, String passthroughCodecs) {
+        Set<String> supported = new HashSet<>();
+        if (passthroughCodecs != null) {
+            for (String codec : passthroughCodecs.split(",")) {
+                if (codec != null && !codec.isBlank()) supported.add(codec.trim().toLowerCase(Locale.US));
+            }
+        }
+        if (supported.isEmpty()) return false;
+        String text = normalizedDescription(candidate);
+        if (text.contains("truehd") || text.contains("true hd") || text.contains("mlp")) return supported.contains("truehd");
+        if (text.contains("dts-hd") || text.contains("dts_hd") || text.contains("dtshd") || text.contains("dts hd")) {
+            return supported.contains("dts-hd") || supported.contains("dts");
+        }
+        if (text.contains("dts")) return supported.contains("dts");
+        if (text.contains("eac3") || text.contains("e-ac-3") || text.contains("e-ac3")) return supported.contains("eac3");
+        if (text.contains("ac3") || text.contains("ac-3")) return supported.contains("ac3");
+        return false;
     }
 
     private static Candidate findById(List<Candidate> candidates, String id) {

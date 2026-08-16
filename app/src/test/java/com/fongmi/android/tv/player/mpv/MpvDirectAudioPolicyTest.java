@@ -53,6 +53,28 @@ public class MpvDirectAudioPolicyTest {
         assertEquals("current-track-stereo", selection.reason());
     }
 
+    @Test
+    public void keepsCurrentTrackWhenDeviceCanPassItThrough() {
+        MpvDirectAudioPolicy.Selection selection = MpvDirectAudioPolicy.select(List.of(
+                track("1", "eng", "dts", "DTS 5.1", 6),
+                track("2", "eng", "aac", "Stereo", 2)), "1", "ac3,dts");
+
+        assertFalse(selection.changed());
+        assertEquals("1", selection.id());
+        assertEquals("current-track-passthrough", selection.reason());
+    }
+
+    @Test
+    public void fallsBackWhenCurrentTrackCannotPassThrough() {
+        MpvDirectAudioPolicy.Selection selection = MpvDirectAudioPolicy.select(List.of(
+                track("1", "eng", "dts", "DTS 5.1", 6),
+                track("2", "eng", "aac", "Stereo", 2)), "1", "ac3,eac3");
+
+        assertTrue(selection.changed());
+        assertEquals("2", selection.id());
+        assertEquals("same-language-stereo", selection.reason());
+    }
+
     private static MpvDirectAudioPolicy.Candidate track(String id, String language,
                                                         String codec, String title,
                                                         int channels) {

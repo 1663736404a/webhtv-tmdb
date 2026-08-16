@@ -207,6 +207,7 @@ public class PlayerManager implements ParseCallback {
     private volatile long liveDanmakuGeneration;
     private volatile boolean liveDanmakuPlaybackActive;
     private long pendingSwitchPositionMs = C.TIME_UNSET;
+    private long pendingInitialStartPositionMs = C.TIME_UNSET;
     private float pendingSwitchSpeed = 1f;
     private boolean danmakuLoadInProgress;
     private boolean danmakuForeground = true;
@@ -4745,11 +4746,16 @@ public class PlayerManager implements ParseCallback {
     }
 
     public void start(PlaySpec spec, long timeout, boolean playWhenReady) {
+        start(spec, timeout, playWhenReady, C.TIME_UNSET);
+    }
+
+    public void start(PlaySpec spec, long timeout, boolean playWhenReady, long positionMs) {
         endPlaybackTelemetrySession("replace-start");
         prepareIjkRuntimeForUserPlayback();
         clearPendingSwitchRestore();
         clearDanmaku("start");
         this.spec = spec;
+        pendingInitialStartPositionMs = positionMs > 0 ? positionMs : C.TIME_UNSET;
         prepareMpvOutputForNewItem();
         beginPlaybackTrace("start", false);
         this.playWhenReady = playWhenReady;
@@ -4764,12 +4770,18 @@ public class PlayerManager implements ParseCallback {
     }
 
     public void parse(String key, Result result, boolean useParse, MediaMetadata metadata, boolean playWhenReady) {
+        parse(key, result, useParse, metadata, playWhenReady, C.TIME_UNSET);
+    }
+
+    public void parse(String key, Result result, boolean useParse, MediaMetadata metadata,
+                      boolean playWhenReady, long positionMs) {
         endPlaybackTelemetrySession("replace-parse");
         prepareIjkRuntimeForUserPlayback();
         stopParse();
         clearPendingSwitchRestore();
         clearDanmaku("parse");
         spec = PlaySpec.fromParse(result, key, metadata, useParse);
+        pendingInitialStartPositionMs = positionMs > 0 ? positionMs : C.TIME_UNSET;
         prepareMpvOutputForNewItem();
         beginPlaybackTrace("parse", false);
         this.playWhenReady = playWhenReady;
@@ -4911,7 +4923,9 @@ public class PlayerManager implements ParseCallback {
         waitingLutBeforePlay = false;
         applySubtitleStyle();
         playbackTrace.mark(PlaybackTrace.Stage.PREPARE, "player=" + playerType + " decode=" + engine.getDecode());
-        engine.start(spec.checkUa(), playWhenReady);
+        long initialPositionMs = pendingInitialStartPositionMs;
+        pendingInitialStartPositionMs = C.TIME_UNSET;
+        engine.start(spec.checkUa(), initialPositionMs, playWhenReady);
         publishPlaybackTelemetry();
         schedulePlaybackTelemetry();
         scheduleMpvAutoOutputEvaluation();

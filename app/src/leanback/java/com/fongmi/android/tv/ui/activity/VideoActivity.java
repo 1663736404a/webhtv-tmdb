@@ -1114,10 +1114,9 @@ public class VideoActivity extends PlaybackActivity implements CustomKeyDownVod.
         mBinding.control.parse.setVisibility(isUseParse() ? View.VISIBLE : View.GONE);
         List<Danmaku> siteDanmakus = result.getDanmaku();
         mInitialPlaybackPosition = resolveInitialPlaybackPosition();
-        if (!isMusicLike() || service() == null || player().isIjk()) mInitialPlaybackPosition = C.TIME_UNSET;
         SpiderDebug.log("video-flow", "startPlayer dispatch initialPosition=%d music=%s ijk=%s", mInitialPlaybackPosition, isMusicLike(), service() != null && player().isIjk());
         long start = System.currentTimeMillis();
-        startPlayer(getHistoryKey(), result, isUseParse(), getSite().getTimeout(), buildMetadata());
+        startPlayer(getHistoryKey(), result, isUseParse(), getSite().getTimeout(), buildMetadata(), mInitialPlaybackPosition);
         SpiderDebug.log("video-flow", "startPlayer return cost=%dms sincePlayerStart=%dms", System.currentTimeMillis() - start, System.currentTimeMillis() - playerStartTime);
         if (DanmakuApi.canAutoSearch(siteDanmakus)) DanmakuApi.search(mHistory.getVodName(), getEpisode().getName(), player()::setDanmaku);
     }
@@ -5414,7 +5413,7 @@ public class VideoActivity extends PlaybackActivity implements CustomKeyDownVod.
         if (mHistory == null) return;
         long position = resolveInitialPlaybackPosition();
         if (position <= 0) return;
-        if (mInitialPlaybackPosition == position && isMusicLike() && service() != null && !player().isIjk()) {
+        if (mInitialPlaybackPosition == position) {
             SpiderDebug.log("video-flow", "skip duplicate restore seek position=%d key=%s", position, getHistoryKey());
             mInitialPlaybackPosition = C.TIME_UNSET;
             return;
