@@ -293,6 +293,8 @@ public final class MPVLib {
 
     public static native void detachOsdSurface();
 
+    public static native int enqueueOsdSurface(long requestId, Surface surface);
+
     public static native int command(String[] cmd);
 
     public static native int enqueueCommand(long requestId, String[] cmd);
