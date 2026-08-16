@@ -1085,10 +1085,6 @@ public class PlayerManager implements ParseCallback {
 
     public void setTrack(List<Track> tracks) {
         mpvExplicitSubtitlePreference = hasRequestedSubtitle(tracks);
-        if (shouldLeaveAutoSurfaceDirectForSubtitle(tracks)) {
-            rebuildAndRestartMpv(false, "subtitle-selected");
-            return;
-        }
         if (!tracks.isEmpty()) engine.setTrack(tracks);
     }
 
@@ -4530,10 +4526,7 @@ public class PlayerManager implements ParseCallback {
         boolean autoDirectEligible = MpvAutoOutputPolicy.canStartSurfaceDirect(
                 engine.isHard(),
                 Util.isLeanback(),
-                MpvAutoOutputPolicy.requiresGpuSubtitle(
-                        spec != null && spec.getSubs() != null && !spec.getSubs().isEmpty(),
-                        mpvExplicitSubtitlePreference)
-                        || videoEffectsActive || videoEffectsDirty || MpvPerformanceSetting.isInterpolation()
+                videoEffectsActive || videoEffectsDirty || MpvPerformanceSetting.isInterpolation()
                         || lutAllowed && LutSetting.isEnabled(),
                 MpvConfigStore.hasGpuVideoProcessing());
         boolean shouldStartDirect = MpvPerformanceSetting.shouldUseSurfaceDirect(
@@ -4598,15 +4591,16 @@ public class PlayerManager implements ParseCallback {
         if (earlyEvaluation
                 && !PlaybackPerformanceSetting
                 .isDv7Hdr10FallbackEnabled()) return false;
-        if (earlyEvaluation && !MpvAutoOutputPolicy.canEvaluateWithoutTracks(width, height, externalSubtitleActive)) return false;
-        boolean subtitleActive = MpvAutoOutputPolicy.requiresGpuSubtitle(externalSubtitleActive, mpvExplicitSubtitlePreference);
+        if (earlyEvaluation && !MpvAutoOutputPolicy.canEvaluateWithoutTracks(width, height)) return false;
+        boolean subtitleActive = externalSubtitleActive || mpvExplicitSubtitlePreference;
         boolean lutOrFilterActive = videoEffectsActive || videoEffectsDirty || lutAllowed && LutSetting.isEnabled() || MpvPerformanceSetting.isInterpolation();
         boolean customGpuProcessing = MpvConfigStore.hasGpuVideoProcessing();
-        boolean forceNativeDv7 = isDv7NativeAttemptRequested() && !subtitleActive;
+        boolean forceNativeDv7 = isDv7NativeAttemptRequested();
         MpvAutoOutputPolicy.Decision decision = forceNativeDv7
                 ? new MpvAutoOutputPolicy.Decision(true,
                 "dv7-native-attempt")
-                : MpvAutoOutputPolicy.evaluate(width, height, engine.isHard(), Util.isLeanback(), subtitleActive, lutOrFilterActive, customGpuProcessing);
+                : MpvAutoOutputPolicy.evaluate(width, height, engine.isHard(),
+                Util.isLeanback(), lutOrFilterActive, customGpuProcessing);
         mpvAutoOutputEvaluated = true;
         boolean currentlyDirect = isMpvSurfaceDirect();
         MpvAutoOutputPolicy.Transition transition = MpvAutoOutputPolicy.transition(decision.eligible(), currentlyDirect);
@@ -4648,23 +4642,6 @@ public class PlayerManager implements ParseCallback {
                                 PlaybackTelemetry.DecisionInput.number("probe_attempts", mpvAutoOutputProbeAttempts, PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH))),
                 SystemClock.elapsedRealtime());
         return true;
-    }
-
-    private boolean shouldLeaveAutoSurfaceDirectForSubtitle(List<Track> tracks) {
-        if (!isMpvSurfaceDirect()
-                || MpvPerformanceSetting.getOutputMode()
-                != MpvPerformanceSetting.OUTPUT_AUTO
-                || tracks == null) return false;
-        for (Track track : tracks) {
-            if (track.getType() == C.TRACK_TYPE_TEXT
-                    && track.isSelected()
-                    && !track.isDisabled()) {
-                mpvAutoOutputEvaluated = true;
-                mpvOutputEvaluationSeq++;
-                return true;
-            }
-        }
-        return false;
     }
 
     private boolean hasRequestedSubtitle(List<Track> tracks) {

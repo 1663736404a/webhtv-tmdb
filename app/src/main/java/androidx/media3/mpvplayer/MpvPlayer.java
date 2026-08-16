@@ -49,6 +49,7 @@ import com.fongmi.android.tv.player.cache.PlaybackDiskBufferStore;
 import com.fongmi.android.tv.player.engine.PlayerCacheState;
 import com.fongmi.android.tv.player.iso.IsoSessionManager;
 import com.fongmi.android.tv.player.lut.MpvLutShader;
+import com.fongmi.android.tv.player.mpv.MpvDirectAudioPolicy;
 import com.fongmi.android.tv.player.mpv.MpvNetworkRecoveryPolicy;
 import com.fongmi.android.tv.player.mpv.MpvSubtitleStylePolicy;
 import com.fongmi.android.tv.setting.PlayerSetting;
@@ -242,6 +243,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     private boolean observedCurrentVo;
     private boolean observedHwdecCurrent;
     private boolean preferAacApplied;
+    private boolean directAudioApplied;
     private boolean audioTrackManuallySelected;
     private BiConsumer<Integer, Integer> videoSizeProbeListener;
     private boolean trackRefreshScheduled;
@@ -412,6 +414,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         eofReached = false;
         idleActive = false;
         preferAacApplied = false;
+        directAudioApplied = false;
         audioTrackManuallySelected = false;
         currentPlayableUri = null;
         closeIsoSession();
@@ -2112,9 +2115,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     }
 
     private boolean requiresOsdSurface() {
-        // Keep mediacodec_embed on the original video-only Surface path. Auto
-        // output switches to the GPU renderer when subtitles are requested.
-        return false;
+        return "mediacodec_embed".equals(videoOutputVo());
     }
 
     private String videoOutputVo() {
@@ -2416,6 +2417,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         loadStartRetryCount = 0;
         eofReached = false;
         preferAacApplied = false;
+        directAudioApplied = false;
         audioTrackManuallySelected = false;
         cachedPositionMs = 0;
         cachedDurationMs = C.TIME_UNSET;
@@ -3362,13 +3364,47 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
             groups.add(new Tracks.Group(mediaGroup, false, new int[]{C.FORMAT_HANDLED}, new boolean[]{selected}));
         }
         currentTracks = groups.isEmpty() ? Tracks.EMPTY : new Tracks(groups);
-        maybeSelectPreferredAac(infos, selectedAudio);
+        if (!maybeSelectPreferredDirectAudio(infos, selectedAudio)) {
+            maybeSelectPreferredAac(infos, selectedAudio);
+        }
         logTrackSnapshot(infos, selectedVideo, selectedAudio, selectedText, currentTracks);
         if (SpiderDebug.isEnabled()) SpiderDebug.log("mpv", "tracks refreshed count=%d groups=%d", count, groups.size());
     }
 
+    private boolean maybeSelectPreferredDirectAudio(List<TrackInfo> infos, String selectedAudio) {
+        if (directAudioApplied || audioTrackManuallySelected || !initialized
+                || !"mediacodec_embed".equals(videoOutputVo())) return false;
+        TrackInfo selected = findTrack(infos, C.TRACK_TYPE_AUDIO, selectedAudio);
+        if (selected == null) return false;
+        List<MpvDirectAudioPolicy.Candidate> candidates = new ArrayList<>();
+        for (TrackInfo info : infos) {
+            if (info.type != C.TRACK_TYPE_AUDIO) continue;
+            candidates.add(new MpvDirectAudioPolicy.Candidate(
+                    info.id, info.lang, info.codec, info.title, info.channels));
+        }
+        MpvDirectAudioPolicy.Selection selection = MpvDirectAudioPolicy.select(
+                candidates, selected.id);
+        directAudioApplied = true;
+        preferAacApplied = true;
+        TrackInfo target = selected;
+        for (TrackInfo info : infos) {
+            if (info.type == C.TRACK_TYPE_AUDIO
+                    && TextUtils.equals(info.id, selection.id())) {
+                target = info;
+                break;
+            }
+        }
+        if (selection.changed()) setMpvTrack(C.TRACK_TYPE_AUDIO, selection.id());
+        SpiderDebug.log("mpv", "direct automatic audio selection changed=%s reason=%s previous=%s/%s/%dch/%s selected=%s/%s/%dch/%s",
+                selection.changed(), selection.reason(), selected.id, selected.codec,
+                selected.channels, selected.lang, target.id, target.codec,
+                target.channels, target.lang);
+        return true;
+    }
+
     private void maybeSelectPreferredAac(List<TrackInfo> infos, String selectedAudio) {
-        if (!PlayerSetting.isPreferAAC(PlayerSetting.MPV) || preferAacApplied || audioTrackManuallySelected || !initialized) return;
+        if (!PlayerSetting.isPreferAAC(PlayerSetting.MPV) || preferAacApplied
+                || directAudioApplied || audioTrackManuallySelected || !initialized) return;
         TrackInfo selected = findTrack(infos, C.TRACK_TYPE_AUDIO, selectedAudio);
         if (selected != null && isAacTrack(selected)) {
             preferAacApplied = true;

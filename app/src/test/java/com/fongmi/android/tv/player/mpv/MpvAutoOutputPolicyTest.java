@@ -10,8 +10,8 @@ public class MpvAutoOutputPolicyTest {
 
     @Test
     public void acceptsTvHardwareDecodeAtAnyResolution() {
-        assertTrue(MpvAutoOutputPolicy.evaluate(3840, 1632, true, true, false, false, false).eligible());
-        assertTrue(MpvAutoOutputPolicy.evaluate(1920, 1080, true, true, false, false, false).eligible());
+        assertTrue(MpvAutoOutputPolicy.evaluate(3840, 1632, true, true, false, false).eligible());
+        assertTrue(MpvAutoOutputPolicy.evaluate(1920, 1080, true, true, false, false).eligible());
     }
 
     @Test
@@ -21,28 +21,25 @@ public class MpvAutoOutputPolicyTest {
     }
 
     @Test
-    public void rejectsFeaturesThatNeedGpuComposition() {
-        assertFalse(MpvAutoOutputPolicy.evaluate(3840, 2160, true, true, true, false, false).eligible());
-        assertFalse(MpvAutoOutputPolicy.evaluate(3840, 2160, true, true, false, true, false).eligible());
-        assertFalse(MpvAutoOutputPolicy.evaluate(3840, 2160, true, true, false, false, true).eligible());
+    public void rejectsVideoFeaturesThatNeedGpuComposition() {
+        assertFalse(MpvAutoOutputPolicy.evaluate(3840, 2160, true, true, true, false).eligible());
+        assertFalse(MpvAutoOutputPolicy.evaluate(3840, 2160, true, true, false, true).eligible());
     }
 
     @Test
     public void evaluatesFourKBeforeTracksAreComplete() {
-        assertTrue(MpvAutoOutputPolicy.canEvaluateWithoutTracks(3840, 1606, false));
+        assertTrue(MpvAutoOutputPolicy.canEvaluateWithoutTracks(3840, 1606));
     }
 
     @Test
     public void evaluatesKnownSizeBeforeTracksAreComplete() {
-        assertTrue(MpvAutoOutputPolicy.canEvaluateWithoutTracks(1920, 1080, false));
-        assertFalse(MpvAutoOutputPolicy.canEvaluateWithoutTracks(3840, 2160, true));
+        assertTrue(MpvAutoOutputPolicy.canEvaluateWithoutTracks(1920, 1080));
+        assertTrue(MpvAutoOutputPolicy.canEvaluateWithoutTracks(3840, 2160));
     }
 
     @Test
-    public void subtitlesRequireGpuComposition() {
-        assertFalse(MpvAutoOutputPolicy.requiresGpuSubtitle(false, false));
-        assertTrue(MpvAutoOutputPolicy.requiresGpuSubtitle(true, false));
-        assertTrue(MpvAutoOutputPolicy.requiresGpuSubtitle(false, true));
+    public void subtitlesUseDirectOutputOverlay() {
+        assertTrue(MpvAutoOutputPolicy.evaluate(3840, 2160, true, true, false, false).eligible());
     }
 
     @Test

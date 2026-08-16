@@ -5,10 +5,11 @@ public final class MpvAutoOutputPolicy {
     private MpvAutoOutputPolicy() {
     }
 
-    public static Decision evaluate(int width, int height, boolean hardDecode, boolean leanback, boolean subtitleActive, boolean lutOrFilterActive, boolean customGpuProcessing) {
+    public static Decision evaluate(int width, int height, boolean hardDecode,
+                                    boolean leanback, boolean lutOrFilterActive,
+                                    boolean customGpuProcessing) {
         if (!leanback) return new Decision(false, "not-tv");
         if (!hardDecode) return new Decision(false, "software-decode");
-        if (subtitleActive) return new Decision(false, "subtitle-active");
         if (lutOrFilterActive) return new Decision(false, "lut-or-filter-active");
         if (customGpuProcessing) return new Decision(false, "custom-gpu-processing");
         return new Decision(true, "tv-hardware-decode");
@@ -18,8 +19,8 @@ public final class MpvAutoOutputPolicy {
     public static boolean canStartSurfaceDirect(boolean hardDecode, boolean leanback,
                                                  boolean lutOrFilterActive,
                                                  boolean customGpuProcessing) {
-        return evaluate(1, 1, hardDecode, leanback, false,
-                lutOrFilterActive, customGpuProcessing).eligible();
+        return evaluate(1, 1, hardDecode, leanback, lutOrFilterActive,
+                customGpuProcessing).eligible();
     }
 
     public static Transition transition(boolean eligible, boolean currentlyDirect) {
@@ -27,12 +28,8 @@ public final class MpvAutoOutputPolicy {
         return currentlyDirect ? Transition.LEAVE_SURFACE_DIRECT : Transition.KEEP_GPU;
     }
 
-    public static boolean canEvaluateWithoutTracks(int width, int height, boolean externalSubtitleActive) {
-        return !externalSubtitleActive && width > 0 && height > 0;
-    }
-
-    public static boolean requiresGpuSubtitle(boolean externalSubtitleActive, boolean userRequestedSubtitle) {
-        return externalSubtitleActive || userRequestedSubtitle;
+    public static boolean canEvaluateWithoutTracks(int width, int height) {
+        return width > 0 && height > 0;
     }
 
     public enum Transition {
