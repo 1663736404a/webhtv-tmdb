@@ -576,6 +576,8 @@ verify_directory() {
   grep -Fq "Direct Dolby Vision initialization failed" <<<"$version_strings" || die "MPV direct Dolby Vision fallback missing from $directory/libmpv.so"
   grep -Fq "video output has no queue-safe EL decoder" <<<"$version_strings" || die "MPV Android Dolby Vision EL capability guard missing from $directory/libmpv.so"
   grep -Fq "DV7 HDR10 fallback: using MediaCodec base-layer decoder" <<<"$version_strings" || die "MPV Dolby Vision Profile 7 HDR10 direct base-layer fallback missing from $directory/libmpv.so"
+  grep -Fq "DV7 HDR10 fallback: stripping EL/RPU before decoder." <<<"$version_strings" || die "MPV Dolby Vision Profile 7 demux base-layer filter missing from $directory/libmpv.so"
+  grep -Fq "DV7 HDR10 fallback: failed to produce base-layer packet." <<<"$version_strings" || die "MPV Dolby Vision Profile 7 filter failure guard missing from $directory/libmpv.so"
   if grep -Fq "Using device native output sample rate for passthrough compatibility" <<<"$version_strings"; then
     die "obsolete MPV AudioTrack passthrough native-rate patch present in $directory/libmpv.so"
   fi

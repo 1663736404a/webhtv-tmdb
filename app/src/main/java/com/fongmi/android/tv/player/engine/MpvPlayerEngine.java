@@ -714,8 +714,7 @@ public class MpvPlayerEngine implements PlayerEngine {
                 .option("interpolation", MpvPerformanceSetting.isInterpolation() ? "yes" : "no")
                 .option("hls-bitrate", MpvPerformanceSetting.getHlsBitrateOption())
                 .option("demuxer-dovi-profile7",
-                        decode == HARD
-                                && PlaybackPerformanceSetting.isDv7Hdr10FallbackEnabled()
+                        PlaybackPerformanceSetting.isDv7Hdr10FallbackEnabled()
                                 ? "hdr10" : "preserve");
         if (useVulkan && !appBackendOverride.isEmpty()) {
             builder.option(MpvVulkanBackendPolicy.OPTION, appBackendOverride);

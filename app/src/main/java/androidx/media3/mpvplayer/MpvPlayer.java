@@ -2420,9 +2420,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         if (!initialized) return;
         boolean previousStopping = stopping;
         if (markStopping) stopping = true;
-        try {
-            MPVLib.command(new String[]{"stop"});
-        } catch (Throwable ignored) {
+        if (!enqueueMpvCommand("stop")) {
             stopping = previousStopping;
         }
     }

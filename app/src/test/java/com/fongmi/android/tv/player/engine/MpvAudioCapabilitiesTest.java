@@ -35,4 +35,19 @@ public class MpvAudioCapabilitiesTest {
     public void leavesSpdifDisabledWhenMedia3ReportsNoSurroundSupport() {
         assertEquals("", MpvAudioCapabilities.getAudioSpdifCodecs(encoding -> false));
     }
+
+    @Test
+    public void filtersAdvertisedCodecsByActualMpvCarrierSupport() {
+        Set<String> advertised = Set.of("ac3", "eac3", "truehd");
+        assertEquals("ac3,truehd",
+                MpvAudioCapabilities.getAudioSpdifCodecs(
+                        advertised, codec -> codec.equals("ac3") || codec.equals("truehd")));
+    }
+
+    @Test
+    public void keepsCodecOrderStableWhenCarrierProbeAcceptsAll() {
+        Set<String> advertised = Set.of("truehd", "dts-hd", "dts", "eac3", "ac3");
+        assertEquals("ac3,eac3,dts,dts-hd,truehd",
+                MpvAudioCapabilities.getAudioSpdifCodecs(advertised, codec -> true));
+    }
 }
