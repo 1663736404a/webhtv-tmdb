@@ -354,7 +354,7 @@ public class MpvPlayerEngine implements PlayerEngine {
                 player.getSelectedVideoTrackDiagnostics();
         String currentVo = player.getObservedCurrentVideoOutput();
         boolean fallbackConfigured = isConfiguredDv7Hdr10Fallback(
-                details, isHard(), surfaceDirect,
+                details, isHard(),
                 PlaybackPerformanceSetting.isDv7Hdr10FallbackEnabled());
         return new VideoPlaybackDetails(
                 details.sourceCodecs(),
@@ -371,10 +371,9 @@ public class MpvPlayerEngine implements PlayerEngine {
     static boolean isConfiguredDv7Hdr10Fallback(
             MpvPlayer.VideoTrackDiagnostics details,
             boolean hardDecode,
-            boolean directSurface,
             boolean fallbackEnabled) {
         return details != null && details.dolbyVisionProfile() == 7
-                && hardDecode && !directSurface && fallbackEnabled;
+                && hardDecode && fallbackEnabled;
     }
 
     static boolean isDolbyVisionHdr10Fallback(
@@ -715,7 +714,7 @@ public class MpvPlayerEngine implements PlayerEngine {
                 .option("interpolation", MpvPerformanceSetting.isInterpolation() ? "yes" : "no")
                 .option("hls-bitrate", MpvPerformanceSetting.getHlsBitrateOption())
                 .option("demuxer-dovi-profile7",
-                        decode == HARD && !surfaceDirect
+                        decode == HARD
                                 && PlaybackPerformanceSetting.isDv7Hdr10FallbackEnabled()
                                 ? "hdr10" : "preserve");
         if (useVulkan && !appBackendOverride.isEmpty()) {

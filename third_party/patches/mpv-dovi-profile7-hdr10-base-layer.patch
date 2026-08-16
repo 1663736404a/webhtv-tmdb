@@ -1,15 +1,8 @@
 diff --git a/video/decode/vd_lavc.c b/video/decode/vd_lavc.c
+index 98f1bd6e..72a882db 100644
 --- a/video/decode/vd_lavc.c
 +++ b/video/decode/vd_lavc.c
-@@ -26,6 +26,7 @@
- #include <libavutil/opt.h>
- #include <libavutil/intreadwrite.h>
- #include <libavutil/pixdesc.h>
-+#include <libplacebo/utils/libav.h>
-
- #include "mpv_talloc.h"
- #include "common/msg.h"
-@@ -120,6 +121,11 @@ static int hwdec_opt_help(struct mp_log *log, const m_option_t *opt,
+@@ -120,6 +120,11 @@ static void set_decoder_avopts(struct mp_log *log, AVCodecContext *avctx,
 
  #define OPT_BASE_STRUCT struct vd_lavc_params
 
@@ -21,7 +14,7 @@ diff --git a/video/decode/vd_lavc.c b/video/decode/vd_lavc.c
  struct vd_lavc_params {
      bool fast;
      int film_grain;
-@@ -135,6 +141,7 @@ struct vd_lavc_params {
+@@ -135,6 +140,7 @@ struct vd_lavc_params {
      bool check_hw_profile;
      char **avopts;
      int dr;
@@ -29,7 +22,7 @@ diff --git a/video/decode/vd_lavc.c b/video/decode/vd_lavc.c
  };
 
  static const struct m_opt_choice_alternatives discard_names[] = {
-@@ -166,6 +173,9 @@ const struct m_sub_options vd_lavc_conf = {
+@@ -166,6 +172,9 @@ const struct m_sub_options vd_lavc_conf = {
          {"vd-lavc-dr", OPT_CHOICE(dr,
              {"auto", -1}, {"no", 0}, {"yes", 1})},
          {"vd-apply-cropping", OPT_BOOL(apply_cropping)},
@@ -39,7 +32,7 @@ diff --git a/video/decode/vd_lavc.c b/video/decode/vd_lavc.c
          {0}
      },
      .change_flags = UPDATE_VD,
-@@ -179,6 +189,7 @@ const struct m_sub_options vd_lavc_conf = {
+@@ -179,6 +188,7 @@ const struct m_sub_options vd_lavc_conf = {
          .framedrop = AVDISCARD_NONREF,
          .dr = -1,
          .apply_cropping = true,
@@ -47,81 +40,32 @@ diff --git a/video/decode/vd_lavc.c b/video/decode/vd_lavc.c
      },
  };
 
-@@ -271,6 +282,7 @@ typedef struct lavc_ctx {
-     struct demux_packet **requeue_packets;
-     int num_requeue_packets;
-
-+    bool dovi_profile7_hdr10_notified;
-     struct mp_image **delay_queue;
-     int num_delay_queue;
-     int max_delay_queue;
-@@ -1296,6 +1308,52 @@ static void handle_err(struct mp_filter *vd)
-     }
+@@ -556,6 +566,12 @@ static bool supports_gpu_dovi_mapping(vd_ffmpeg_ctx *ctx)
+     return hwctx && hwctx->supports_gpu_dovi_mapping;
  }
 
-+static void *get_image_side_data(const struct mp_image *mpi,
-+                                 enum AVFrameSideDataType type)
++static bool dovi_profile7_hdr10_fallback(const vd_ffmpeg_ctx *ctx)
 +{
-+    for (int i = 0; i < mpi->num_ff_side_data; i++) {
-+        if (mpi->ff_side_data[i].type == type)
-+            return mpi->ff_side_data[i].buf->data;
-+    }
-+    return NULL;
++    return ctx->codec && ctx->codec->dv_profile == 7 &&
++           ctx->opts->dovi_profile7_mode == DOVI_PROFILE7_HDR10;
 +}
 +
-+static void apply_dovi_profile7_hdr10_fallback(vd_ffmpeg_ctx *ctx,
-+                                               struct mp_image *mpi)
-+{
-+    if (!mpi || !ctx->codec || ctx->codec->dv_profile != 7 ||
-+        ctx->opts->dovi_profile7_mode != DOVI_PROFILE7_HDR10)
-+        return;
-+
-+    // Keep the original access units for the vendor HEVC decoder. Profile 7
-+    // has an independently decodable HDR10 base layer, and removing EL/RPU
-+    // NALs before MediaCodec has proven less compatible than letting the
-+    // decoder ignore them. Strip Dolby Vision only from the decoded frame.
-+    mp_image_params_restore_dovi_mapping(&mpi->params);
-+    mpi->params.color.hdr = (struct pl_hdr_metadata){0};
-+    pl_map_hdr_metadata(&mpi->params.color.hdr, &(struct pl_av_hdr_metadata) {
-+        .mdm = get_image_side_data(
-+            mpi, AV_FRAME_DATA_MASTERING_DISPLAY_METADATA),
-+        .clm = get_image_side_data(
-+            mpi, AV_FRAME_DATA_CONTENT_LIGHT_LEVEL),
-+        .dhp = get_image_side_data(mpi, AV_FRAME_DATA_DYNAMIC_HDR_PLUS),
-+    });
-+    mpi->params.repr.dovi = NULL;
-+    mpi->params.no_dovi = true;
-+    mpi->params.no_enhancement_layer = true;
-+    av_buffer_unref(&mpi->dovi);
-+    mp_image_unrefp(&mpi->enhancement_layer);
-+
-+    for (int i = 0; i < mpi->num_ff_side_data;) {
-+        int type = mpi->ff_side_data[i].type;
-+        if (type != AV_FRAME_DATA_DOVI_METADATA &&
-+            type != AV_FRAME_DATA_DOVI_RPU_BUFFER) {
-+            i++;
-+            continue;
-+        }
-+        av_buffer_unref(&mpi->ff_side_data[i].buf);
-+        MP_TARRAY_REMOVE_AT(mpi->ff_side_data, mpi->num_ff_side_data, i);
-+    }
-+
-+    if (!ctx->dovi_profile7_hdr10_notified) {
-+        MP_INFO(ctx, "DV7 HDR10 fallback: preserving decoder input and "
-+                     "stripping Dolby Vision frame metadata.\n");
-+        ctx->dovi_profile7_hdr10_notified = true;
-+    }
-+}
-+
- static int send_packet(struct mp_filter *vd, struct demux_packet *pkt)
+ // Select if and which hwdec to use. Also makes sure to get the decode device.
+ static void select_and_set_hwdec(struct mp_filter *vd)
  {
-     vd_ffmpeg_ctx *ctx = vd->priv;
-@@ -1397,6 +1455,8 @@ static int decode_frame(struct mp_filter *vd)
-         return ret;
-     }
+@@ -932,9 +948,14 @@ static int init_avctx(struct mp_filter *vd)
 
-+    apply_dovi_profile7_hdr10_fallback(ctx, mpi);
-+
-     if (mpi->imgfmt == IMGFMT_CUDA && !mpi->planes[0]) {
-         MP_ERR(vd, "CUDA frame without data. This is a FFmpeg bug.\n");
-         talloc_free(mpi);
+     bool native_dovi_sink =
+         ctx->vo && (ctx->vo->driver->caps & VO_CAP_NATIVE_DOVI);
++    bool decoder_native_dovi_sink = native_dovi_sink &&
++                                    !dovi_profile7_hdr10_fallback(ctx);
++    if (native_dovi_sink && !decoder_native_dovi_sink)
++        MP_INFO(vd, "DV7 HDR10 fallback: using MediaCodec base-layer decoder "
++                   "with direct Surface output.\n");
+     bool gpu_dovi_mapping = supports_gpu_dovi_mapping(ctx);
+     set_decoder_avopts(vd->log, avctx, lavc_param->avopts,
+-                       native_dovi_sink, gpu_dovi_mapping);
++                       decoder_native_dovi_sink, gpu_dovi_mapping);
+
+     // Do this after the above avopt handling in case it changes values
+     ctx->skip_frame = avctx->skip_frame;

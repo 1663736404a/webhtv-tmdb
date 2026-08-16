@@ -20,7 +20,9 @@ public class MpvDolbyVisionFallbackPolicyTest {
     }
 
     @Test
-    public void surfaceDirectKeepsNativeDv7() {
+    public void configuredFallbackAlsoCoversSurfaceDirect() {
+        assertTrue(MpvPlayerEngine.isConfiguredDv7Hdr10Fallback(
+                details(7), true, true));
         assertFalse(MpvPlayerEngine.isDolbyVisionHdr10Fallback(
                 details(7), "mediacodec_embed"));
         assertFalse(MpvPlayerEngine.isDolbyVisionHdr10Fallback(
@@ -30,11 +32,13 @@ public class MpvDolbyVisionFallbackPolicyTest {
     @Test
     public void configuredFallbackMarksDv7WithoutWaitingForVo() {
         assertTrue(MpvPlayerEngine.isConfiguredDv7Hdr10Fallback(
-                details(7), true, false, true));
+                details(7), true, true));
         assertFalse(MpvPlayerEngine.isConfiguredDv7Hdr10Fallback(
-                details(7), true, true, true));
+                details(7), false, true));
         assertFalse(MpvPlayerEngine.isConfiguredDv7Hdr10Fallback(
-                details(5), true, false, true));
+                details(5), true, true));
+        assertFalse(MpvPlayerEngine.isConfiguredDv7Hdr10Fallback(
+                details(7), true, false));
     }
 
     private static MpvPlayer.VideoTrackDiagnostics details(int profile) {
