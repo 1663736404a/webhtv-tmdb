@@ -1,0 +1,124 @@
+diff --git a/video/out/vo_mediacodec_embed.c b/video/out/vo_mediacodec_embed.c
+index 47e3e3db..0b37ac17 100644
+--- a/video/out/vo_mediacodec_embed.c
++++ b/video/out/vo_mediacodec_embed.c
+@@ -45,13 +45,16 @@ struct priv {
+     uint64_t timed_frames;
+     uint64_t immediate_frames;
+     uint64_t late_frames;
++    uint64_t release_calls;
++    int64_t release_call_total;
++    int64_t release_call_max;
+     bool backend_failed;
+ };
+ 
+ #define MAX_OSD_FAILURES 3
+ #define MEDIACODEC_QUEUE_OFFSET_NS MP_TIME_MS_TO_NS(32)
+ #define MAX_TIMED_RELEASE_LEAD_NS MP_TIME_MS_TO_NS(100)
+-#define TIMING_LOG_INTERVAL 600
++#define TIMING_LOG_INTERVAL 300
+ 
+ static int64_t android_monotonic_time_ns(void);
+ 
+@@ -103,6 +106,7 @@ static int preinit(struct vo *vo)
+     p->last_pts = MP_NOPTS_VALUE;
+     p->next_pts = MP_NOPTS_VALUE;
+     p->timed_lead_min = INT64_MAX;
++    MP_WARN(vo, "WebHTV MediaCodec timed output enabled: queue-offset=32ms.\n");
+     p->osd_overlay = android_osd_overlay_create(vo);
+     if (!p->osd_overlay ||
+         !android_osd_overlay_set_surface(
+@@ -156,6 +160,7 @@ static void flip_page(struct vo *vo)
+         }
+ 
+         int result;
++        int64_t release_start = mp_time_ns();
+         if (release_time > 0) {
+             result = av_mediacodec_render_buffer_at_time(buffer, release_time);
+             if (result >= 0) {
+@@ -171,6 +176,10 @@ static void flip_page(struct vo *vo)
+             if (p->next_pts > 0 && lead <= 0)
+                 p->late_frames++;
+         }
++        int64_t release_elapsed = mp_time_ns() - release_start;
++        p->release_calls++;
++        p->release_call_total += MPMAX(release_elapsed, 0);
++        p->release_call_max = MPMAX(p->release_call_max, release_elapsed);
+         p->submitted_frames++;
+         if (result < 0)
+             report_backend_error(vo, "video surface");
+@@ -179,16 +188,19 @@ static void flip_page(struct vo *vo)
+                 ? p->timed_lead_total / p->timed_frames : 0;
+             int64_t minimum_lead = p->timed_frames > 0
+                 ? p->timed_lead_min : 0;
+-            MP_INFO(vo, "MediaCodec output scheduling: submitted=%llu "
++            MP_WARN(vo, "MediaCodec output scheduling: submitted=%llu "
+                         "timed=%llu immediate=%llu late=%llu "
+-                        "lead=%lld/%lld/%lld us.\n",
++                        "lead=%lld/%lld/%lld us release=%lld/%lld us.\n",
+                     (unsigned long long)p->submitted_frames,
+                     (unsigned long long)p->timed_frames,
+                     (unsigned long long)p->immediate_frames,
+                     (unsigned long long)p->late_frames,
+                     (long long)(minimum_lead / 1000),
+                     (long long)(average_lead / 1000),
+-                    (long long)(p->timed_lead_max / 1000));
++                    (long long)(p->timed_lead_max / 1000),
++                    (long long)(p->release_calls > 0
++                            ? p->release_call_total / p->release_calls : 0) / 1000,
++                    (long long)(p->release_call_max / 1000));
+         }
+         mp_image_unrefp(&p->next_image);
+         p->next_pts = MP_NOPTS_VALUE;
+diff --git a/video/out/vo.c b/video/out/vo.c
+index 679a7bd0..06f51b3c 100644
+--- a/video/out/vo.c
++++ b/video/out/vo.c
+@@ -162,6 +162,9 @@ struct vo_internal {
+ 
+     int64_t delayed_count;
+     int64_t drop_count;
++    int64_t drop_late_total;
++    int64_t drop_late_max;
++    uint64_t drop_diag_frames;
+     bool dropped_frame;             // the previous frame was dropped
+ 
+     struct vo_frame *current_frame; // last frame queued to the VO
+@@ -706,6 +709,9 @@ static void forget_frames(struct vo *vo)
+     in->hasframe = false;
+     in->hasframe_rendered = false;
+     in->drop_count = 0;
++    in->drop_late_total = 0;
++    in->drop_late_max = 0;
++    in->drop_diag_frames = 0;
+     in->delayed_count = 0;
+     talloc_free(in->frame_queued);
+     in->frame_queued = NULL;
+@@ -1018,6 +1024,27 @@ static bool render_frame(struct vo *vo)
+ 
+     if (in->dropped_frame) {
+         in->drop_count += 1;
++        int64_t late_ns = end_time < now ? now - end_time : 0;
++        if (late_ns > 0) {
++            in->drop_late_total += late_ns;
++            in->drop_late_max = MPMAX(in->drop_late_max, late_ns);
++        }
++        in->drop_diag_frames++;
++        if (vo->driver == &video_out_mediacodec_embed &&
++            (in->drop_count == 1 || in->drop_diag_frames >= 60))
++        {
++            MP_WARN(vo, "MediaCodec VO drop timing: count=%lld late=%lld "
++                        "avg=%lld max=%lld us pts=%lld duration=%lld us.\n",
++                    (long long)in->drop_count,
++                    (long long)(late_ns / 1000),
++                    (long long)(in->drop_late_total / in->drop_diag_frames / 1000),
++                    (long long)(in->drop_late_max / 1000),
++                    (long long)(pts / 1000),
++                    (long long)(duration / 1000));
++            in->drop_diag_frames = 0;
++            in->drop_late_total = 0;
++            in->drop_late_max = 0;
++        }
+         wakeup_core(vo);
+     } else {
+         in->rendering = true;
