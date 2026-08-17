@@ -10,6 +10,7 @@ import android.os.Build;
 import android.os.SystemClock;
 import android.text.TextUtils;
 import android.util.Log;
+import android.view.SurfaceView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -142,6 +143,7 @@ public class PlayerManager implements ParseCallback {
     private static final long LIVE_DANMAKU_METRICS_INTERVAL_MS = 15000L;
     private static final long PLAYBACK_TELEMETRY_INTERVAL_MS = 5000L;
     private static final long MPV_FRAME_TIMING_LOG_INTERVAL_MS = 5000L;
+    private static final long LUT_PREVIEW_FRAME_INTERVAL_MS = 16L;
     private static final float[] SPEED_PRESETS = new float[]{0.5f, 0.75f, 1f, 1.2f, 1.25f, 1.5f, 1.75f, 2f, 2.5f, 3f, 5f};
     private static final DecimalFormat SPEED_FORMAT = new DecimalFormat("0.##x");
 
@@ -715,6 +717,22 @@ public class PlayerManager implements ParseCallback {
         return LutEligibility.getUnavailableReason(engine, spec);
     }
 
+    public boolean selectLut(@Nullable LutPreset preset, boolean preview) {
+        if (preset != null) {
+            String reason = getLutUnavailableReason();
+            if (!TextUtils.isEmpty(reason)) {
+                if (SpiderDebug.isEnabled()) SpiderDebug.log("lut-ui", "reject preset=%s reason=%s", preset.getId(), reason);
+                Notify.show(reason);
+                return false;
+            }
+        }
+        LutSetting.select(preset);
+        callback.onPlayerRenderRequired();
+        if (preset != null && preview) applyLutPreview(true);
+        else applyLut(true);
+        return true;
+    }
+
     public boolean isIjk() {
         return playerType == PlayerSetting.IJK;
     }
@@ -729,6 +747,10 @@ public class PlayerManager implements ParseCallback {
 
     public boolean isExo() {
         return playerType == PlayerSetting.EXO;
+    }
+
+    public void refreshVideoSurface(SurfaceView surfaceView) {
+        if (engine != null && isExo()) engine.refreshVideoSurface(surfaceView);
     }
 
     public boolean isNativePlayer() {
@@ -5079,7 +5101,21 @@ public class PlayerManager implements ParseCallback {
             if (SpiderDebug.isEnabled()) SpiderDebug.log("lut", "rebuild clean player before media item reason=prepare spec=%s", debugSpec());
             rebuildPlayer();
         }
+        if (shouldPreinstallDynamicLutPipeline()
+                && safeSetVideoEffects(dynamicLutEffect.effects(), "prepare_dynamic_passthrough")) {
+            lutPipelineReadyForItem = true;
+            if (SpiderDebug.isEnabled()) SpiderDebug.log("lut", "preinstalled dynamic pipeline before playback spec=%s", debugSpec());
+            return;
+        }
         clearVideoEffects("prepare");
+    }
+
+    private boolean shouldPreinstallDynamicLutPipeline() {
+        return LutSetting.isEnabled()
+                && engine != null
+                && !engine.supportsNativeLut()
+                && canWarmLutPipeline()
+                && TextUtils.isEmpty(getLutUnavailableReason());
     }
 
     private boolean shouldPrepareLutBeforePlay() {
@@ -5096,12 +5132,6 @@ public class PlayerManager implements ParseCallback {
 
     private void applyLut(boolean notify, boolean preview) {
         if (engine == null) return;
-        if (isMpvSurfaceDirect() && MpvPerformanceSetting.getOutputMode() == MpvPerformanceSetting.OUTPUT_AUTO && LutSetting.isEnabled()) {
-            mpvAutoOutputEvaluated = true;
-            mpvOutputEvaluationSeq++;
-            if (rebuildAndRestartMpv(false, "lut-enabled")) App.post(() -> applyLut(notify, preview), 200);
-            return;
-        }
         int seq = ++lutApplySeq;
         if (SpiderDebug.isEnabled()) SpiderDebug.log("lut", "request seq=%d notify=%s preview=%s enabled=%s preset=%s state=%s videoFormat=%s tracksEmpty=%s active=%s dirty=%s applied=%s applying=%s pendingPreview=%s", seq, notify, preview, LutSetting.isEnabled(), LutSetting.getPresetId(), stateName(player.getPlaybackState()), engine.getVideoFormat(), engine.getCurrentTracks() == null || engine.getCurrentTracks().isEmpty(), videoEffectsActive, videoEffectsDirty, lutAppliedForItem, lutApplyInProgress, pendingLutPreview);
         if (!lutAllowed) {
@@ -5197,12 +5227,11 @@ public class PlayerManager implements ParseCallback {
         pendingLutPreview = false;
         int strength = LutSetting.getStrength();
         int previewSeconds = LutSetting.getPreviewSeconds();
-        long previewStartMs = preview && player != null ? Math.max(0, player.getCurrentPosition()) : 0;
         Task.execute(() -> {
             long start = System.currentTimeMillis();
             try {
-                MpvLutShader shader = MpvLutShaderFactory.create(preset, strength, preview, previewStartMs, previewSeconds);
-                if (SpiderDebug.isEnabled()) SpiderDebug.log("lut-mpv", "create shader preset=%s format=%s strength=%d preview=%s start=%d seconds=%d cost=%dms", preset.getId(), preset.getFormat(), strength, preview, previewStartMs, previewSeconds, System.currentTimeMillis() - start);
+                MpvLutShader shader = MpvLutShaderFactory.create(preset, strength, preview);
+                if (SpiderDebug.isEnabled()) SpiderDebug.log("lut-mpv", "create shader preset=%s format=%s strength=%d preview=%s seconds=%d clock=monotonic cost=%dms", preset.getId(), preset.getFormat(), strength, preview, previewSeconds, System.currentTimeMillis() - start);
                 App.post(() -> applyNativeLutShader(seq, shader, notify, preview));
             } catch (Throwable e) {
                 if (SpiderDebug.isEnabled()) SpiderDebug.log("lut-mpv", "create shader failed preset=%s strength=%d error=%s", preset.getId(), strength, causeChain(e));
@@ -5239,13 +5268,23 @@ public class PlayerManager implements ParseCallback {
     }
 
     private void scheduleNativeLutPreviewCommit(int seq) {
-        int delayMs = Math.max(1, LutSetting.getPreviewSeconds()) * 1000 + MpvLutShaderFactory.PREVIEW_SLIDE_MS;
-        App.post(() -> {
-            if (seq != lutApplySeq || engine == null || !engine.supportsNativeLut()) return;
-            if (!lutAllowed || !LutSetting.isEnabled()) return;
-            if (SpiderDebug.isEnabled()) SpiderDebug.log("lut-mpv", "commit preview shader seq=%d delay=%d", seq, delayMs);
-            applyLut(false, false);
-        }, delayMs);
+        int holdMs = Math.max(1, LutSetting.getPreviewSeconds()) * 1000;
+        long slideStartMs = SystemClock.elapsedRealtime() + holdMs;
+        if (SpiderDebug.isEnabled()) SpiderDebug.log("lut-mpv", "preview scheduled seq=%d hold=%d slide=%d", seq, holdMs, MpvLutShaderFactory.PREVIEW_SLIDE_MS);
+        App.post(() -> updateNativeLutPreview(seq, slideStartMs), holdMs);
+    }
+
+    private void updateNativeLutPreview(int seq, long slideStartMs) {
+        if (seq != lutApplySeq || engine == null || !engine.supportsNativeLut()) return;
+        if (!lutAllowed || !LutSetting.isEnabled()) return;
+        long elapsedMs = Math.max(0, SystemClock.elapsedRealtime() - slideStartMs);
+        float progress = Math.min(1f, elapsedMs / (float) MpvLutShaderFactory.PREVIEW_SLIDE_MS);
+        engine.setNativeLutPreviewProgress(progress);
+        if (progress < 1f) {
+            App.post(() -> updateNativeLutPreview(seq, slideStartMs), LUT_PREVIEW_FRAME_INTERVAL_MS);
+            return;
+        }
+        if (SpiderDebug.isEnabled()) SpiderDebug.log("lut-mpv", "preview completed seq=%d elapsed=%d", seq, elapsedMs);
     }
 
     private void applyLutColor(int seq, ColorLut colorLut, boolean notify, boolean preview, int previewSeconds) {
@@ -5267,7 +5306,13 @@ public class PlayerManager implements ParseCallback {
             return;
         }
         dynamicLutEffect.set(colorLut, preview, previewSeconds);
-        if (safeSetVideoEffects(dynamicLutEffect.effects(), preview ? "preview_dynamic" : "apply_dynamic")) {
+        boolean applied = videoEffectsActive;
+        if (applied) {
+            if (SpiderDebug.isEnabled()) SpiderDebug.log("lut", "updated dynamic pipeline in place reason=%s preview=%s", preview ? "preview_dynamic" : "apply_dynamic", preview);
+        } else {
+            applied = safeSetVideoEffects(dynamicLutEffect.effects(), preview ? "preview_dynamic" : "apply_dynamic");
+        }
+        if (applied) {
             lutAppliedForItem = true;
             pendingLutPreview = false;
         } else {
@@ -5347,20 +5392,14 @@ public class PlayerManager implements ParseCallback {
         lutAppliedForItem = false;
         lutApplyInProgress = false;
         dynamicLutEffect.clear();
-        long position = Math.max(0, getPosition());
-        boolean playWhenReady = player.getPlayWhenReady();
-        float speed = getSpeed();
         if (!safeSetVideoEffects(dynamicLutEffect.effects(), reason + "_prepare_dynamic_passthrough")) {
             lutPipelinePrepareInProgress = false;
             return true;
         }
         lutPipelineReadyForItem = true;
-        if (SpiderDebug.isEnabled()) SpiderDebug.log("lut", "prepare current item with effects reason=%s position=%d play=%s spec=%s", reason, position, playWhenReady, debugSpec());
-        startLutWarmupRecovery();
-        engine.restart(spec.checkUa(), position, playWhenReady);
-        if (speed != 1f) setSpeed(speed);
+        if (SpiderDebug.isEnabled()) SpiderDebug.log("lut", "prepare current item with effects in place reason=%s state=%s spec=%s", reason, stateName(player.getPlaybackState()), debugSpec());
         lutPipelinePrepareInProgress = false;
-        return false;
+        return true;
     }
 
     private void startLutWarmupRecovery() {
@@ -5467,6 +5506,10 @@ public class PlayerManager implements ParseCallback {
         if (empty && !videoEffectsActive) {
             if (SpiderDebug.isEnabled()) SpiderDebug.log("lut", "skip clear effects reason=%s", reason);
             return false;
+        }
+        if (!empty && videoEffectsActive) {
+            if (SpiderDebug.isEnabled()) SpiderDebug.log("lut", "reuse active effects reason=%s", reason);
+            return true;
         }
         try {
             engine.setVideoEffects(empty ? Collections.emptyList() : effects);
@@ -6980,6 +7023,9 @@ public class PlayerManager implements ParseCallback {
         void onError(String msg);
 
         void onReload(String msg);
+
+        default void onPlayerRenderRequired() {
+        }
 
         void onPlayerRebuild(Player newPlayer, boolean resetVideoSurface);
     }

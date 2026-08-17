@@ -392,7 +392,7 @@ public abstract class PlaybackActivity extends BaseActivity implements MediaCont
         String playerText = mService == null ? "none" : player().getPlayerText();
         boolean nativePlayer = mService != null && player().isNativePlayer();
         int targetRender = mService == null ? -1 : getRender();
-        Log.d(SIZE_TAG, "playback " + step
+        String message = "playback " + step
                 + " key=" + getPlaybackKey()
                 + " player=" + playerText
                 + " native=" + nativePlayer
@@ -401,7 +401,12 @@ public abstract class PlaybackActivity extends BaseActivity implements MediaCont
                 + " resize=" + view.getResizeMode()
                 + " playerView=" + viewSize(view)
                 + " content=" + viewSize(content)
-                + " surface=" + surfaceName(surface) + ":" + viewSize(surface));
+                + " surface=" + surfaceName(surface) + ":" + viewSize(surface)
+                + " holder=" + surfaceHolderSize(surface)
+                + " rotation=" + (getDisplay() == null ? -1 : getDisplay().getRotation())
+                + " orientation=" + getResources().getConfiguration().orientation;
+        Log.d(SIZE_TAG, message);
+        if (SpiderDebug.isEnabled()) SpiderDebug.log("surface-size", "%s", message);
     }
 
     private static String viewSize(View view) {
@@ -411,6 +416,12 @@ public abstract class PlaybackActivity extends BaseActivity implements MediaCont
 
     private static String surfaceName(View view) {
         return view == null ? "null" : view.getClass().getSimpleName();
+    }
+
+    private static String surfaceHolderSize(View view) {
+        if (!(view instanceof SurfaceView surfaceView)) return "n/a";
+        android.graphics.Rect frame = surfaceView.getHolder().getSurfaceFrame();
+        return frame.width() + "x" + frame.height() + "/valid=" + surfaceView.getHolder().getSurface().isValid();
     }
 
     private void syncShutter() {
@@ -543,6 +554,11 @@ public abstract class PlaybackActivity extends BaseActivity implements MediaCont
         }
 
         @Override
+        public void onPlayerRenderRequired() {
+            if (isOwner()) refreshExoVideoSurfaceForLut();
+        }
+
+        @Override
         public void onPlayerRebuild(Player player, boolean resetVideoSurface) {
             if (isOwner()) {
                 getSeekView().setProgressPlayer(player);
@@ -553,6 +569,19 @@ public abstract class PlaybackActivity extends BaseActivity implements MediaCont
             }
         }
     };
+
+    private void refreshExoVideoSurfaceForLut() {
+        if (mService == null || !player().isExo()) return;
+        View surface = getExoView().getVideoSurfaceView();
+        if (!(surface instanceof SurfaceView surfaceView)) return;
+        syncVideoSurfaceSize(null);
+        player().refreshVideoSurface(surfaceView);
+        surfaceView.postOnAnimation(() -> {
+            if (mService == null || !isOwner() || getExoView().getVideoSurfaceView() != surfaceView) return;
+            player().refreshVideoSurface(surfaceView);
+            logSurfaceState("lut surface refreshed");
+        });
+    }
 
     @Override
     protected void initView(Bundle savedInstanceState) {

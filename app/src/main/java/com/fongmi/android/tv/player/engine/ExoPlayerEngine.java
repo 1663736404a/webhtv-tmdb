@@ -1,5 +1,8 @@
 package com.fongmi.android.tv.player.engine;
 
+import android.graphics.Rect;
+import android.view.SurfaceView;
+
 import androidx.media3.common.C;
 import androidx.media3.common.Effect;
 import androidx.media3.common.Format;
@@ -37,6 +40,7 @@ import com.fongmi.android.tv.setting.ExoPerformanceSetting;
 import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
 import com.fongmi.android.tv.setting.PlayerSetting;
 import com.fongmi.android.tv.utils.ResUtil;
+import com.github.catvod.crawler.SpiderDebug;
 
 import java.util.HashSet;
 import java.util.List;
@@ -533,7 +537,28 @@ public class ExoPlayerEngine implements PlayerEngine {
 
     @Override
     public void setVideoEffects(List<Effect> effects) {
+        if (SpiderDebug.isEnabled()) {
+            Format format = getVideoFormat();
+            SpiderDebug.log("lut-exo", "set effects=%d state=%d position=%d video=%s",
+                    effects == null ? 0 : effects.size(),
+                    player.getPlaybackState(),
+                    player.getCurrentPosition(),
+                    format == null ? "unknown" : format.width + "x" + format.height + "/" + format.sampleMimeType);
+        }
         player.setVideoEffects(effects);
+    }
+
+    @Override
+    public void refreshVideoSurface(SurfaceView surfaceView) {
+        if (surfaceView == null || player == null) return;
+        Rect frame = surfaceView.getHolder().getSurfaceFrame();
+        boolean valid = surfaceView.getHolder().getSurface().isValid();
+        if (SpiderDebug.isEnabled()) {
+            SpiderDebug.log("lut-exo", "refresh surface holder=%dx%d view=%dx%d valid=%s",
+                    frame.width(), frame.height(), surfaceView.getWidth(), surfaceView.getHeight(), valid);
+        }
+        if (!valid || frame.width() <= 0 || frame.height() <= 0) return;
+        player.setVideoSurfaceView(surfaceView);
     }
 
     @Override

@@ -329,6 +329,11 @@ public class MpvPlayerEngine implements PlayerEngine {
     }
 
     @Override
+    public void setNativeLutPreviewProgress(float progress) {
+        player.setLutPreviewProgress(progress);
+    }
+
+    @Override
     public PlayerCacheState getCacheState() {
         return player.getCacheState();
     }

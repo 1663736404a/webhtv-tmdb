@@ -683,6 +683,14 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         applyShaderPipeline(false);
     }
 
+    public void setLutPreviewProgress(float progress) {
+        if (!initialized || lutShader == null || !lutShader.isPreview()) return;
+        float value = Math.max(0f, Math.min(1f, progress));
+        safeCommand(new String[]{
+                "change-list", "glsl-shader-opts", "append",
+                lutShader.getPreviewOptionKey() + "=" + String.format(Locale.US, "%.5f", value)});
+    }
+
     public AutoCacheBaselineResult applyAutoCacheBaseline(long forwardBytes, long backBytes) {
         if (!autoCacheBaselineState.stage(
                 config.performanceOptionsPriority(), forwardBytes, backBytes)) {
@@ -4518,10 +4526,13 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         String target = lutShader == null ? "" : lutShader.getPath();
         if (!force && TextUtils.equals(appliedLutShaderPath, target)) return;
         if (!TextUtils.isEmpty(appliedLutShaderPath)) {
+            String optionKey = MpvLutShader.getPreviewOptionKey(appliedLutShaderPath);
+            if (!optionKey.isEmpty()) safeCommand(new String[]{"change-list", "glsl-shader-opts", "del", optionKey});
             safeCommand(new String[]{"change-list", "glsl-shaders", "remove", appliedLutShaderPath});
             SpiderDebug.log("mpv", "shader remove lut=%s", appliedLutShaderPath);
         }
         if (!TextUtils.isEmpty(target)) {
+            if (lutShader != null && lutShader.isPreview()) setLutPreviewProgress(0f);
             safeCommand(new String[]{"change-list", "glsl-shaders", "append", target});
             SpiderDebug.log("mpv", "shader append lut=%s", target);
         }

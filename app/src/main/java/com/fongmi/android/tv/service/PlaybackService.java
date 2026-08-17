@@ -534,6 +534,11 @@ public class PlaybackService extends MediaLibraryService implements MediaLibrary
     }
 
     @Override
+    public void onPlayerRenderRequired() {
+        playerCallbacks.forEach(PlayerCallback::onPlayerRenderRequired);
+    }
+
+    @Override
     public void onPlayerRebuild(Player newPlayer, boolean resetVideoSurface) {
         exoPlayer.removeListener(listener);
         exoPlayer = newPlayer;
@@ -629,6 +634,9 @@ public class PlaybackService extends MediaLibraryService implements MediaLibrary
         }
 
         default void onReload(String msg) {
+        }
+
+        default void onPlayerRenderRequired() {
         }
 
         default void onPlayerRebuild(Player player, boolean resetVideoSurface) {
