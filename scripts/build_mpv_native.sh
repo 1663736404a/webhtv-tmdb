@@ -595,7 +595,7 @@ verify_directory() {
   fi
   grep -Fq "Using 7.1 IEC61937 carrier mask for TrueHD" <<<"$version_strings" || die "MPV AudioTrack TrueHD channel-mask patch missing from $directory/libmpv.so"
   grep -Fq "WebHTV direct output accepts an optional Android OSD Surface" <<<"$version_strings" || die "MPV optional direct-output OSD patch missing from $directory/libmpv.so"
-  grep -Fq "MediaCodec output scheduling" <<<"$version_strings" || die "MPV MediaCodec timed-release patch missing from $directory/libmpv.so"
+  grep -Fq "WebHTV timestamped MediaCodec output enabled" <<<"$version_strings" || die "MPV MediaCodec timestamped-release patch missing from $directory/libmpv.so"
   grep -Fq "MediaCodec VO drop timing" <<<"$version_strings" || die "MPV MediaCodec output timing diagnostics missing from $directory/libmpv.so"
   grep -Fq "WebHTV Vulkan auto backend prefers direct AHardwareBuffer sampling" <<<"$version_strings" || die "MPV Android Vulkan smart backend patch missing from $directory/libmpv.so"
   grep -Fq "WebHTV Vulkan auto uses a queue-safe four-output bounded-fence pool" <<<"$version_strings" || die "MPV Android Vulkan queue-safe conversion pool missing from $directory/libmpv.so"

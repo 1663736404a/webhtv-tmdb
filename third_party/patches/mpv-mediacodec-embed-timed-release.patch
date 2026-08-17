@@ -1,5 +1,5 @@
 diff --git a/video/out/vo_mediacodec_embed.c b/video/out/vo_mediacodec_embed.c
-index 3f527ffe..3409cd20 100644
+index 3f527ffe..a88d4808 100644
 --- a/video/out/vo_mediacodec_embed.c
 +++ b/video/out/vo_mediacodec_embed.c
 @@ -15,6 +15,8 @@
@@ -19,13 +19,11 @@ index 3f527ffe..3409cd20 100644
  #include "video/mp_image.h"
  #include "video/hwdec.h"
  
-@@ -33,10 +36,40 @@ struct priv {
+@@ -33,10 +36,29 @@ struct priv {
      double last_pts;
      int osd_failures;
      bool osd_render_ok;
 +    int64_t next_pts;
-+    int64_t next_duration;
-+    int64_t queue_offset;
 +    int64_t timed_lead_total;
 +    int64_t timed_lead_min;
 +    int64_t timed_lead_max;
@@ -39,40 +37,31 @@ index 3f527ffe..3409cd20 100644
 +    uint64_t late_frames;
 +    uint64_t timed_release_calls;
 +    uint64_t immediate_release_calls;
-+    int slow_timed_release_streak;
-+    bool timed_release_disabled;
      bool backend_failed;
  };
  
  #define MAX_OSD_FAILURES 3
++#define MEDIACODEC_QUEUE_OFFSET_NS MP_TIME_MS_TO_NS(50)
 +#define MAX_TIMED_RELEASE_LEAD_NS MP_TIME_MS_TO_NS(50)
-+#define MAX_REASONABLE_FRAME_DURATION_NS MP_TIME_S_TO_NS(10)
-+#define MIN_TIMED_RELEASE_LEAD_NS MP_TIME_MS_TO_NS(2)
-+#define MIN_TIMED_RELEASE_BUDGET_NS MP_TIME_MS_TO_NS(2)
-+#define TIMED_RELEASE_BUDGET_DIVISOR 4
-+#define MAX_SLOW_TIMED_RELEASE_STREAK 3
 +#define TIMING_LOG_INTERVAL 600
 +
 +static int64_t android_monotonic_time_ns(void);
-+static void disable_timed_release(struct vo *vo, int64_t elapsed,
-+                                  int64_t budget, const char *reason);
-+static void update_queue_offset(struct vo *vo, int64_t duration);
  
  static void report_backend_error(struct vo *vo, const char *component)
  {
-@@ -85,6 +118,11 @@ static int preinit(struct vo *vo)
+@@ -85,6 +107,11 @@ static int preinit(struct vo *vo)
  
      p->video_wid = vo->opts->WinID;
      p->last_pts = MP_NOPTS_VALUE;
 +    p->next_pts = MP_NOPTS_VALUE;
 +    p->timed_lead_min = INT64_MAX;
-+    vo_set_queue_params(vo, 0, 1, 2);
-+    MP_INFO(vo, "WebHTV adaptive MediaCodec output enabled: "
-+                "lead<=one-frame/50ms with blocking fallback.\n");
++    vo_set_queue_params(vo, MEDIACODEC_QUEUE_OFFSET_NS, 1, 2);
++    MP_INFO(vo, "WebHTV timestamped MediaCodec output enabled: "
++                "up to 50ms scheduling lead.\n");
      p->osd_overlay = android_osd_overlay_create(vo);
      if (!p->osd_overlay ||
          !android_osd_overlay_set_surface(
-@@ -126,9 +164,106 @@ static void flip_page(struct vo *vo)
+@@ -126,9 +153,81 @@ static void flip_page(struct vo *vo)
      if (p->next_image) {
          AVMediaCodecBuffer *buffer =
              (AVMediaCodecBuffer *)p->next_image->planes[3];
@@ -80,10 +69,7 @@ index 3f527ffe..3409cd20 100644
 +        int64_t now = mp_time_ns();
 +        int64_t lead = p->next_pts > 0 ? p->next_pts - now : 0;
 +        int64_t release_time = 0;
-+        if (!p->timed_release_disabled &&
-+            lead >= MIN_TIMED_RELEASE_LEAD_NS &&
-+            lead <= MAX_TIMED_RELEASE_LEAD_NS)
-+        {
++        if (lead > 0 && lead <= MAX_TIMED_RELEASE_LEAD_NS) {
 +            int64_t monotonic_now = android_monotonic_time_ns();
 +            if (monotonic_now > 0 && lead <= INT64_MAX - monotonic_now)
 +                release_time = monotonic_now + lead;
@@ -107,26 +93,6 @@ index 3f527ffe..3409cd20 100644
 +            p->timed_lead_total += lead;
 +            p->timed_lead_min = MPMIN(p->timed_lead_min, lead);
 +            p->timed_lead_max = MPMAX(p->timed_lead_max, lead);
-+
-+            int64_t frame_budget = p->next_duration > 0
-+                ? p->next_duration : MP_TIME_MS_TO_NS(16);
-+            int64_t slow_budget = MPMAX(
-+                frame_budget / TIMED_RELEASE_BUDGET_DIVISOR,
-+                MIN_TIMED_RELEASE_BUDGET_NS);
-+            if (release_elapsed >= frame_budget) {
-+                disable_timed_release(vo, release_elapsed, frame_budget,
-+                                      "single-call-frame-budget");
-+            } else if (release_elapsed > slow_budget) {
-+                p->slow_timed_release_streak++;
-+                if (p->slow_timed_release_streak >=
-+                    MAX_SLOW_TIMED_RELEASE_STREAK)
-+                {
-+                    disable_timed_release(vo, release_elapsed, slow_budget,
-+                                          "repeated-slow-calls");
-+                }
-+            } else {
-+                p->slow_timed_release_streak = 0;
-+            }
 +        } else {
 +            p->immediate_frames++;
 +            p->immediate_release_calls++;
@@ -144,11 +110,10 @@ index 3f527ffe..3409cd20 100644
 +                ? p->timed_lead_total / p->timed_release_calls : 0;
 +            int64_t minimum_lead = p->timed_release_calls > 0
 +                ? p->timed_lead_min : 0;
-+            MP_INFO(vo, "MediaCodec output scheduling: mode=%s "
++            MP_INFO(vo, "MediaCodec output scheduling: mode=timestamped "
 +                        "submitted=%llu timed=%llu immediate=%llu late=%llu "
 +                        "lead=%lld/%lld/%lld us timed-release=%lld/%lld us "
 +                        "immediate-release=%lld/%lld us.\n",
-+                    p->timed_release_disabled ? "immediate" : "adaptive",
 +                    (unsigned long long)p->submitted_frames,
 +                    (unsigned long long)p->timed_frames,
 +                    (unsigned long long)p->immediate_frames,
@@ -176,26 +141,17 @@ index 3f527ffe..3409cd20 100644
 +        }
          mp_image_unrefp(&p->next_image);
 +        p->next_pts = MP_NOPTS_VALUE;
-+        p->next_duration = 0;
      }
  
      bool osd_ok =
-@@ -152,13 +287,70 @@ static bool draw_frame(struct vo *vo, struct vo_frame *frame)
+@@ -152,13 +251,26 @@ static bool draw_frame(struct vo *vo, struct vo_frame *frame)
          mpi = mp_image_new_ref(frame->current);
  
      mp_image_unrefp(&p->next_image);
 +    p->next_pts = MP_NOPTS_VALUE;
-+    p->next_duration = 0;
      p->next_image = mpi;
-+    if (mpi) {
++    if (mpi)
 +        p->next_pts = frame->pts;
-+        double duration = frame->duration > 0
-+            ? frame->duration : frame->approx_duration;
-+        if (duration > 0 && duration <= MAX_REASONABLE_FRAME_DURATION_NS) {
-+            p->next_duration = duration;
-+            update_queue_offset(vo, p->next_duration);
-+        }
-+    }
      p->osd_render_ok =
          p->last_pts == MP_NOPTS_VALUE ||
          android_osd_overlay_render(p->osd_overlay, p->last_pts);
@@ -210,42 +166,6 @@ index 3f527ffe..3409cd20 100644
 +    if (ts.tv_sec < 0 || ts.tv_sec > INT64_MAX / MP_TIME_S_TO_NS(1))
 +        return 0;
 +    return (int64_t)ts.tv_sec * MP_TIME_S_TO_NS(1) + ts.tv_nsec;
-+}
-+
-+static void disable_timed_release(struct vo *vo, int64_t elapsed,
-+                                  int64_t budget, const char *reason)
-+{
-+    struct priv *p = vo->priv;
-+    if (p->timed_release_disabled)
-+        return;
-+
-+    p->timed_release_disabled = true;
-+    p->slow_timed_release_streak = 0;
-+    p->queue_offset = 0;
-+    vo_set_queue_params(vo, 0, 1, 2);
-+    MP_WARN(vo, "MediaCodec timed release disabled for this playback: "
-+                "reason=%s elapsed=%lldus budget=%lldus; "
-+                "using MPV immediate output.\n",
-+            reason, (long long)(elapsed / 1000),
-+            (long long)(budget / 1000));
-+}
-+
-+static void update_queue_offset(struct vo *vo, int64_t duration)
-+{
-+    struct priv *p = vo->priv;
-+    if (p->timed_release_disabled || duration <= 0)
-+        return;
-+
-+    int64_t offset = MPMIN(duration, MAX_TIMED_RELEASE_LEAD_NS);
-+    if (offset < MIN_TIMED_RELEASE_LEAD_NS)
-+        offset = 0;
-+    int64_t difference = p->queue_offset > offset
-+        ? p->queue_offset - offset : offset - p->queue_offset;
-+    if (p->queue_offset > 0 && difference < MP_TIME_US_TO_NS(250))
-+        return;
-+
-+    p->queue_offset = offset;
-+    vo_set_queue_params(vo, offset, 1, 2);
 +}
 +
  static int query_format(struct vo *vo, int format)
