@@ -464,6 +464,7 @@ public abstract class PlaybackActivity extends BaseActivity implements MediaCont
 
     private int getRender() {
         if (mService != null && player().isNativePlayer()) return 0;
+        if (mService != null && player().requiresTextureRenderForLut()) return PlayerSetting.RENDER_TEXTURE;
         return PlayerSetting.getRender();
     }
 
@@ -555,7 +556,12 @@ public abstract class PlaybackActivity extends BaseActivity implements MediaCont
 
         @Override
         public void onPlayerRenderRequired() {
-            if (isOwner()) refreshExoVideoSurfaceForLut();
+            if (!isOwner()) return;
+            int targetRender = getRender();
+            if (render == targetRender) return;
+            if (SpiderDebug.isEnabled()) SpiderDebug.log("playback-flow", "LUT switch render from=%d to=%d", render, targetRender);
+            setRender();
+            applyResizeMode(requestedResizeMode);
         }
 
         @Override
@@ -569,19 +575,6 @@ public abstract class PlaybackActivity extends BaseActivity implements MediaCont
             }
         }
     };
-
-    private void refreshExoVideoSurfaceForLut() {
-        if (mService == null || !player().isExo()) return;
-        View surface = getExoView().getVideoSurfaceView();
-        if (!(surface instanceof SurfaceView surfaceView)) return;
-        syncVideoSurfaceSize(null);
-        player().refreshVideoSurface(surfaceView);
-        surfaceView.postOnAnimation(() -> {
-            if (mService == null || !isOwner() || getExoView().getVideoSurfaceView() != surfaceView) return;
-            player().refreshVideoSurface(surfaceView);
-            logSurfaceState("lut surface refreshed");
-        });
-    }
 
     @Override
     protected void initView(Bundle savedInstanceState) {

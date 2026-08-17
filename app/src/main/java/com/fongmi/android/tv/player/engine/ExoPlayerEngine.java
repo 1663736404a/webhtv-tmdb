@@ -1,8 +1,5 @@
 package com.fongmi.android.tv.player.engine;
 
-import android.graphics.Rect;
-import android.view.SurfaceView;
-
 import androidx.media3.common.C;
 import androidx.media3.common.Effect;
 import androidx.media3.common.Format;
@@ -546,19 +543,6 @@ public class ExoPlayerEngine implements PlayerEngine {
                     format == null ? "unknown" : format.width + "x" + format.height + "/" + format.sampleMimeType);
         }
         player.setVideoEffects(effects);
-    }
-
-    @Override
-    public void refreshVideoSurface(SurfaceView surfaceView) {
-        if (surfaceView == null || player == null) return;
-        Rect frame = surfaceView.getHolder().getSurfaceFrame();
-        boolean valid = surfaceView.getHolder().getSurface().isValid();
-        if (SpiderDebug.isEnabled()) {
-            SpiderDebug.log("lut-exo", "refresh surface holder=%dx%d view=%dx%d valid=%s",
-                    frame.width(), frame.height(), surfaceView.getWidth(), surfaceView.getHeight(), valid);
-        }
-        if (!valid || frame.width() <= 0 || frame.height() <= 0) return;
-        player.setVideoSurfaceView(surfaceView);
     }
 
     @Override

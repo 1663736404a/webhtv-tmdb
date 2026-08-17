@@ -1,7 +1,5 @@
 package com.fongmi.android.tv.player.engine;
 
-import android.view.SurfaceView;
-
 import androidx.media3.common.C;
 import androidx.media3.common.ColorInfo;
 import androidx.media3.common.Effect;
@@ -80,9 +78,6 @@ public interface PlayerEngine {
     }
 
     default void setVideoEffects(List<Effect> effects) {
-    }
-
-    default void refreshVideoSurface(SurfaceView surfaceView) {
     }
 
     default boolean supportsNativeLut() {

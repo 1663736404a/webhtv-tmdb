@@ -10,7 +10,6 @@ import android.os.Build;
 import android.os.SystemClock;
 import android.text.TextUtils;
 import android.util.Log;
-import android.view.SurfaceView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -749,8 +748,11 @@ public class PlayerManager implements ParseCallback {
         return playerType == PlayerSetting.EXO;
     }
 
-    public void refreshVideoSurface(SurfaceView surfaceView) {
-        if (engine != null && isExo()) engine.refreshVideoSurface(surfaceView);
+    public boolean requiresTextureRenderForLut() {
+        return isExo()
+                && LutSetting.isEnabled()
+                && canWarmLutPipeline()
+                && TextUtils.isEmpty(getLutUnavailableReason());
     }
 
     public boolean isNativePlayer() {
