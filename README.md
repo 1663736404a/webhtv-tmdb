@@ -191,8 +191,8 @@ bash gradlew :app:assembleMobileArm64_v8aDebug :app:assembleLeanbackArmeabi_v7aD
 
 | ABI | MPV | FFmpeg | libplacebo | 网络后端 | 说明 |
 | --- | --- | --- | --- | --- | --- |
-| `arm64-v8a` | `0.41.0-940-gcca559b41` | `04482c8d13ac`（9.0-fongmi） | `7.375.0` / `b694a21bf2dc` | curl 8.21.0 + nghttp2 1.69.0 | 2026-08-10 已按新 lock 从源码重编，完成能力、ELF 与 APK 资产哈希校验 |
-| `armeabi-v7a` | `0.41.0-940-gcca559b41` | `04482c8d13ac`（9.0-fongmi） | `7.375.0` / `b694a21bf2dc` | curl 8.21.0 + nghttp2 1.69.0 | 2026-08-10 已按同一 lock 独立重编，完成能力、ELF 与 APK 资产哈希校验 |
+| `arm64-v8a` | `0.41.0-940-gcca559b41` | `04482c8d13ac`（9.0-fongmi） | `7.375.0` / `b694a21bf2dc` | curl 8.21.0 + nghttp2 1.69.0 | 截至 2026-08-17，当前 assets 已通过能力、ELF 与打包规则校验 |
+| `armeabi-v7a` | `0.41.0-940-gcca559b41` | `04482c8d13ac`（9.0-fongmi） | `7.375.0` / `b694a21bf2dc` | curl 8.21.0 + nghttp2 1.69.0 | 截至 2026-08-17，当前 assets 已通过能力、ELF 与打包规则校验 |
 
 替换或升级 MPV native 时必须遵守：
 
@@ -201,7 +201,7 @@ bash gradlew :app:assembleMobileArm64_v8aDebug :app:assembleLeanbackArmeabi_v7aD
 - 最新 FongMi MPV 分支已经内建重写后的 AImageReader/AHardwareBuffer OpenGL/Vulkan 后端、异步 fence、HDR/Dolby Vision、双 Surface OSD 和 Android helper scheme；旧的 `fd679c81` 不是新分支祖先，原 `mpv-aimagereader-transient-buffer.patch` 已删除，不能在新分支上重复叠加。
 - curl 与 nghttp2 静态链接进 `libmpv.so`，APK 不新增独立网络 `.so`。它增强 MPV 直接远程 HTTP/HTTPS 输入；App 自己处理的本地 HLS 代理、`stream_cb` 和 FFmpeg/lavf 路径仍按各自实现工作，不能把启用 curl 理解为所有播放请求都强制走同一后端。
 - FFmpeg 文件名、ELF `SONAME` 和所有 `DT_NEEDED` 都要从 `libav*`/`libsw*` 等长改为 `libmv*`/`libmw*`，不能只重命名文件，否则会和 `nextlib-media3ext` 内置 FFmpeg 发生 Android linker 复用冲突。
-- WebHTV 继续应用 `ffmpeg-webhtv-proxy-range.patch`、`mpv-stream-cb-disc-controls.patch` 和 `mpv-matroska-segment-end.patch`。前者兼容 App 本地代理验证后的 Range 起点，后两者保留远程 Blu-ray/DVD ISO 时间线和未知 HTTP 总长度 MKV 的 seek；修改光盘控制补丁或 `stream_cb.h` 后必须同时重建 `libmpv.so` 与 `libplayer.so`。
+- WebHTV 当前补丁集还包含 FFmpeg MediaCodec 端口饥饿回退、DV7 HDR10 基底层、TrueHD AudioTrack channel mask、可选 OSD Surface、MediaCodec timestamped release/时序诊断、Vulkan `direct/legacy/stable` 和 AImageReader 稳定释放流程。完整顺序以 `scripts/build_mpv_native.sh` 和 `third_party/mpv-native-build.md` 为准；修改光盘控制补丁、`stream_cb.h` 或 JNI 源码后必须同时重建 `libmpv.so` 与 `libplayer.so`。
 - 更新后用 NDK `llvm-readelf -d` 确认没有残留 `libav*.so`/`libsw*.so` 依赖，再分别回归 OpenGL、Vulkan、硬解/软解、LUT、字幕、线路切换、连续起播/退出和 Blu-ray ISO。Android 15 必须同时检查 crash buffer 中是否出现 destroyed mutex。
 
 从固定源码重新生成 MPV/FFmpeg `.so`：
@@ -218,7 +218,7 @@ scripts/build_mpv_native.sh --abi all --install
 # 按需执行：scripts/build_mpv_player_jni.sh --abi all --install
 ```
 
-脚本读取 `third_party/mpv-native-lock.json`，自动下载固定 commit、构建 FFmpeg 9/字体/字幕/光盘/归档/网络/Vulkan 依赖，应用 WebHTV 的 Range、光盘控制和 Matroska seek 补丁，修改 ELF 依赖名、strip 并校验。当前 lock 与两套已提交 assets 一致；libass 的 fontconfig/libxml2 字体回退栈静态链接进 `libmpv.so`，不会向 APK 内置中文字体或增加独立 `.so`。普通 Gradle 和 GitHub Actions 不会现场编译 MPV；Android Release Action 只运行 `scripts/verify_mpv_native_assets.sh --require-elf`，检查文件集合、ABI、版本字符串、HTTP/2、字体提供器、AImageReader/Vulkan/HDR/Dolby Vision、光盘/Range/Matroska 标记、`SONAME` 和 `DT_NEEDED`。
+脚本读取 `third_party/mpv-native-lock.json`，自动下载固定 commit、构建 FFmpeg 9/字体/字幕/光盘/归档/网络/Vulkan 依赖，按脚本声明的完整顺序应用 FFmpeg、MPV、MediaCodec、Vulkan 和 AImageReader 补丁，修改 ELF 依赖名、strip 并校验。上游版本由 lock 锁定，最终可复现输入还包括构建脚本、`third_party/patches/`、native overrides 和 JNI 源码。libass 的 fontconfig/libxml2 字体回退栈静态链接进 `libmpv.so`，不会向 APK 内置中文字体或增加独立 `.so`。普通 Gradle 和 GitHub Actions 不会现场编译 MPV；Android Release Action 只运行 `scripts/verify_mpv_native_assets.sh --require-elf`，检查文件集合、ABI、版本字符串、HTTP/2、可选 OSD Surface、MediaCodec timestamped release、AImageReader/Vulkan/HDR/Dolby Vision、光盘/Range/Matroska 标记、`SONAME` 和 `DT_NEEDED`。
 
 只校验当前仓库已经提交的 MPV native assets：
 
