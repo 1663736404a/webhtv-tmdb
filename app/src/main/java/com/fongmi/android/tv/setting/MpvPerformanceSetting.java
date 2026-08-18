@@ -63,7 +63,7 @@ public final class MpvPerformanceSetting {
 
     public static String getOutputModeText() {
         return switch (getOutputMode()) {
-            case OUTPUT_GPU -> "GPU完整";
+            case OUTPUT_GPU -> "GPU渲染";
             case OUTPUT_SURFACE_DIRECT -> "电视直出";
             default -> "自动";
         };
