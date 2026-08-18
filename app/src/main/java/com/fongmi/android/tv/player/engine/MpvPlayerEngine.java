@@ -363,6 +363,19 @@ public class MpvPlayerEngine implements PlayerEngine {
     public VideoPlaybackDetails getVideoPlaybackDetails() {
         MpvPlayer.VideoTrackDiagnostics details =
                 player.getSelectedVideoTrackDiagnostics();
+        // A failed direct MediaCodec attempt can make mpv report vid=no while
+        // retaining the actual video track in track-list. Preserve that source
+        // metadata so automatic output can move to GPU instead of treating a
+        // failed Dolby Vision stream as ordinary video.
+        if (details == null || (details.dolbyVisionProfile() <= 0
+                && details.sourceCodecs().isEmpty())) {
+            MpvPlayer.VideoTrackDiagnostics available =
+                    player.getAvailableVideoTrackDiagnostics();
+            if (available != null && (!available.sourceCodecs().isEmpty()
+                    || available.dolbyVisionProfile() > 0)) {
+                details = available;
+            }
+        }
         String currentVo = player.getObservedCurrentVideoOutput();
         boolean fallbackConfigured = isConfiguredDv7Hdr10Fallback(
                 details, isHard(),
