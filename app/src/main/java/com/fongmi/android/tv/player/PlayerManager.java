@@ -5453,14 +5453,20 @@ public class PlayerManager implements ParseCallback {
         lutAppliedForItem = false;
         lutApplyInProgress = false;
         dynamicLutEffect.clear();
+        long position = Math.max(0, getPosition());
+        boolean playWhenReady = player.getPlayWhenReady();
+        float speed = getSpeed();
         if (!safeSetVideoEffects(dynamicLutEffect.effects(), reason + "_prepare_dynamic_passthrough")) {
             lutPipelinePrepareInProgress = false;
             return true;
         }
         lutPipelineReadyForItem = true;
-        if (SpiderDebug.isEnabled()) SpiderDebug.log("lut", "prepare current item with effects in place reason=%s state=%s spec=%s", reason, stateName(player.getPlaybackState()), debugSpec());
+        if (SpiderDebug.isEnabled()) SpiderDebug.log("lut", "prepare current item with effects reason=%s position=%d play=%s spec=%s", reason, position, playWhenReady, debugSpec());
+        startLutWarmupRecovery();
+        engine.restart(spec.checkUa(), position, playWhenReady);
+        if (speed != 1f) setSpeed(speed);
         lutPipelinePrepareInProgress = false;
-        return true;
+        return false;
     }
 
     private void startLutWarmupRecovery() {
