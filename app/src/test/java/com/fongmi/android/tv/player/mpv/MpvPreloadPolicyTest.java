@@ -36,14 +36,16 @@ public class MpvPreloadPolicyTest {
     }
 
     @Test
-    public void unknownAndStaleProxyThroughputStayClosed() {
+    public void unknownAndStaleProxyThroughputUseBootstrapAdmission() {
         MpvPreloadPolicy.Assessment unknown = MpvPreloadPolicy.assess(
                 withThroughput(eligible(), 0, false, false));
         MpvPreloadPolicy.Assessment stale = MpvPreloadPolicy.assess(
                 withThroughput(eligible(), 20_000_000L, true, false));
 
-        assertEquals(MpvPreloadPolicy.Reason.THROUGHPUT_UNKNOWN, unknown.reason());
-        assertEquals(MpvPreloadPolicy.Reason.THROUGHPUT_STALE, stale.reason());
+        assertEquals(MpvPreloadPolicy.Signal.BOOTSTRAP, unknown.signal());
+        assertEquals(MpvPreloadPolicy.Reason.THROUGHPUT_BOOTSTRAP, unknown.reason());
+        assertEquals(MpvPreloadPolicy.Signal.BOOTSTRAP, stale.signal());
+        assertEquals(MpvPreloadPolicy.Reason.THROUGHPUT_REFRESH, stale.reason());
     }
 
     @Test

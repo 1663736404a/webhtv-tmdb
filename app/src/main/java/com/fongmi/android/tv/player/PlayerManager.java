@@ -3841,6 +3841,16 @@ public class PlayerManager implements ParseCallback {
         boolean bufferUsable = bufferFact.isUsable(now);
         long selectedBits = hls.selectedVariant() == null
                 ? 0 : hls.selectedVariant().selectionBitsPerSecond();
+        if (selectedBits <= 0 && hls.variants().size() == 1) {
+            selectedBits = hls.variants().get(0).selectionBitsPerSecond();
+        }
+        if (selectedBits <= 0) {
+            PlaybackAutoContext.Fact<Long> mediaBitrateFact =
+                    context.runtime().mediaBitrateBitsPerSecond();
+            if (mediaBitrateFact.isUsable(now) && mediaBitrateFact.value() > 0) {
+                selectedBits = mediaBitrateFact.value();
+            }
+        }
         boolean buffering = player != null
                 && player.getPlaybackState() == Player.STATE_BUFFERING;
         MpvPreloadPolicy.Request request = new MpvPreloadPolicy.Request(

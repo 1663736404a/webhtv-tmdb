@@ -9,13 +9,15 @@ import androidx.annotation.NonNull;
 import androidx.media3.common.C;
 import androidx.media3.common.Format;
 import androidx.media3.common.MediaItem;
+import androidx.media3.common.MimeTypes;
 import androidx.media3.common.Player;
 import androidx.media3.datasource.DataSource;
 import androidx.media3.exoplayer.source.preload.PreCacheHelper;
 
-import com.fongmi.android.tv.player.PlaybackRoute;
 import com.fongmi.android.tv.player.PlaybackAutoContext;
 import com.fongmi.android.tv.player.PlaybackAutoContextStore;
+import com.fongmi.android.tv.player.PlaybackResourceClassifier;
+import com.fongmi.android.tv.player.PlaybackRoute;
 import com.fongmi.android.tv.player.PlaybackSystemConditionMonitor;
 import com.fongmi.android.tv.player.PlaybackSystemConditionCoordinator;
 import com.fongmi.android.tv.player.PlaybackTelemetry;
@@ -73,6 +75,7 @@ public class PreCache implements Player.Listener {
     private PreCacheHelper helper;
     private Handler handler;
     private HandlerThread worker;
+    private MediaItem preloadMediaItem;
     private Player player;
     private PlaybackRoute route;
     private PlaybackRoute.Resolution routeResolution = PlaybackRoute.resolve(null);
@@ -123,6 +126,7 @@ public class PreCache implements Player.Listener {
         }
         this.player = player;
         this.handler = new Handler(player.getApplicationLooper());
+        this.preloadMediaItem = mediaItem;
         this.mediaKey = PlaybackDiskBufferStore.mediaKey(mediaItem);
         this.diskBufferStore.reset(mediaKey);
         this.routeResolution = routeResolution == null ? PlaybackRoute.resolve(mediaItem.localConfiguration.uri.toString()) : routeResolution;
@@ -132,7 +136,6 @@ public class PreCache implements Player.Listener {
                 ? PlaybackAutoContext.SessionToken.none() : currentAutoSession();
         this.lastAutoInputs = null;
         this.lastAutoDecision = null;
-        this.helper = createHelper(mediaItem);
         bindMemoryPressure();
         bindSystemConditions();
         clearSeek();
@@ -173,6 +176,7 @@ public class PreCache implements Player.Listener {
         closePreloadTraffic();
         handler = null;
         helper = null;
+        preloadMediaItem = null;
         player = null;
         mediaKey = "";
         route = null;
@@ -256,14 +260,14 @@ public class PreCache implements Player.Listener {
 
     @Override
     public void onPlayWhenReadyChanged(boolean playWhenReady, int reason) {
-        if (player == null || helper == null) return;
+        if (player == null) return;
         if (playWhenReady) refillActive = true;
         check();
     }
 
     @Override
     public void onPositionDiscontinuity(@NonNull Player.PositionInfo oldPosition, @NonNull Player.PositionInfo newPosition, int reason) {
-        if (!isSeek(reason) || helper == null) return;
+        if (!isSeek(reason) || player == null) return;
         transition(PreloadLifecycleTracker.State.CANCELLED_SEEK, "seek", "generation=%d oldPosition=%d newPosition=%d", generation, oldPosition.positionMs, newPosition.positionMs);
         if (autoPolicy != null) autoPolicy.disrupt(SystemClock.elapsedRealtime());
         stopCurrentTask("seek");
@@ -287,7 +291,7 @@ public class PreCache implements Player.Listener {
     }
 
     private boolean update() {
-        if (helper == null || player == null) return false;
+        if (player == null || preloadMediaItem == null) return false;
         if (autoPolicy != null && !PlaybackExperimentSetting.isAllowed(
                 PlaybackExperimentPolicy.Action.EXO_AUTO_PRELOAD)) {
             stop("experiment-disabled");
@@ -405,6 +409,7 @@ public class PreCache implements Player.Listener {
         }
         if (autoDecision != null) setEffectiveThreads(autoDecision.threads());
         if (lifecycle.hasActiveTask()) return true;
+        if (!ensureHelper()) return true;
         long positionMs = Math.max(0, player.getCurrentPosition());
         long effectiveBufferedEndMs = getEffectiveBufferedEnd();
         long chunkTargetMs = autoDecision == null
@@ -626,6 +631,49 @@ public class PreCache implements Player.Listener {
         publishStorageDecision(decision, PlaybackTelemetry.DecisionOutcome.SUPPRESSED, reason);
         if (lifecycle.hasActiveTask()) stopCurrentTask(reason);
         transition(PreloadLifecycleTracker.State.PAUSED_STORAGE, reason, "generation=%d actualCapacityBytes=%d safeCapacityBytes=%d cacheSizeBytes=%d availableBytes=%d reserveBytes=%d reclaimBytes=%d", generation, decision.actualCapacityBytes(), decision.effectiveCapacityBytes(), decision.existingCacheBytes(), decision.availableStorageBytes(), decision.reserveBytes(), decision.reclaimBytes());
+    }
+
+    private boolean ensureHelper() {
+        if (helper != null) return true;
+        MediaItem item = normalizePreloadMediaItem(preloadMediaItem);
+        if (item == null) return false;
+        helper = createHelper(item);
+        preloadMediaItem = item;
+        return true;
+    }
+
+    private MediaItem normalizePreloadMediaItem(MediaItem mediaItem) {
+        if (mediaItem == null || mediaItem.localConfiguration == null) return mediaItem;
+        MediaItem.LocalConfiguration local = mediaItem.localConfiguration;
+        String uri = local.uri == null ? "" : local.uri.toString();
+        String mime = local.mimeType;
+        PlaybackResourceClassifier.Classification classification =
+                PlaybackResourceClassifier.classifyRequest(uri, mime, mime);
+        PlaybackAutoContext.Protocol protocol = classification.protocol();
+        PlaybackAutoContext context = PlaybackAutoContextStore.process().snapshot();
+        long now = SystemClock.elapsedRealtime();
+        if (context.active()
+                && playbackTraceId.equals(context.session().traceId())
+                && context.resource().protocol().isUsable(now)) {
+            protocol = context.resource().protocol().value();
+        }
+        String resolvedMime = switch (protocol) {
+            case HLS -> MimeTypes.APPLICATION_M3U8;
+            case DASH -> MimeTypes.APPLICATION_MPD;
+            default -> null;
+        };
+        if (resolvedMime == null || resolvedMime.equals(mime)) return mediaItem;
+        PlaybackTrace.log("exo-preload", playbackTraceId,
+                "event=normalize-media-item protocol=%s mime=%s resolvedMime=%s uri=%s",
+                protocol.label(), mime == null ? "-" : mime, resolvedMime,
+                summarizeUri(uri));
+        return mediaItem.buildUpon().setMimeType(resolvedMime).build();
+    }
+
+    private String summarizeUri(String value) {
+        if (value == null || value.isEmpty()) return "-";
+        if (value.length() <= 96) return value;
+        return value.substring(0, 96) + "...";
     }
 
     private PreCacheHelper createHelper(MediaItem mediaItem) {

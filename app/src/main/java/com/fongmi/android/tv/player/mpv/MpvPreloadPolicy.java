@@ -53,35 +53,38 @@ public final class MpvPreloadPolicy {
         if (!current.cacheStorageKnown()) {
             return block(current, Reason.CACHE_STORAGE_UNKNOWN, 0);
         }
+        if (!current.bufferUsable()) return block(current, Reason.BUFFER_UNKNOWN, 0);
+        if (current.buffering()) return block(current, Reason.BUFFERING, 0);
+        if (current.rebufferRisk()) return block(current, Reason.REBUFFER, 0);
+        if (current.bufferDeclining()) return block(current, Reason.BUFFER_DECLINING, 0);
+        if (current.bufferedDurationMs() < LOW_BUFFER_MS) {
+            return block(current, Reason.LOW_BUFFER, 0);
+        }
+        if (current.foregroundRequests() > 0) {
+            return new Assessment(true, Signal.SUSPEND, Reason.FOREGROUND_ACTIVE,
+                    0, current);
+        }
+        if (!current.cacheBudgetAvailable()) {
+            return block(current, Reason.CACHE_BUDGET_EXHAUSTED, 0);
+        }
         if (!current.throughputKnown()) {
-            return block(current, Reason.THROUGHPUT_UNKNOWN, 0);
+            return new Assessment(true, Signal.BOOTSTRAP,
+                    Reason.THROUGHPUT_BOOTSTRAP, 0, current);
         }
         if (!current.throughputFresh()) {
-            return block(current, Reason.THROUGHPUT_STALE, 0);
+            return new Assessment(true, Signal.BOOTSTRAP,
+                    Reason.THROUGHPUT_REFRESH, 0, current);
         }
         if (current.upstreamBitsPerSecond() <= 0) {
-            return block(current, Reason.THROUGHPUT_UNKNOWN, 0);
+            return new Assessment(true, Signal.BOOTSTRAP,
+                    Reason.THROUGHPUT_BOOTSTRAP, 0, current);
         }
         if (current.selectedBitsPerSecond() <= 0) {
             return block(current, Reason.SELECTED_BITRATE_UNKNOWN, 0);
         }
-        if (!current.bufferUsable()) return block(current, Reason.BUFFER_UNKNOWN, 0);
         long ratio = ratioPermille(
                 current.upstreamBitsPerSecond(), current.selectedBitsPerSecond());
-        if (current.buffering()) return block(current, Reason.BUFFERING, ratio);
-        if (current.rebufferRisk()) return block(current, Reason.REBUFFER, ratio);
-        if (current.bufferDeclining()) return block(current, Reason.BUFFER_DECLINING, ratio);
-        if (current.bufferedDurationMs() < LOW_BUFFER_MS) {
-            return block(current, Reason.LOW_BUFFER, ratio);
-        }
         if (ratio < PAUSE_RATIO_PERMILLE) return block(current, Reason.RATIO_LOW, ratio);
-        if (current.foregroundRequests() > 0) {
-            return new Assessment(true, Signal.SUSPEND, Reason.FOREGROUND_ACTIVE,
-                    ratio, current);
-        }
-        if (!current.cacheBudgetAvailable()) {
-            return block(current, Reason.CACHE_BUDGET_EXHAUSTED, ratio);
-        }
         if (ratio >= RESUME_RATIO_PERMILLE
                 && current.bufferedDurationMs() >= SAFE_BUFFER_MS) {
             return new Assessment(true, Signal.RECOVER, Reason.RECOVERY_EVIDENCE,
@@ -224,6 +227,7 @@ public final class MpvPreloadPolicy {
         INACTIVE("inactive"),
         BLOCK("block"),
         SUSPEND("suspend"),
+        BOOTSTRAP("bootstrap"),
         HOLD("hold"),
         RECOVER("recover");
 
@@ -258,6 +262,8 @@ public final class MpvPreloadPolicy {
         CACHE_CIRCUIT_OPEN("cache-circuit-open"),
         THROUGHPUT_UNKNOWN("throughput-unknown"),
         THROUGHPUT_STALE("throughput-stale"),
+        THROUGHPUT_BOOTSTRAP("throughput-bootstrap"),
+        THROUGHPUT_REFRESH("throughput-refresh"),
         SELECTED_BITRATE_UNKNOWN("selected-bitrate-unknown"),
         BUFFER_UNKNOWN("buffer-unknown"),
         BUFFERING("buffering"),
