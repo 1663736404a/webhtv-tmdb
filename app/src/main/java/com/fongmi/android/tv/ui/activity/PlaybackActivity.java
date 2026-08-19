@@ -55,6 +55,7 @@ public abstract class PlaybackActivity extends BaseActivity implements MediaCont
     private boolean audioOnly;
     private boolean redirect;
     private boolean playbackExiting;
+    private boolean nativeOutputPending;
     private boolean bound;
     private boolean stop;
     private boolean lock;
@@ -433,9 +434,18 @@ public abstract class PlaybackActivity extends BaseActivity implements MediaCont
         boolean nativePlayer = player().isNativePlayer();
         View shutter = getExoView().findViewById(androidx.media3.ui.R.id.exo_shutter);
         if (nativePlayer) {
-            getExoView().setShutterBackgroundColor(Color.TRANSPARENT);
-            if (shutter != null) shutter.setVisibility(View.GONE);
+            boolean keepClosed = nativeOutputPending
+                    || player().shouldKeepVideoShutterClosed();
+            View videoSurface = getExoView().getVideoSurfaceView();
+            // Native MPV uses SurfaceView, which is composed above the normal
+            // PlayerView shutter. Alpha hides its buffer without replacing or
+            // detaching the Surface while automatic output is being decided.
+            if (videoSurface != null) videoSurface.setAlpha(keepClosed ? 0f : 1f);
+            getExoView().setShutterBackgroundColor(keepClosed ? Color.BLACK : Color.TRANSPARENT);
+            if (shutter != null) shutter.setVisibility(keepClosed ? View.VISIBLE : View.GONE);
         } else if (restoreExo) {
+            View videoSurface = getExoView().getVideoSurfaceView();
+            if (videoSurface != null) videoSurface.setAlpha(1f);
             getExoView().setShutterBackgroundColor(Color.BLACK);
             if (shutter != null) shutter.setVisibility(View.VISIBLE);
         }
@@ -565,8 +575,23 @@ public abstract class PlaybackActivity extends BaseActivity implements MediaCont
         }
 
         @Override
+        public void onPlayerOutputPending() {
+            if (!isOwner()) return;
+            nativeOutputPending = true;
+            syncShutter();
+        }
+
+        @Override
+        public void onPlayerOutputReady() {
+            if (!isOwner()) return;
+            nativeOutputPending = false;
+            syncShutter();
+        }
+
+        @Override
         public void onPlayerRebuild(Player player, boolean resetVideoSurface) {
             if (isOwner()) {
+                nativeOutputPending = player().shouldKeepVideoShutterClosed();
                 getSeekView().setProgressPlayer(player);
                 if (resetVideoSurface) resetVideoSurfaceForDecoderSwitch();
                 setRender();

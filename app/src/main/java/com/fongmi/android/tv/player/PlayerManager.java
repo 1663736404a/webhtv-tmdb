@@ -760,6 +760,17 @@ public class PlayerManager implements ParseCallback {
         return engine instanceof MpvPlayerEngine mpv && mpv.isSurfaceDirect();
     }
 
+    /**
+     * Keep the native player's shutter visible while automatic MPV output is
+     * still being selected. This prevents a failed direct DV probe from
+     * exposing a stale poster or the last frame before the GPU rebuild.
+     */
+    public boolean shouldKeepVideoShutterClosed() {
+        return isMpv()
+                && MpvPerformanceSetting.getOutputMode() == MpvPerformanceSetting.OUTPUT_AUTO
+                && !mpvAutoOutputEvaluated;
+    }
+
     public boolean isExo() {
         return playerType == PlayerSetting.EXO;
     }
@@ -4571,6 +4582,10 @@ public class PlayerManager implements ParseCallback {
         resetMpvOutputEvaluationState();
         mpvExplicitSubtitlePreference = hasRequestedSubtitle(Track.find(getKey()));
         if (!(engine instanceof MpvPlayerEngine mpv)) return;
+        if (MpvPerformanceSetting.getOutputMode()
+                == MpvPerformanceSetting.OUTPUT_AUTO) {
+            callback.onPlayerOutputPending();
+        }
         mpv.setSurfaceDirectOverride(null);
         boolean autoDirectEligible = MpvAutoOutputPolicy.canStartSurfaceDirect(
                 engine.isHard(),
@@ -4707,6 +4722,9 @@ public class PlayerManager implements ParseCallback {
                                 PlaybackTelemetry.DecisionInput.bool("eligible", decision.eligible(), PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH),
                                 PlaybackTelemetry.DecisionInput.number("probe_attempts", mpvAutoOutputProbeAttempts, PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH))),
                 SystemClock.elapsedRealtime());
+        if (!transitionRequested) {
+            callback.onPlayerOutputReady();
+        }
         return true;
     }
 
@@ -7068,6 +7086,12 @@ public class PlayerManager implements ParseCallback {
         void onReload(String msg);
 
         default void onPlayerRenderRequired() {
+        }
+
+        default void onPlayerOutputPending() {
+        }
+
+        default void onPlayerOutputReady() {
         }
 
         void onPlayerRebuild(Player newPlayer, boolean resetVideoSurface);
