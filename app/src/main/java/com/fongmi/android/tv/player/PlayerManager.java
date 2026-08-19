@@ -4722,7 +4722,7 @@ public class PlayerManager implements ParseCallback {
                                 PlaybackTelemetry.DecisionInput.bool("eligible", decision.eligible(), PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH),
                                 PlaybackTelemetry.DecisionInput.number("probe_attempts", mpvAutoOutputProbeAttempts, PlaybackAutoContext.ValueSource.PLAYER_MANAGER, PlaybackAutoContext.Confidence.HIGH))),
                 SystemClock.elapsedRealtime());
-        if (!transitionRequested) {
+        if (!transitionRequested || !requestAccepted) {
             callback.onPlayerOutputReady();
         }
         return true;
