@@ -82,6 +82,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
     private static final String CACHE_META_SUFFIX = ".meta";
     private static final int PREFIX_SCAN_LIMIT = 64 * 1024;
     private static final long SESSION_TTL_MS = TimeUnit.MINUTES.toMillis(3);
+    private static final long PRELOAD_FAILURE_BACKOFF_MS = TimeUnit.SECONDS.toMillis(20);
     private static final long MIN_CACHE_FILE_BYTES = 1;
     private static final int MAX_PENDING_PRELOAD_SEGMENTS = 256;
     private static final Pattern DASH_BASE_URL = Pattern.compile("(<BaseURL\\b[^>]*>)(.*?)(</BaseURL>)", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
@@ -95,6 +96,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
     private final Map<String, Target> targets;
     private final AtomicLong nextId;
     private final java.util.Set<String> preloading;
+    private final Map<String, Long> preloadFailureUntilMs;
     private final MpvHlsPreloadGate preloadGate;
     private final MpvHlsUpstreamEstimator upstreamEstimator;
     private final PlaybackDiskBufferStore diskBufferStore;
@@ -130,6 +132,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
         targets = new ConcurrentHashMap<>();
         nextId = new AtomicLong();
         preloading = ConcurrentHashMap.newKeySet();
+        preloadFailureUntilMs = new ConcurrentHashMap<>();
         preloadGate = new MpvHlsPreloadGate();
         upstreamEstimator = new MpvHlsUpstreamEstimator();
         diskBufferStore = PlaybackDiskBufferStore.process();
@@ -235,6 +238,7 @@ public final class MpvHlsProxy extends NanoHTTPD {
         upstreamEstimator.reset();
         lastManualPreloadPositionMs = Long.MIN_VALUE;
         lastManualPreloadAtMs = 0;
+        preloadFailureUntilMs.clear();
         cancelPreloads();
     }
 
@@ -967,6 +971,11 @@ public final class MpvHlsProxy extends NanoHTTPD {
             return false;
         }
         String key = file.getName();
+        Long failedUntil = preloadFailureUntilMs.get(key);
+        if (failedUntil != null) {
+            if (failedUntil > SystemClock.elapsedRealtime()) return false;
+            preloadFailureUntilMs.remove(key, failedUntil);
+        }
         if (cacheCoordinator.isKeyBusyOrCached(key, file)) return false;
         if (!preloading.add(key)) return false;
         try {
@@ -1036,7 +1045,15 @@ public final class MpvHlsProxy extends NanoHTTPD {
             if (!preloadGate.allows(preloadGeneration)) return false;
             ResponseBody body = response.body();
             if (!response.isSuccessful() || body == null
-                    || isPlaylistUrl(url, body.contentType())) return false;
+                    || isPlaylistUrl(url, body.contentType())) {
+                long until = SystemClock.elapsedRealtime() + PRELOAD_FAILURE_BACKOFF_MS;
+                preloadFailureUntilMs.put(file.getName(), until);
+                SpiderDebug.log(TAG,
+                        "preload skip key=%s code=%d backoffMs=%d url=%s",
+                        file.getName(), response.code(), PRELOAD_FAILURE_BACKOFF_MS,
+                        shortUrl(url));
+                return false;
+            }
             long upstreamLength = body.contentLength();
             if (upstreamLength < MIN_CACHE_FILE_BYTES) return false;
             boolean stripPngPrefix = MpvHlsSegmentContentPolicy.shouldProbePngPrefix(

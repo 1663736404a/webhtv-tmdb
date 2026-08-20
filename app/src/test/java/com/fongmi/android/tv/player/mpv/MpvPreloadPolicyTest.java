@@ -27,7 +27,7 @@ public class MpvPreloadPolicyTest {
         MpvPreloadPolicy.Assessment healthy = MpvPreloadPolicy.assess(
                 withThroughput(eligible(), 14_000_000L, true, true));
 
-        assertEquals(MpvPreloadPolicy.Signal.BLOCK, low.signal());
+        assertEquals(MpvPreloadPolicy.Signal.BOOTSTRAP, low.signal());
         assertEquals(MpvPreloadPolicy.Reason.RATIO_LOW, low.reason());
         assertEquals(1_149, low.ratioPermille());
         assertEquals(MpvPreloadPolicy.Signal.HOLD, middle.signal());

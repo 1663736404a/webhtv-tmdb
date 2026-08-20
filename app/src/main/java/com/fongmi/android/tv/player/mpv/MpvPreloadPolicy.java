@@ -54,11 +54,14 @@ public final class MpvPreloadPolicy {
             return block(current, Reason.CACHE_STORAGE_UNKNOWN, 0);
         }
         if (!current.bufferUsable()) return block(current, Reason.BUFFER_UNKNOWN, 0);
-        if (current.buffering()) return block(current, Reason.BUFFERING, 0);
-        if (current.rebufferRisk()) return block(current, Reason.REBUFFER, 0);
-        if (current.bufferDeclining()) return block(current, Reason.BUFFER_DECLINING, 0);
+        // Foreground requests are independently prioritized and cancel active
+        // preload work. Keep the disk worker admitted during short buffer dips
+        // so paused playback can continue filling the disk timeline.
+        if (current.buffering()) return bootstrap(current, Reason.BUFFERING);
+        if (current.rebufferRisk()) return bootstrap(current, Reason.REBUFFER);
+        if (current.bufferDeclining()) return bootstrap(current, Reason.BUFFER_DECLINING);
         if (current.bufferedDurationMs() < LOW_BUFFER_MS) {
-            return block(current, Reason.LOW_BUFFER, 0);
+            return bootstrap(current, Reason.LOW_BUFFER);
         }
         if (current.foregroundRequests() > 0) {
             return new Assessment(true, Signal.SUSPEND, Reason.FOREGROUND_ACTIVE,
@@ -84,7 +87,10 @@ public final class MpvPreloadPolicy {
         }
         long ratio = ratioPermille(
                 current.upstreamBitsPerSecond(), current.selectedBitsPerSecond());
-        if (ratio < PAUSE_RATIO_PERMILLE) return block(current, Reason.RATIO_LOW, ratio);
+        if (ratio < PAUSE_RATIO_PERMILLE) {
+            return new Assessment(true, Signal.BOOTSTRAP, Reason.RATIO_LOW,
+                    ratio, current);
+        }
         if (ratio >= RESUME_RATIO_PERMILLE
                 && current.bufferedDurationMs() >= SAFE_BUFFER_MS) {
             return new Assessment(true, Signal.RECOVER, Reason.RECOVERY_EVIDENCE,
@@ -107,6 +113,10 @@ public final class MpvPreloadPolicy {
 
     private static Assessment block(Request request, Reason reason, long ratio) {
         return new Assessment(true, Signal.BLOCK, reason, ratio, request);
+    }
+
+    private static Assessment bootstrap(Request request, Reason reason) {
+        return new Assessment(true, Signal.BOOTSTRAP, reason, 0, request);
     }
 
     private static long ratioPermille(long throughput, long selectedBitrate) {

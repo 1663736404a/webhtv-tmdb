@@ -863,6 +863,18 @@ public class PreCache implements Player.Listener {
         boolean automaticPreload = PlaybackPerformanceSetting.isAuto(
                 PlayerSetting.EXO,
                 PlaybackPerformanceCatalog.PRELOAD);
+        // A short throughput/buffer warning must reduce the disk task size, not
+        // disable disk preloading. Foreground playback already owns the higher
+        // priority data source, so keeping a single small background task is
+        // safe and preserves the old continuously-growing disk buffer.
+        if (automaticPreload && !decision.enabled()
+                && !isHardAutomaticPause(decision.reason())) {
+            return new AutoPreloadPolicy.Decision(
+                    AutoPreloadPolicy.NORMAL_THREADS,
+                    AutoPreloadPolicy.DEGRADED_DURATION_MS,
+                    "degraded",
+                    decision.reason() + "-continuous");
+        }
         if (automaticPreload && !decision.enabled()) return decision;
         int effectiveThreads = PlaybackPerformanceSetting.isAuto(
                 PlayerSetting.EXO,
@@ -880,6 +892,15 @@ public class PreCache implements Player.Listener {
                 effectiveDurationMs,
                 decision.mode(),
                 decision.reason());
+    }
+
+    private static boolean isHardAutomaticPause(String reason) {
+        return switch (reason == null ? "" : reason) {
+            case "session-mismatch", "memory-pressure", "network-unavailable",
+                    "network-unvalidated", "data-saver", "power-save",
+                    "thermal-pressure" -> true;
+            default -> false;
+        };
     }
 
     private PlaybackAutoContext.SessionToken currentAutoSession() {
