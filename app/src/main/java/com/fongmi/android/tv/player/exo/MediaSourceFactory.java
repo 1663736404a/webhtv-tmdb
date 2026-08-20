@@ -73,9 +73,7 @@ public class MediaSourceFactory implements MediaSource.Factory {
         OkHttpDataSource.Factory factory = new OkHttpDataSource.Factory(OkHttp.player());
         applyHeaders(factory, headers);
         DataSource.Factory upstream = new DefaultDataSource.Factory(App.get(), factory);
-        DataSource.Factory manifestAware = new PlaybackManifestSnapshotDataSource.Factory(
-                upstream, PlaybackManifestSnapshotDataSource.Mode.REPLAY);
-        DataSource.Factory recovered = new HttpEofRecoveryDataSource.Factory(manifestAware);
+        DataSource.Factory recovered = new HttpEofRecoveryDataSource.Factory(upstream);
         return new PriorityTaskDataSource.Factory(recovered, PLAYBACK_PRIORITY_MANAGER, C.PRIORITY_PLAYBACK_PRELOAD, true);
     }
 
@@ -227,9 +225,7 @@ public class MediaSourceFactory implements MediaSource.Factory {
     private DataSource.Factory getDataSourceFactory() {
         if (dataSourceFactory == null) {
             DataSource.Factory cacheDataSource = getCacheDataSource(new DefaultDataSource.Factory(App.get(), getHttpDataSourceFactory()));
-            DataSource.Factory manifestAware = new PlaybackManifestSnapshotDataSource.Factory(
-                    cacheDataSource, PlaybackManifestSnapshotDataSource.Mode.CAPTURE);
-            DataSource.Factory trackedDataSource = new PlaybackBytePositionDataSource.Factory(manifestAware);
+            DataSource.Factory trackedDataSource = new PlaybackBytePositionDataSource.Factory(cacheDataSource);
             dataSourceFactory = new PriorityTaskDataSource.Factory(trackedDataSource, PLAYBACK_PRIORITY_MANAGER, C.PRIORITY_PLAYBACK, false);
         }
         return dataSourceFactory;

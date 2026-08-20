@@ -10,7 +10,6 @@ import androidx.annotation.NonNull;
 import androidx.media3.common.C;
 import androidx.media3.common.Format;
 import androidx.media3.common.MediaItem;
-import androidx.media3.common.MimeTypes;
 import androidx.media3.common.Player;
 import androidx.media3.datasource.DataSource;
 import androidx.media3.exoplayer.source.preload.PreCacheHelper;
@@ -19,7 +18,6 @@ import com.fongmi.android.tv.BuildConfig;
 import com.fongmi.android.tv.player.PlaybackRoute;
 import com.fongmi.android.tv.player.PlaybackAutoContext;
 import com.fongmi.android.tv.player.PlaybackAutoContextStore;
-import com.fongmi.android.tv.player.PlaybackResourceClassifier;
 import com.fongmi.android.tv.player.PlaybackSystemConditionMonitor;
 import com.fongmi.android.tv.player.PlaybackSystemConditionCoordinator;
 import com.fongmi.android.tv.player.PlaybackTelemetry;
@@ -66,7 +64,6 @@ public class PreCache implements Player.Listener {
 
         @Override
         public void onPrepareError(MediaItem mediaItem, IOException exception) {
-            evictPoisonedManifest(mediaItem, exception);
             if (BuildConfig.DEBUG) Log.w(TAG, "prepare failed " + errorDetails(exception));
             handleTaskError(PreloadLifecycleTracker.TaskEvent.Outcome.PREPARE_ERROR, "prepare-error", exception);
         }
@@ -154,7 +151,12 @@ public class PreCache implements Player.Listener {
                 ? PlaybackAutoContext.SessionToken.none() : currentAutoSession();
         this.lastAutoInputs = null;
         this.lastAutoDecision = null;
-        this.helper = createHelper(normalizePreloadMediaItem(mediaItem));
+        // Keep the exact MediaItem used by foreground playback.  Preload must
+        // not infer or override a MIME type from a route classifier: signed
+        // direct-media URLs are commonly classified as HLS while returning a
+        // media segment/stream, which makes Exo hand them to HlsMediaSource
+        // and repeatedly fail with "Input does not start with #EXTM3U".
+        this.helper = createHelper(mediaItem);
         if (BuildConfig.DEBUG) {
             Log.i(TAG, "session active automatic=" + automatic
                     + " experimentAllowed=" + experimentAllowed
@@ -657,67 +659,12 @@ public class PreCache implements Player.Listener {
         transition(PreloadLifecycleTracker.State.PAUSED_STORAGE, reason, "generation=%d actualCapacityBytes=%d safeCapacityBytes=%d cacheSizeBytes=%d availableBytes=%d reserveBytes=%d reclaimBytes=%d", generation, decision.actualCapacityBytes(), decision.effectiveCapacityBytes(), decision.existingCacheBytes(), decision.availableStorageBytes(), decision.reserveBytes(), decision.reclaimBytes());
     }
 
-    private MediaItem normalizePreloadMediaItem(MediaItem mediaItem) {
-        if (mediaItem == null || mediaItem.localConfiguration == null) return mediaItem;
-        MediaItem.LocalConfiguration local = mediaItem.localConfiguration;
-        String uri = local.uri == null ? "" : local.uri.toString();
-        String mime = local.mimeType;
-        PlaybackResourceClassifier.Classification classification =
-                PlaybackResourceClassifier.classifyRequest(uri, mime, mime);
-        PlaybackAutoContext.Protocol protocol = classification.protocol();
-        PlaybackAutoContext context = PlaybackAutoContextStore.process().snapshot();
-        long now = SystemClock.elapsedRealtime();
-        if (context.active()
-                && playbackTraceId.equals(context.session().traceId())
-                && context.resource().protocol().isUsable(now)) {
-            protocol = context.resource().protocol().value();
-        }
-        String resolvedMime = switch (protocol) {
-            case HLS -> MimeTypes.APPLICATION_M3U8;
-            case DASH -> MimeTypes.APPLICATION_MPD;
-            default -> null;
-        };
-        if (resolvedMime == null || resolvedMime.equals(mime)) return mediaItem;
-        if (BuildConfig.DEBUG) {
-            Log.i(TAG, "normalize protocol=" + protocol.label()
-                    + " mime=" + (mime == null ? "-" : mime)
-                    + " resolvedMime=" + resolvedMime);
-        }
-        PlaybackTrace.log("exo-preload", playbackTraceId,
-                "event=normalize-media-item protocol=%s mime=%s resolvedMime=%s uri=%s",
-                protocol.label(), mime == null ? "-" : mime, resolvedMime,
-                summarizeUri(uri));
-        return mediaItem.buildUpon().setMimeType(resolvedMime).build();
-    }
-
-    private String summarizeUri(String value) {
-        if (value == null || value.isEmpty()) return "-";
-        if (value.length() <= 96) return value;
-        return value.substring(0, 96) + "...";
-    }
-
     private PreCacheHelper createHelper(MediaItem mediaItem) {
         DataSource.Factory upstreamFactory = MediaSourceFactory.createUpstreamDataSourceFactory(ExoUtil.extractHeaders(mediaItem));
         return new PreCacheHelper.Factory(MediaSourceFactory.getCache(), upstreamFactory, ExoUtil.buildRenderersFactory(), getWorker().getLooper())
                 .setDownloadExecutor(getExecutor())
                 .setListener(preCacheListener)
                 .create(mediaItem);
-    }
-
-    private void evictPoisonedManifest(MediaItem mediaItem, Throwable error) {
-        if (!(error instanceof androidx.media3.common.ParserException)
-                || mediaItem == null || mediaItem.localConfiguration == null) return;
-        String cacheKey = mediaItem.localConfiguration.uri.toString();
-        try {
-            MediaSourceFactory.getCache().removeResource(cacheKey);
-            PlaybackTrace.log("exo-preload", playbackTraceId,
-                    "event=manifest-cache-evicted reason=prepare-parse-error uri=%s",
-                    summarizeUri(cacheKey));
-        } catch (RuntimeException e) {
-            if (BuildConfig.DEBUG) {
-                Log.w(TAG, "manifest cache eviction failed " + errorDetails(e));
-            }
-        }
     }
 
     private String errorDetails(Throwable error) {
