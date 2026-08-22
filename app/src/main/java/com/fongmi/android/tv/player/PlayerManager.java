@@ -4704,6 +4704,9 @@ public class PlayerManager implements ParseCallback {
         boolean lutOrFilterActive = videoEffectsActive || videoEffectsDirty || lutAllowed && LutSetting.isEnabled() || MpvPerformanceSetting.isInterpolation();
         boolean customGpuProcessing = MpvConfigStore.hasGpuVideoProcessing();
         boolean forceNativeDv7 = isDv7NativeAttemptRequested();
+        boolean dv7Hdr10FallbackEnabled = dolbyVision
+                && videoDetails.dolbyVisionProfile() == 7
+                && PlaybackPerformanceSetting.isDv7Hdr10FallbackEnabled();
         MpvAutoOutputPolicy.DolbyVisionSupport dolbyVisionSupport = dolbyVision
                 ? CodecCapabilityInspector.dolbyVisionSupport(
                 App.get(), videoDetails, format, width, height)
@@ -4714,7 +4717,8 @@ public class PlayerManager implements ParseCallback {
                 : MpvAutoOutputPolicy.evaluate(width, height, engine.isHard(),
                 Util.isLeanback(), lutOrFilterActive, customGpuProcessing,
                 dolbyVisionSupport,
-                dolbyVision ? videoDetails.dolbyVisionProfile() : C.INDEX_UNSET);
+                dolbyVision ? videoDetails.dolbyVisionProfile() : C.INDEX_UNSET,
+                dv7Hdr10FallbackEnabled);
         if (dolbyVision && decision.reason().startsWith("dolby-vision-hw-")) {
             mpvAutoGpuPinnedForSession = true;
         }
