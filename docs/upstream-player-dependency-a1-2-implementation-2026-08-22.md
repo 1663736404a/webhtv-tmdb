@@ -47,7 +47,9 @@ bash ./gradlew :app:testMobileArm64_v8aDebugUnitTest \\
 
 - 预实施回滚点：`9f946cfb003e721c2c36dde1a197c4ce86422cee`。
 - 原实施提交（引入回归）：`9306df6afa3d20514764fb8e3ccda08c147e8ffc`。
-- 本次修复提交与 recovery tag 将在本轮单测通过后记录；它只回滚合成 CSD 配置行为，不回滚 E1、FFmpeg、MPV 或 HDR10 逻辑。
+- 本次修复提交：`5e264c409d1d41002d707dfb5cface8f733a41ff`。
+- recovery tag：`recovery/exo-dv7-p81-csd-compat/20260822170928-5e264c409d1d`。
+- 它只回滚合成 CSD 配置行为，不回滚 E1、FFmpeg、MPV 或 HDR10 逻辑。
 - 后续不重建 AAR/native；目标电视回归成功后，保留本修复提交作为新的 Exo 回滚边界。
 
 ## 2026-08-22 实机回归检查点
