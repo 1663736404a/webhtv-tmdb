@@ -7,6 +7,7 @@ import androidx.media3.common.Format;
 public final class ExoDolbyVisionPlaybackState {
 
     private volatile Snapshot snapshot = Snapshot.inactive();
+    private volatile boolean hdr10FallbackRequested;
 
     public void activate(Format sourceFormat, Format outputFormat) {
         snapshot = new Snapshot(true, false, sourceFormat, outputFormat);
@@ -17,7 +18,21 @@ public final class ExoDolbyVisionPlaybackState {
     }
 
     public void reset() {
+        hdr10FallbackRequested = false;
+        resetAttempt();
+    }
+
+    /** Clears the active renderer/extractor snapshot while keeping a pending retry policy. */
+    public void resetAttempt() {
         snapshot = Snapshot.inactive();
+    }
+
+    public void requestHdr10Fallback() {
+        hdr10FallbackRequested = true;
+    }
+
+    public boolean isHdr10FallbackRequested() {
+        return hdr10FallbackRequested;
     }
 
     public Snapshot snapshot() {

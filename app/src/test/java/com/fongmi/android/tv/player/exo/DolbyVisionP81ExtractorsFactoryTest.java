@@ -83,6 +83,34 @@ public class DolbyVisionP81ExtractorsFactoryTest {
     }
 
     @Test
+    public void hdr10FallbackUsesHevcAndRemovesDolbyVisionCsd() {
+        Format source = formatWithInitializationData("dvhe.07.06", List.of(
+                new byte[]{0, 0, 0, 1, 1},
+                new byte[]{0, 0, 0, 1, 2},
+                new byte[]{1, 0, 14, 52, 0}));
+
+        Format output = DolbyVisionP81ExtractorsFactory.asHdr10Fallback(source);
+
+        assertEquals(MimeTypes.VIDEO_H265, output.sampleMimeType);
+        assertEquals(null, output.codecs);
+        assertEquals(2, output.initializationData.size());
+        assertArrayEquals(source.initializationData.get(0), output.initializationData.get(0));
+        assertArrayEquals(source.initializationData.get(1), output.initializationData.get(1));
+    }
+
+    @Test
+    public void runtimeFallbackRequestSurvivesAttemptResetButNotFullReset() {
+        ExoDolbyVisionPlaybackState state = new ExoDolbyVisionPlaybackState();
+        state.requestHdr10Fallback();
+
+        state.resetAttempt();
+        assertTrue(state.isHdr10FallbackRequested());
+
+        state.reset();
+        assertFalse(state.isHdr10FallbackRequested());
+    }
+
+    @Test
     public void doesNotModifyNonProfile7Format() {
         byte[] csd = {1, 2, 3};
         Format source = formatWithInitializationData("dvhe.08.06", List.of(csd));

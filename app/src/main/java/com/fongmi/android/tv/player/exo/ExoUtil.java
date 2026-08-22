@@ -957,11 +957,16 @@ public class ExoUtil {
             } finally {
                 pendingSourceFormat = null;
                 pendingOutputFormat = null;
-                if (playbackState != null) playbackState.reset();
+                if (playbackState != null) playbackState.resetAttempt();
             }
         }
 
-        private static Format asHdr10(Format format) {
+        private Format asHdr10(Format format) {
+            if (playbackState != null
+                    && playbackState.isHdr10FallbackRequested()
+                    && DolbyVisionP81ExtractorsFactory.isProfile7(format)) {
+                return DolbyVisionP81ExtractorsFactory.asHdr10Fallback(format);
+            }
             ColorInfo color = format.colorInfo == null
                     ? new ColorInfo.Builder().setColorSpace(C.COLOR_SPACE_BT2020).setColorRange(C.COLOR_RANGE_LIMITED).setColorTransfer(C.COLOR_TRANSFER_ST2084).build()
                     : format.colorInfo.buildUpon().setColorSpace(C.COLOR_SPACE_BT2020).setColorRange(C.COLOR_RANGE_LIMITED).setColorTransfer(C.COLOR_TRANSFER_ST2084).build();

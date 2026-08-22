@@ -63,6 +63,9 @@ public class ExoPlayerEngine implements PlayerEngine {
     private boolean tunnelingEnabledForSession;
     private boolean decoderRuntimeEnabledForPlayer;
     private boolean dv7Hdr10FallbackEnabledForPlayer;
+    private boolean dolbyVisionP81RuntimeFailureObserved;
+    private boolean dolbyVisionFallbackPreparedForNextStart;
+    private PlaySpec dolbyVisionFallbackSpec;
     private ExoFrameSchedulingPlayerSettings frameSchedulingSettings;
     private ExoFrameSchedulingPlayerSettings pendingFrameSchedulingSettings;
     private ExoDecoderRuntimeSession.OutputConfig frameSchedulingOutput;
@@ -178,6 +181,9 @@ public class ExoPlayerEngine implements PlayerEngine {
         finishDecoderRuntimeAttempt();
         PlaybackAnalyticsListener.finishSession(player.getCurrentPosition());
         dolbyVisionPlaybackState.reset();
+        dolbyVisionP81RuntimeFailureObserved = false;
+        dolbyVisionFallbackPreparedForNextStart = false;
+        dolbyVisionFallbackSpec = null;
         player.release();
     }
 
@@ -191,7 +197,7 @@ public class ExoPlayerEngine implements PlayerEngine {
         cancelDecoderRuntimeStableWindow();
         finishDecoderRuntimeAttempt();
         PlaybackAnalyticsListener.finishSession(player.getCurrentPosition());
-        dolbyVisionPlaybackState.reset();
+        dolbyVisionPlaybackState.resetAttempt();
         player.release();
         PlaybackTrace.log("player-engine", getPlaybackTraceId(), "rebuild decode=%d", decode);
         tunnelingEnabledForSession = ExoUtil.isTunnelingEnabled(decode, tunnelingFallbackAttempted);
@@ -403,6 +409,7 @@ public class ExoPlayerEngine implements PlayerEngine {
 
     @Override
     public void start(PlaySpec spec, boolean playWhenReady) {
+        prepareDolbyVisionForStart(spec);
         finishDecoderRuntimeAttempt();
         lockCompatibleFrameSchedulingDecision();
         this.spec = spec;
@@ -419,6 +426,7 @@ public class ExoPlayerEngine implements PlayerEngine {
 
     @Override
     public void start(PlaySpec spec, long position, boolean playWhenReady) {
+        prepareDolbyVisionForStart(spec);
         finishDecoderRuntimeAttempt();
         lockCompatibleFrameSchedulingDecision();
         this.spec = spec;
@@ -435,6 +443,7 @@ public class ExoPlayerEngine implements PlayerEngine {
 
     @Override
     public void restart(PlaySpec spec, long position, boolean playWhenReady) {
+        prepareDolbyVisionForStart(spec);
         finishDecoderRuntimeAttempt();
         this.spec = spec;
         this.activeFormat = spec.getFormat();
@@ -662,17 +671,34 @@ public class ExoPlayerEngine implements PlayerEngine {
     public boolean observeDecoderRuntimeFailure(PlaybackException error) {
         if (!decoderRuntimeEnabledForPlayer || !isHard() || error == null) return false;
         cancelDecoderRuntimeStableWindow();
-        return decoderRuntimeSession.recordFatalFailure(
-                decoderRuntimeEvidence(error),
+        ExoDecoderRuntimeSession.Evidence evidence = decoderRuntimeEvidence(error);
+        boolean observed = decoderRuntimeSession.recordFatalFailure(
+                evidence,
                 error.errorCode,
                 android.os.SystemClock.elapsedRealtime(),
                 System.currentTimeMillis());
+        if (observed) {
+            ExoDolbyVisionPlaybackState.Snapshot snapshot =
+                    dolbyVisionPlaybackState.snapshot();
+            dolbyVisionP81RuntimeFailureObserved =
+                    snapshot.p81ConversionActive()
+                            || isDolbyVisionProfile81(evidence.format());
+        }
+        return observed;
     }
 
     public boolean prepareDecoderRuntimeFallback() {
-        return decoderRuntimeEnabledForPlayer
+        boolean prepared = decoderRuntimeEnabledForPlayer
                 && isHard()
                 && decoderRuntimeSession.prepareRuntimeFallback();
+        if (!prepared) return false;
+        if (dolbyVisionP81RuntimeFailureObserved) {
+            dolbyVisionFallbackPreparedForNextStart = true;
+            dolbyVisionFallbackSpec = spec;
+            dolbyVisionPlaybackState.requestHdr10Fallback();
+        }
+        dolbyVisionP81RuntimeFailureObserved = false;
+        return true;
     }
 
     public void stopAutomaticPreload(String reason) {
@@ -714,7 +740,7 @@ public class ExoPlayerEngine implements PlayerEngine {
         cancelDecoderRuntimeStableWindow();
         armTunnelingWatchdog();
         finishDecoderRuntimeAttempt();
-        dolbyVisionPlaybackState.reset();
+        dolbyVisionPlaybackState.resetAttempt();
         PlaybackAnalyticsListener.finishSession(player.getCurrentPosition());
         PlaybackAnalyticsListener.beginSession(
                 spec.getPlaybackTraceId(),
@@ -743,6 +769,26 @@ public class ExoPlayerEngine implements PlayerEngine {
                 currentDecoderRuntimeEvidence(),
                 android.os.SystemClock.elapsedRealtime(),
                 System.currentTimeMillis());
+    }
+
+    private void prepareDolbyVisionForStart(PlaySpec nextSpec) {
+        if (dolbyVisionFallbackPreparedForNextStart
+                && dolbyVisionFallbackSpec == nextSpec) {
+            dolbyVisionPlaybackState.resetAttempt();
+        } else {
+            dolbyVisionPlaybackState.reset();
+        }
+        dolbyVisionFallbackPreparedForNextStart = false;
+        dolbyVisionFallbackSpec = null;
+        dolbyVisionP81RuntimeFailureObserved = false;
+    }
+
+    private static boolean isDolbyVisionProfile81(Format format) {
+        if (format == null
+                || !MimeTypes.VIDEO_DOLBY_VISION.equals(format.sampleMimeType)
+                || format.codecs == null) return false;
+        String codecs = format.codecs.toLowerCase(Locale.US);
+        return codecs.startsWith("dvhe.08.") || codecs.startsWith("dvh1.08.");
     }
 
     private ExoDecoderRuntimeSession.Evidence currentDecoderRuntimeEvidence() {
