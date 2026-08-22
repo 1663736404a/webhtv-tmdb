@@ -42,6 +42,7 @@ import com.github.catvod.crawler.SpiderDebug;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -773,7 +774,7 @@ public class ExoPlayerEngine implements PlayerEngine {
 
     private void prepareDolbyVisionForStart(PlaySpec nextSpec) {
         if (dolbyVisionFallbackPreparedForNextStart
-                && dolbyVisionFallbackSpec == nextSpec) {
+                && isSameDolbyVisionPlayback(dolbyVisionFallbackSpec, nextSpec)) {
             dolbyVisionPlaybackState.resetAttempt();
         } else {
             dolbyVisionPlaybackState.reset();
@@ -781,6 +782,15 @@ public class ExoPlayerEngine implements PlayerEngine {
         dolbyVisionFallbackPreparedForNextStart = false;
         dolbyVisionFallbackSpec = null;
         dolbyVisionP81RuntimeFailureObserved = false;
+    }
+
+    static boolean isSameDolbyVisionPlayback(
+            PlaySpec expected, PlaySpec actual) {
+        if (expected == actual) return true;
+        if (expected == null || actual == null) return false;
+        return Objects.equals(expected.getPlaybackTraceId(), actual.getPlaybackTraceId())
+                && Objects.equals(expected.getKey(), actual.getKey())
+                && Objects.equals(expected.getUrl(), actual.getUrl());
     }
 
     private static boolean isDolbyVisionProfile81(Format format) {
