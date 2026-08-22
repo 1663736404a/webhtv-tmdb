@@ -25,7 +25,7 @@
 
 - 当前 HEAD：`f2721c43b6654ae7307647ebaaaa4248a50a9ab7`
 - 当前最新 recovery tag：`recovery/exo-dv7-timeout-after-first-frame/20260822212742-f2721c43b665`
-- 本轮没有新的代码提交或 tag。
+- 本轮没有生产代码或依赖变更；仅提交了本评估文档，并创建文档 recovery tag。
 - 预先存在的脏路径保持不变：`.gitignore`、`third_party/fongmi-repositories-lock.json`、`.codex/`、`AGENTS.md`、已有上游评估文档。
 
 ### 1.2 Exo 远程大 MKV 实测
