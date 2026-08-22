@@ -2,12 +2,14 @@
 
 ## 当前恢复锚点
 
-- 状态：候选完成，待任务守卫原子提交与 recovery tag。
+- 状态：E1 已完成并提交。
 - 分支：`fongmi-sync`
 - 回滚基线：`4b50754d3a2902eb4f94361669aa52079f3a2917`
 - 任务：将 Exo/nextlib 内置 FFmpeg 从 `04482c8d13ac27b2a9fe93f5d388929eef8af5f4` 升级到 `177f090e0503b7e013922ca903bde14b1c375f18`。
 - 新坐标：`io.github.anilbeesetti:nextlib-media3ext:1.10.0-0.12.1-fongmi-softload-av3a-ffmpeg901-r1`
-- 下一动作：完成任务守卫原子提交并创建 recovery tag。
+- 实施提交：`0b09fc0944a0ef3c21f423e470ece93f3193690c`
+- Recovery tag：`recovery/exo-e1-ffmpeg-9.0.1/20260822093504-0b09fc0944a0`
+- 下一动作：由用户决定是否进入后续 Exo 阶段；C2 继续保持未启用。
 
 ## 实施边界
 
@@ -41,4 +43,4 @@ C2 实测边界：FFmpeg 配置输出的 Enabled bsfs 仅包含 `av1_frame_merge
 
 App 验证：`bash ./gradlew :app:assembleMobileArm64_v8aDebug` 成功，`BUILD SUCCESSFUL in 1m 28s`（101 actionable tasks，10 executed，91 up-to-date）。
 
-完成条件：E1 的 lock、nextlib patch、双 ABI AAR/POM/module、README、开发文档和实施记录已同步；C2 未接入；下一步是任务守卫原子提交并立即创建 recovery tag。
+完成结果：E1 的 lock、nextlib patch、双 ABI AAR/POM/module、README、开发文档和实施记录已同步；C2 未接入。实施提交为 `0b09fc0944a0ef3c21f423e470ece93f3193690c`，本地回滚锚点为 `recovery/exo-e1-ffmpeg-9.0.1/20260822093504-0b09fc0944a0`。
