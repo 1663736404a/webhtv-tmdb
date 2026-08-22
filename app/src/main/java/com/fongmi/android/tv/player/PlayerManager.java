@@ -7142,6 +7142,9 @@ public class PlayerManager implements ParseCallback {
         default void onPlayerOutputReady() {
         }
 
+        default void onExoFirstFrame() {
+        }
+
         void onPlayerRebuild(Player newPlayer, boolean resetVideoSurface);
     }
 
@@ -7293,6 +7296,7 @@ public class PlayerManager implements ParseCallback {
             publishPlaybackAutoContext(true);
             onIjkRuntimeFirstFrame(SystemClock.elapsedRealtime());
             publishPlaybackTelemetry();
+            if (isExo()) callback.onExoFirstFrame();
         }
 
         @Override

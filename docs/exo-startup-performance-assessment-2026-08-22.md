@@ -2,7 +2,7 @@
 
 评估日期：2026-08-22（Asia/Tokyo）
 评估范围：Exo 起播速度、远程百度网盘 MKV、Matroska Cues/索引、首帧与 `STATE_READY` 的关系。
-当前状态：仅评估，未修改生产代码、依赖锁、AAR、APK 或 native 二进制。
+当前状态：E-SP1 已实施并通过 Mobile/Leanback Java 编译；E-SP2 仍为独立实验评估，未修改 Media3 依赖、AAR、APK 或 native 二进制。
 
 ## 结论先行
 
@@ -201,14 +201,34 @@ VLC 将 MKV 的 seekability、fast-seekability、Cues/segment preload 分开管�
 - 远程请求为正常 `206`，连接建立不是主要耗时。
 - 决定：不作为本次 Exo 起播优化方案。
 
-## 6. 最小实施顺序
+## 6. E-SP1 实施记录
+
+### 6.1 实施目标
+
+E-SP1 解决的是“视频首帧已经由 Exo/Media3 渲染，但完整 `STATE_READY` 仍因音频或其他轨道初始化而延后”时的界面遮挡问题。它不承诺降低 `stage=first-frame` 的实际耗时，也不改变 Exo 的状态机、缓冲策略或错误判定。
+
+### 6.2 实施内容
+
+- `PlayerManager` 在 Exo `onRenderedFirstFrame()` 后新增 `onExoFirstFrame()` 回调；原有首帧 trace、超时取消和 telemetry 保持不变。
+- `PlaybackService` 只转发该 Exo 专用回调；MPV/native 不进入该路径。
+- `PlaybackActivity` 收到当前 owner 的 Exo 首帧后立即隐藏 `exo_shutter`、设置透明 shutter，并隐藏页面已有的 `R.id.progress` 启动遮罩。
+- 不修改 `STATE_READY`、`PlaybackStartupPolicy`、`DefaultLoadControl`、解码器选择、DV7→P8.1/HDR10 fallback、TrueHD、seek、Range/cache、软解降载或 MPV 输出策略。
+
+### 6.3 验证与回滚
+
+- 验证：`bash ./gradlew :app:compileMobileArm64_v8aDebugJavaWithJavac :app:compileLeanbackArm64_v8aDebugJavaWithJavac`，结果 `BUILD SUCCESSFUL`。
+- 静态检查：`git diff --check` 通过。
+- 回滚：恢复 E-SP1 原子提交即可；不涉及依赖锁或二进制重建。
+- 实施提交与 recovery tag：由本轮 task guard 在提交完成后记录；后续文档 checkpoint 会补充完整 40 位 commit/tag。
+
+## 7. 最小实施顺序
 
 1. 先实施/验证 E-SP1（首帧可见分层），不触碰依赖和 extractor。
 2. 若仍需降低实际首帧耗时，再批准 E-SP2 的实验分支/feature flag；实验只覆盖远程大 MKV、起始位置 0。
 3. E-SP2 通过同设备/同资源/同设置的基线比较后，才能讨论是否进入 Media3 fork、AAR 和 Exo 依赖锁。
 4. Exo 阶段稳定后，再按既定顺序评估 MPV；不得因为 MPV 更快而直接复制其 demux 实现到 Exo。
 
-## 7. 研究来源与证据等级
+## 8. 研究来源与证据等级
 
 | 来源 | 类型 | 等级 | 用途 |
 | --- | --- | --- | --- |
@@ -220,21 +240,30 @@ VLC 将 MKV 的 seekability、fast-seekability、Cues/segment preload 分开管�
 | VLC `mkv.cpp` | 成熟开源实现/源码 | A/B | 确认 seekability、fast-seekability、preload 分层 |
 | WebHTV trace `p-2vl4f6-g` | 本地可重复日志 | A | 确认当前实际尾部 Range 与阶段耗时 |
 
-## 8. 当前未决事项
+## 9. 当前未决事项
 
 - 是否批准 E-SP1 的 UI/启动状态适配？
 - 是否批准 E-SP2 的实验性 Media3 extractor/代理预取方案？
 - E-SP2 采用“Media3 fork 延后 Cues”还是“代理/DataSource 有界预取”，需要先冻结实验边界再设计。
 
-本评估完成后，下一步只有一个：等待用户选择 E-SP1、E-SP2 或两者的实施授权；在授权前不修改生产代码。
+E-SP1 已获用户授权并完成；下一步只进入 E-SP2 的独立研究/实验实现，不把 E-SP2 的 Media3/代理改动混入 E-SP1。
 
 ## Checkpoint 1：2026-08-22 Exo 起播性能评估
 
-- 完成：完成 Exo 远程大 MKV 起播性能评估：确认尾部 Cues Range 是主要实耗时；对照 Media3、mpv、FFmpeg、VLC；提出 E-SP1 首帧分层推荐、E-SP2 Cues 延后仅实验，缓冲/TrueHD/预加载/网络库暂缓或忽略。
+- 完成：完成 Exo 远程大 MKV 起播性能评估；确认尾部 Cues Range 是主要实耗时；对照 Media3、mpv、FFmpeg、VLC；完成 E-SP1 首帧可见分层实现并通过双产品 Java 编译；E-SP2 仍保持实验边界。
 - 基线：`f2721c43b6654ae7307647ebaaaa4248a50a9ab7`；最新 recovery tag 为 `recovery/exo-dv7-timeout-after-first-frame/20260822212742-f2721c43b665`。
 - 工作区：只新增本评估文档；既有脏路径未触碰。
 - 证据：WebHTV trace `p-2vl4f6-g`；Media3、mpv、FFmpeg、VLC 官方源码链接见上文。
-- 验证：文档 `git diff --check` 通过；本轮未改生产代码，未执行 APK/native 构建。
-- 回滚：删除本新增文档即可；生产代码与依赖锁无变化。
-- 未决：等待用户批准 E-SP1/E-SP2；批准前不改生产代码。
-- 下一步：等待用户批准 E-SP1/E-SP2；批准前不改生产代码。
+- 验证：E-SP1 Java 编译 `BUILD SUCCESSFUL`；`git diff --check` 通过；未执行 APK/native 构建（本阶段不需要）。
+- 回滚：回滚 E-SP1 原子提交即可；既有依赖锁和其他脏路径保持不变。
+- 未决：E-SP2 采用 Media3 fork 延后 Cues 还是有界代理/DataSource 预取，必须完成研究与实验后再决定。
+- 下一步：记录 E-SP1 提交/tag 后，启动独立 E-SP2 assessment/upstream 会话，先审阅本地 Media3 源码与实验边界。
+
+## Checkpoint 2：2026-08-22 E-SP1 已实施
+
+- 目标：首帧出现后立即解除 Exo 黑屏和启动遮罩，完整 `STATE_READY` 继续由播放器自行完成。
+- 改动：`PlayerManager.java`、`PlaybackService.java`、`PlaybackActivity.java`；只新增 Exo 专用首帧通知链。
+- 保护：MPV/native、音频-only、DV7 转换/fallback、AV3A、TrueHD、seek、Range/cache、软解降载均未改动。
+- 验证：Mobile Arm64 与 Leanback Arm64 Java 编译通过；`git diff --check` 通过。
+- 提交/tag：本 checkpoint 随 task guard 完成后补录完整 40 位 commit 与 recovery tag。
+- 下一步：完成 E-SP1 原子提交/tag 后，进入 E-SP2 深度研究；不重复检索已确认的 E-SP1 事实。
