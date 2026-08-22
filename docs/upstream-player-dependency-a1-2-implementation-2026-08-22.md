@@ -45,5 +45,6 @@ bash ./gradlew :app:testMobileArm64_v8aDebugUnitTest \\
 ## 回滚与下一步
 
 - 预实施回滚点：`9f946cfb003e721c2c36dde1a197c4ce86422cee`。
-- task guard 将创建原子提交和 `recovery/exo-a1-2-dv-csd/<timestamp>` tag，并在此处补充提交号和 tag。
-- 下一步：完成 task guard 提交/tag；不重建 AAR/native，不运行完整测试矩阵。
+- 实施提交：`9306df6afa3d20514764fb8e3ccda08c147e8ffc`。
+- recovery tag：`recovery/exo-a1-2-dv-csd/20260822103334-9306df6afa3d`。
+- 后续不重建 AAR/native；进入下一项 Exo 阶段前，保留上述提交作为可回滚边界。
