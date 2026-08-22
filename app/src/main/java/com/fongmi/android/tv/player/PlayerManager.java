@@ -7284,6 +7284,11 @@ public class PlayerManager implements ParseCallback {
 
         @Override
         public void onRenderedFirstFrame() {
+            // A rendered video frame proves that the media and video decoder are
+            // working even if a slow audio track keeps Exo in BUFFERING briefly.
+            // Do not let the generic startup timer turn that valid playback into
+            // a false connection-timeout error.
+            if (isExo()) App.removeCallbacks(runnable);
             playbackTrace.mark(PlaybackTrace.Stage.FIRST_FRAME, "source=media3 player=" + playerType);
             publishPlaybackAutoContext(true);
             onIjkRuntimeFirstFrame(SystemClock.elapsedRealtime());
