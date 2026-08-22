@@ -240,6 +240,32 @@ public class ExoPlayerEngine implements PlayerEngine {
                 .isDv7Hdr10FallbackEnabled();
     }
 
+    /**
+     * Arms the one-shot HDR10 retry for a DV7-to-P8.1 attempt that never renders
+     * its first frame. This is deliberately narrower than the decoder-error
+     * fallback: the P8.1 conversion must already be active for this session.
+     */
+    public boolean prepareDv7Hdr10FallbackForFirstFrameTimeout() {
+        ExoDolbyVisionPlaybackState.Snapshot snapshot =
+                dolbyVisionPlaybackState.snapshot();
+        if (!isHard()
+                || firstFrameRendered
+                || spec == null
+                || !snapshot.p81ConversionActive()
+                || dolbyVisionPlaybackState.isHdr10FallbackRequested()
+                || dolbyVisionFallbackPreparedForNextStart) {
+            return false;
+        }
+        dolbyVisionFallbackPreparedForNextStart = true;
+        dolbyVisionFallbackSpec = spec;
+        dolbyVisionPlaybackState.requestHdr10Fallback();
+        PlaybackTrace.log(
+                "exo-dv",
+                getPlaybackTraceId(),
+                "first-frame timeout; prepare one-shot HDR10 fallback");
+        return true;
+    }
+
     private ExoFrameSchedulingPlayerSettings settingsForRebuild() {
         ExoFrameSchedulingPlayerSettings pending =
                 pendingFrameSchedulingSettings;

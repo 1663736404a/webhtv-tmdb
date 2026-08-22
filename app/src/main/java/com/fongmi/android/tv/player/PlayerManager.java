@@ -136,6 +136,7 @@ public class PlayerManager implements ParseCallback {
     private static final long EXO_TUNNELING_RETRY_DELAY_MS = 250;
     private static final long EXO_DECODER_RUNTIME_RETRY_DELAY_MS = 1200;
     private static final long EXO_DECODER_RESOURCE_RECOVERY_DELAY_MS = 500;
+    private static final long EXO_DV7_FIRST_FRAME_FALLBACK_DELAY_MS = 1200;
     private static final long MPV_AUTO_OUTPUT_PROBE_INTERVAL_MS = 250;
     private static final int LOCAL_PROXY_MAX_RETRY = 2;
     private static final int MPV_AUTO_OUTPUT_PROBE_MAX_ATTEMPTS = 20;
@@ -405,6 +406,7 @@ public class PlayerManager implements ParseCallback {
                 false, "timeout", SystemClock.elapsedRealtime(), true);
         if (retryLutWarmupByRefresh("timeout")) return;
         if (retryMpvVulkanBackendTimeout()) return;
+        if (retryExoDv7FirstFrameTimeout()) return;
         callback.onError(ResUtil.getString(R.string.error_play_timeout));
     }
 
@@ -7652,6 +7654,50 @@ public class PlayerManager implements ParseCallback {
             App.post(runnable, Constant.TIMEOUT_PLAY);
             callback.onPrepare();
         }, EXO_DECODER_RUNTIME_RETRY_DELAY_MS);
+        return true;
+    }
+
+    private boolean retryExoDv7FirstFrameTimeout() {
+        if (!(engine instanceof ExoPlayerEngine exo)
+                || player == null
+                || spec == null
+                || !exo.prepareDv7Hdr10FallbackForFirstFrameTimeout()) {
+            return false;
+        }
+        int seq = ++prepareSeq;
+        PlaySpec target = spec;
+        long position = Math.max(0, player.getCurrentPosition());
+        float speed = getSpeed();
+        boolean repeat = isRepeatOne();
+        boolean wasPlayWhenReady = player.getPlayWhenReady();
+        App.removeCallbacks(runnable);
+        rebuildPlayer(true);
+        this.playWhenReady = wasPlayWhenReady;
+        initTrack = false;
+        if (SpiderDebug.isEnabled()) {
+            SpiderDebug.log(
+                    "exo-dv",
+                    "action=first-frame-timeout-fallback-scheduled delay=%d position=%d",
+                    EXO_DV7_FIRST_FRAME_FALLBACK_DELAY_MS,
+                    position);
+        }
+        App.post(() -> {
+            if (seq != prepareSeq || spec != target || engine != exo || player == null) return;
+            setDanmakus(target.getDanmakus());
+            waitingLutBeforePlay = false;
+            applySubtitleStyle();
+            engine.start(target.checkUa(), position, wasPlayWhenReady);
+            if (speed != 1f) setSpeed(speed);
+            setRepeatOne(repeat);
+            App.post(runnable, Constant.TIMEOUT_PLAY);
+            callback.onPrepare();
+            if (SpiderDebug.isEnabled()) {
+                SpiderDebug.log(
+                        "exo-dv",
+                        "action=first-frame-timeout-fallback-start position=%d",
+                        position);
+            }
+        }, EXO_DV7_FIRST_FRAME_FALLBACK_DELAY_MS);
         return true;
     }
 
