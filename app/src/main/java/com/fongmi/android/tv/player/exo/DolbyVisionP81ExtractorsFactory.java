@@ -165,11 +165,11 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
             @Nullable List<byte[]> initializationData, byte[] dvCsd) {
         List<byte[]> result = initializationData == null
                 ? new ArrayList<>() : new ArrayList<>(initializationData);
-        while (result.size() < 2) result.add(new byte[0]);
+        // Vendor Dolby Vision decoders commonly expect the original HEVC CSD layout for MKV
+        // (usually only csd-0). Only replace an existing DV record; do not synthesize empty
+        // csd-1/csd-2 entries when the container did not provide one.
         if (result.size() > 2 && isDolbyVisionCsd(result.get(2))) {
             result.set(2, dvCsd);
-        } else {
-            result.add(2, dvCsd);
         }
         return result;
     }

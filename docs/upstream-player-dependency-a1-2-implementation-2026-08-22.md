@@ -1,6 +1,6 @@
 # Exo A1-2：DV7 转 P8.1 同步重写 CSD
 
-状态：已实施并通过针对性单测。
+状态：已修复 A1-2 的 MTK 首帧回归；针对性单测通过；待用户在目标电视安装 APK 做最终首帧回归。
 
 ## 范围与来源
 
@@ -24,7 +24,8 @@
 ## 实现
 
 - `DolbyVisionP81ExtractorsFactory.asProfile81()` 只处理 DV7，使用 Media3 四参数 `buildDolbyVisionInitializationData(8, level, 1, 0)`。
-- `csd-2` 已是 DV CSD 时替换；已有其它初始化数据时在 index 2 插入并保留原数据；不足 3 项时用空数组补齐。
+- `csd-2` 已存在且是合法 DV CSD 时原位替换为 P8.1 CSD。
+- 容器没有 DV `csd-2`（当前百度网盘 MKV 的实际情况）时，保留原始 HEVC 初始化数据，不再插入 `csd-2`，也不补空 `csd-1`。这样避免把仅有 `csd-0` 的 MKV 改造成 MTK 解码器无法正常出首帧的人工 CSD 布局。
 - 非 DV7 格式保持原对象语义，不修改 codec 或 CSD。
 
 ## 验证与风险
@@ -38,13 +39,24 @@ bash ./gradlew :app:testMobileArm64_v8aDebugUnitTest \\
 
 结果：`BUILD SUCCESSFUL`；`DolbyVisionP81ExtractorsFactoryTest` 通过。
 
-已覆盖的单测场景：codec/CSD 同步、level 保留、CSD flags、非 DV index 2 保留、已有 DV CSD 替换、缺失 CSD 补齐、非 DV7 不修改。
+已覆盖的单测场景：codec/CSD 同步、level 保留、已有 DV CSD 替换、缺失 CSD 不合成、非 DV index 2 保留、非 DV7 不修改，以及既有 HDR10 fallback 行为。
 
 未覆盖：真实 DV7 MEL/FEL 样片、各厂商硬解实际接受的 CSD、跨 seek/segment 实机行为。该风险不改变本阶段的 App 层范围；失败时回滚本阶段提交即可，不能回滚 E1 或改变 MPV native。
 
 ## 回滚与下一步
 
 - 预实施回滚点：`9f946cfb003e721c2c36dde1a197c4ce86422cee`。
-- 实施提交：`9306df6afa3d20514764fb8e3ccda08c147e8ffc`。
-- recovery tag：`recovery/exo-a1-2-dv-csd/20260822103334-9306df6afa3d`。
-- 后续不重建 AAR/native；进入下一项 Exo 阶段前，保留上述提交作为可回滚边界。
+- 原实施提交（引入回归）：`9306df6afa3d20514764fb8e3ccda08c147e8ffc`。
+- 本次修复提交与 recovery tag 将在本轮单测通过后记录；它只回滚合成 CSD 配置行为，不回滚 E1、FFmpeg、MPV 或 HDR10 逻辑。
+- 后续不重建 AAR/native；目标电视回归成功后，保留本修复提交作为新的 Exo 回滚边界。
+
+## 2026-08-22 实机回归检查点
+
+- 当前基线 HEAD：`c49c13759b05677262a8dd227f4aa059b14eeef1`；本轮修复修改本文件、`DolbyVisionP81ExtractorsFactory.java` 及对应单测。
+- 同一百度网盘 DV7 资源的 HTTP 请求正常返回 `206 Partial Content`，输入访问单元持续到达，因此界面显示的“连接超时”不是网络根因，而是 15 秒内没有首帧后被通用启播计时器终止。
+- Exo 已选择 DV7→P8.1，`c2.mtk.dvhe.st.decoder` 初始化成功；转换输出持续包含 VCL 与 RPU，转换结果为有效，但始终没有首帧，也没有可用于证明“不支持 P8.1”的 decoder 异常。
+- 设备的 P8.1 与 HDR10 支持均视为既有事实。本轮禁止以设备能力不足为理由回退 HDR10，也不把 HDR10 当作修复 P8.1 的替代目标。
+- 已采取的最小修复：撤销对缺失 CSD 的合成，仅在容器已有合法 DV CSD 时原位改写 profile；这保持 codec string 的 DV7→P8.1 转换和逐帧 RPU 转换不变。
+- 已确认 Media3 四参数方法的语义是 `(profile, level, blSignalCompatibilityId, mdCompression)`；当前值 `(8, level, 1, 0)` 不能仅凭单测判定为厂商 codec 可接受。
+- 静态差异检查和 `DolbyVisionP81ExtractorsFactoryTest`（13 项）已通过。
+- 唯一剩余验证：用户在同一目标电视播放同一 DV7 资源，确认仍选择 `dvhe.08.xx` / `c2.mtk.dvhe.st.decoder`，出现首帧/READY，不再触发 `error_play_timeout`，且不进入 HDR10 fallback。设备支持 P8.1/HDR10 是既定前提，不作为本次验证变量。
