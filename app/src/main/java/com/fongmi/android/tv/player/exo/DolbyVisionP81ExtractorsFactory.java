@@ -8,6 +8,7 @@ import androidx.media3.common.C;
 import androidx.media3.common.DataReader;
 import androidx.media3.common.Format;
 import androidx.media3.common.MimeTypes;
+import androidx.media3.common.util.CodecSpecificDataUtil;
 import androidx.media3.common.util.ParsableByteArray;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo;
@@ -35,6 +36,7 @@ import com.suyashbelekar.exoplayerhdrutils.video.transformers.TransformStrategy;
 import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -120,12 +122,56 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
     }
 
     static Format asProfile81(Format source) {
-        return source.buildUpon().setCodecs(rewriteProfile81(source.codecs)).build();
+        if (!isProfile7(source)) return source;
+        Format.Builder builder = source.buildUpon()
+                .setCodecs(rewriteProfile81(source.codecs));
+        int level = dolbyVisionLevel(source.codecs);
+        if (level >= 0) {
+            byte[] dvCsd = CodecSpecificDataUtil.buildDolbyVisionInitializationData(
+                    8, level, 1, 0);
+            builder.setInitializationData(
+                    rewriteDolbyVisionCsd(source.initializationData, dvCsd));
+        }
+        return builder.build();
     }
 
     static String rewriteProfile81(@Nullable String codecs) {
         if (codecs == null || codecs.isBlank()) return codecs;
         return codecs.replaceFirst("(?i)(dvhe|dvh1)\\.07\\.", "$1.08.");
+    }
+
+    static List<byte[]> rewriteDolbyVisionCsd(
+            @Nullable List<byte[]> initializationData, byte[] dvCsd) {
+        List<byte[]> result = initializationData == null
+                ? new ArrayList<>() : new ArrayList<>(initializationData);
+        while (result.size() < 2) result.add(new byte[0]);
+        if (result.size() > 2 && isDolbyVisionCsd(result.get(2))) {
+            result.set(2, dvCsd);
+        } else {
+            result.add(2, dvCsd);
+        }
+        return result;
+    }
+
+    private static int dolbyVisionLevel(@Nullable String codecs) {
+        if (codecs == null || codecs.isBlank()) return -1;
+        String[] parts = firstCodec(codecs).split("\\.");
+        if (parts.length < 3) return -1;
+        try {
+            int level = Integer.parseInt(parts[2]);
+            return level >= 0 && level <= 63 ? level : -1;
+        } catch (NumberFormatException ignored) {
+            return -1;
+        }
+    }
+
+    private static boolean isDolbyVisionCsd(@Nullable byte[] csd) {
+        if (csd == null || csd.length < 5 || csd[0] != 1) return false;
+        int profile = (csd[2] & 0xFF) >> 1;
+        int level = ((csd[2] & 0x01) << 5) | ((csd[3] & 0xF8) >> 3);
+        if (level <= 0 || level > 63) return false;
+        return profile == 4 || profile == 5 || profile == 7
+                || profile == 8 || profile == 9 || profile == 10;
     }
 
     private static String firstCodec(String codecs) {

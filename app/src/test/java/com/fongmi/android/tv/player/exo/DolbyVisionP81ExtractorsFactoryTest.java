@@ -5,6 +5,11 @@ import androidx.media3.common.MimeTypes;
 
 import org.junit.Test;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -29,6 +34,62 @@ public class DolbyVisionP81ExtractorsFactoryTest {
         assertFalse(DolbyVisionP81ExtractorsFactory.isProfile7(
                 new Format.Builder().setSampleMimeType(MimeTypes.VIDEO_H265)
                         .setCodecs("dvhe.07.06").build()));
+    }
+
+    @Test
+    public void rewritesProfile81CodecAndCsdTogether() {
+        Format output = DolbyVisionP81ExtractorsFactory.asProfile81(
+                formatWithInitializationData("dvhe.07.06", List.of(new byte[]{1})));
+
+        assertEquals("dvhe.08.06", output.codecs);
+        assertEquals(3, output.initializationData.size());
+        byte[] csd = output.initializationData.get(2);
+        assertEquals(24, csd.length);
+        assertEquals(8, (csd[2] & 0xFF) >> 1);
+        assertEquals(6, ((csd[2] & 0x01) << 5) | ((csd[3] & 0xF8) >> 3));
+        assertEquals(1, (csd[3] >> 2) & 0x01);
+        assertEquals(0, (csd[3] >> 1) & 0x01);
+        assertEquals(1, csd[3] & 0x01);
+        assertEquals(1, (csd[4] >> 4) & 0x0F);
+    }
+
+    @Test
+    public void preservesNonDolbyVisionCsdAtIndexTwo() {
+        byte[] otherCsd = {9, 8, 7};
+        List<byte[]> rewritten = DolbyVisionP81ExtractorsFactory.rewriteDolbyVisionCsd(
+                Arrays.asList(new byte[]{1}, new byte[]{2}, otherCsd),
+                new byte[]{1, 0, 16, 52, 16});
+
+        assertEquals(4, rewritten.size());
+        assertTrue(rewritten.get(2) != otherCsd);
+        assertArrayEquals(otherCsd, rewritten.get(3));
+    }
+
+    @Test
+    public void replacesExistingDolbyVisionCsdAndPadsMissingEntries() {
+        byte[] oldCsd = {1, 0, 14, 52, 0};
+        byte[] newCsd = {1, 0, 16, 52, 16};
+        List<byte[]> replaced = DolbyVisionP81ExtractorsFactory.rewriteDolbyVisionCsd(
+                List.of(new byte[]{1}, new byte[]{2}, oldCsd), newCsd);
+        List<byte[]> padded = DolbyVisionP81ExtractorsFactory.rewriteDolbyVisionCsd(
+                null, newCsd);
+
+        assertEquals(3, replaced.size());
+        assertArrayEquals(newCsd, replaced.get(2));
+        assertEquals(3, padded.size());
+        assertEquals(0, padded.get(0).length);
+        assertEquals(0, padded.get(1).length);
+        assertArrayEquals(newCsd, padded.get(2));
+    }
+
+    @Test
+    public void doesNotModifyNonProfile7Format() {
+        byte[] csd = {1, 2, 3};
+        Format source = formatWithInitializationData("dvhe.08.06", List.of(csd));
+        Format output = DolbyVisionP81ExtractorsFactory.asProfile81(source);
+
+        assertEquals(source, output);
+        assertArrayEquals(csd, output.initializationData.get(0));
     }
 
     @Test
@@ -117,6 +178,15 @@ public class DolbyVisionP81ExtractorsFactoryTest {
         return new Format.Builder()
                 .setSampleMimeType(MimeTypes.VIDEO_DOLBY_VISION)
                 .setCodecs(codecs)
+                .build();
+    }
+
+    private static Format formatWithInitializationData(
+            String codecs, List<byte[]> initializationData) {
+        return new Format.Builder()
+                .setSampleMimeType(MimeTypes.VIDEO_DOLBY_VISION)
+                .setCodecs(codecs)
+                .setInitializationData(new ArrayList<>(initializationData))
                 .build();
     }
 }
