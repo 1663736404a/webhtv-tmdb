@@ -108,21 +108,38 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
                 && ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme));
     }
 
-    static boolean shouldConvert(Format source) {
+    static PlaybackPath resolvePlaybackPath(
+            boolean sourceSupported,
+            boolean p81Supported,
+            boolean hdr10Supported) {
+        if (sourceSupported) return PlaybackPath.NATIVE;
+        if (p81Supported) return PlaybackPath.P81;
+        if (hdr10Supported) return PlaybackPath.HDR10;
+        return PlaybackPath.UNSUPPORTED;
+    }
+
+    private static PlaybackPath resolvePlaybackPath(Format source) {
         if (!PlaybackPerformanceSetting.isDv7P81Enabled()
                 || !isProfile7(source)
-                || source.cryptoType != C.CRYPTO_TYPE_NONE
-                || !isConverterAvailable()) return false;
-        Format p81 = asProfile81(source);
-        boolean sourceSupported = hasHardwareDecoder(source);
-        boolean p81Supported = hasHardwareDecoder(p81);
-        if (SpiderDebug.isEnabled()) {
-            SpiderDebug.log("exo-dv", "DV7 P8.1 decision source=%s p81=%s sourceHw=%s p81Hw=%s size=%dx%d",
-                    source.codecs, p81.codecs, sourceSupported, p81Supported,
-                    source.width, source.height);
+                || source.cryptoType != C.CRYPTO_TYPE_NONE) {
+            return PlaybackPath.NATIVE;
         }
-        return !sourceSupported && p81Supported;
+        Format p81 = asProfile81(source);
+        Format hdr10 = asHdr10Fallback(source);
+        boolean sourceSupported = hasHardwareDecoder(source);
+        boolean p81Supported = isConverterAvailable() && hasHardwareDecoder(p81);
+        boolean hdr10Supported = hasHardwareDecoder(hdr10);
+        PlaybackPath path = resolvePlaybackPath(
+                sourceSupported, p81Supported, hdr10Supported);
+        if (SpiderDebug.isEnabled()) {
+            SpiderDebug.log("exo-dv", "DV7 decision path=%s source=%s p81=%s sourceHw=%s p81Hw=%s hdr10Hw=%s size=%dx%d",
+                    path, source.codecs, p81.codecs, sourceSupported, p81Supported,
+                    hdr10Supported, source.width, source.height);
+        }
+        return path;
     }
+
+    enum PlaybackPath { NATIVE, P81, HDR10, UNSUPPORTED }
 
     static boolean isProfile7(@Nullable Format format) {
         if (format == null
@@ -224,8 +241,10 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
 
     private static boolean hasHardwareDecoder(Format format) {
         try {
+            String mimeType = format == null || format.sampleMimeType == null
+                    ? MimeTypes.VIDEO_DOLBY_VISION : format.sampleMimeType;
             for (MediaCodecInfo info : MediaCodecSelector.DEFAULT.getDecoderInfos(
-                    MimeTypes.VIDEO_DOLBY_VISION, false, false)) {
+                    mimeType, false, false)) {
                 if (info.hardwareAccelerated
                         && info.isFormatSupported(App.get(), format)) return true;
             }
@@ -361,11 +380,27 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
 
         @Override
         public void format(Format format) {
-            hdr10Fallback = playbackState != null
+            boolean fallbackRequested = playbackState != null
                     && playbackState.isHdr10FallbackRequested()
                     && isProfile7(format);
-            converting = !hdr10Fallback && shouldConvert(format);
+            PlaybackPath path = fallbackRequested
+                    ? PlaybackPath.HDR10 : resolvePlaybackPath(format);
+            if (path == PlaybackPath.UNSUPPORTED) {
+                if (SpiderDebug.isEnabled()) {
+                    SpiderDebug.log("exo-dv", "DV7 unsupported: no hardware DV/P8.1/HDR10 decoder");
+                }
+                throw new IllegalStateException(
+                        "DV7 has no supported hardware DV, P8.1, or HDR10 decoder");
+            }
+            hdr10Fallback = path == PlaybackPath.HDR10;
+            if (hdr10Fallback && playbackState != null) {
+                playbackState.requestHdr10Fallback();
+            }
+            converting = path == PlaybackPath.P81;
             sourceFormat = format;
+            if (converting && playbackState != null) {
+                playbackState.activateP81(format, asProfile81(format));
+            }
             formatDispatched = !(converting || hdr10Fallback);
             sampleCount = 0;
             lastDiagnosticLogMs = 0;

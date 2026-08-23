@@ -37,6 +37,26 @@ public class DolbyVisionP81ExtractorsFactoryTest {
     }
 
     @Test
+    public void choosesNativeBeforeConversionOrFallback() {
+        assertEquals(DolbyVisionP81ExtractorsFactory.PlaybackPath.NATIVE,
+                DolbyVisionP81ExtractorsFactory.resolvePlaybackPath(true, true, true));
+    }
+
+    @Test
+    public void choosesP81BeforeHdr10Fallback() {
+        assertEquals(DolbyVisionP81ExtractorsFactory.PlaybackPath.P81,
+                DolbyVisionP81ExtractorsFactory.resolvePlaybackPath(false, true, true));
+    }
+
+    @Test
+    public void choosesHdr10WhenDv7AndP81AreUnavailable() {
+        assertEquals(DolbyVisionP81ExtractorsFactory.PlaybackPath.HDR10,
+                DolbyVisionP81ExtractorsFactory.resolvePlaybackPath(false, false, true));
+        assertEquals(DolbyVisionP81ExtractorsFactory.PlaybackPath.UNSUPPORTED,
+                DolbyVisionP81ExtractorsFactory.resolvePlaybackPath(false, false, false));
+    }
+
+    @Test
     public void rewritesProfile81CodecAndCsdTogether() {
         Format output = DolbyVisionP81ExtractorsFactory.asProfile81(
                 formatWithInitializationData("dvhe.07.06", List.of(new byte[]{1})));
