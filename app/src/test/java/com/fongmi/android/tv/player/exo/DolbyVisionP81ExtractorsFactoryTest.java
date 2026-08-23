@@ -120,6 +120,23 @@ public class DolbyVisionP81ExtractorsFactoryTest {
     }
 
     @Test
+    public void p81ConversionEvidenceSurvivesAttemptResetButNotFullReset() {
+        ExoDolbyVisionPlaybackState state = new ExoDolbyVisionPlaybackState();
+        state.activate(format("dvhe.07.06"),
+                DolbyVisionP81ExtractorsFactory.asHdr10Fallback(
+                        format("dvhe.07.06")));
+        assertFalse(state.isP81ConversionAttempted());
+
+        state.activateP81(format("dvhe.07.06"), format("dvhe.08.06"));
+
+        state.resetAttempt();
+        assertTrue(state.isP81ConversionAttempted());
+
+        state.reset();
+        assertFalse(state.isP81ConversionAttempted());
+    }
+
+    @Test
     public void doesNotModifyNonProfile7Format() {
         byte[] csd = {1, 2, 3};
         Format source = formatWithInitializationData("dvhe.08.06", List.of(csd));

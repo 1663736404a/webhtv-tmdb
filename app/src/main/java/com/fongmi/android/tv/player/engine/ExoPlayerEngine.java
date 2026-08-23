@@ -251,8 +251,9 @@ public class ExoPlayerEngine implements PlayerEngine {
         if (!isHard()
                 || firstFrameRendered
                 || spec == null
-                || !snapshot.p81ConversionActive()
                 || dolbyVisionPlaybackState.isHdr10FallbackRequested()
+                || !(snapshot.p81ConversionActive()
+                        || dolbyVisionPlaybackState.isP81ConversionAttempted())
                 || dolbyVisionFallbackPreparedForNextStart) {
             return false;
         }
@@ -707,7 +708,8 @@ public class ExoPlayerEngine implements PlayerEngine {
                 dolbyVisionPlaybackState.snapshot();
         dolbyVisionP81RuntimeFailureObserved = !dolbyVisionPlaybackState
                 .isHdr10FallbackRequested()
-                && snapshot.p81ConversionActive();
+                && (snapshot.p81ConversionActive()
+                        || dolbyVisionPlaybackState.isP81ConversionAttempted());
         boolean observed = decoderRuntimeEnabledForPlayer
                 && decoderRuntimeSession.recordFatalFailure(
                 evidence,
