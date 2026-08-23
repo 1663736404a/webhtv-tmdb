@@ -141,6 +141,10 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
 
     enum PlaybackPath { NATIVE, P81, HDR10, UNSUPPORTED }
 
+    static boolean requiresAccessUnitTransformation(PlaybackPath path) {
+        return path == PlaybackPath.P81;
+    }
+
     static boolean isProfile7(@Nullable Format format) {
         if (format == null
                 || !MimeTypes.VIDEO_DOLBY_VISION.equals(format.sampleMimeType)
@@ -392,22 +396,26 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
                 throw new IllegalStateException(
                         "DV7 has no supported hardware DV, P8.1, or HDR10 decoder");
             }
-            hdr10Fallback = path == PlaybackPath.HDR10;
-            if (hdr10Fallback && playbackState != null) {
+            if (path == PlaybackPath.HDR10 && playbackState != null) {
                 playbackState.requestHdr10Fallback();
             }
-            converting = path == PlaybackPath.P81;
+            converting = requiresAccessUnitTransformation(path);
+            hdr10Fallback = path == PlaybackPath.HDR10;
             sourceFormat = format;
             if (converting && playbackState != null) {
                 playbackState.activateP81(format, asProfile81(format));
             }
+            // HDR10 fallback changes only the decoder-visible format. Preserve the
+            // original DV7 access units because affected vendor HEVC decoders fail to
+            // produce a first frame after RPU/type-63 NAL units are stripped.
             formatDispatched = !(converting || hdr10Fallback);
             sampleCount = 0;
             lastDiagnosticLogMs = 0;
             pending.clear();
             transformer = converting
                     ? new HevcFrameTransformer(P81_STRATEGY) : null;
-            if (!converting && !hdr10Fallback) delegate.format(format);
+            if (hdr10Fallback) dispatchFormatIfNeeded();
+            else if (!converting) delegate.format(format);
         }
 
         @Override
@@ -416,7 +424,7 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
                 int length,
                 boolean allowEndOfInput,
                 int sampleDataPart) throws IOException {
-            if (!(converting || hdr10Fallback)
+            if (!converting
                     || sampleDataPart != SAMPLE_DATA_PART_MAIN) {
                 return delegate.sampleData(
                         input, length, allowEndOfInput, sampleDataPart);
@@ -437,7 +445,7 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
         @Override
         public void sampleData(
                 ParsableByteArray data, int length, int sampleDataPart) {
-            if (!(converting || hdr10Fallback)
+            if (!converting
                     || sampleDataPart != SAMPLE_DATA_PART_MAIN) {
                 delegate.sampleData(data, length, sampleDataPart);
                 return;
@@ -454,7 +462,7 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
                 int size,
                 int offset,
                 @Nullable CryptoData cryptoData) {
-            if (!(converting || hdr10Fallback) || pending.position() == 0) {
+            if (!converting || pending.position() == 0) {
                 dispatchFormatIfNeeded();
                 delegate.sampleMetadata(
                         timeUs, flags, size, offset, cryptoData);
@@ -505,9 +513,7 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
             // BlockAdditional. The latter is appended last by our Media3 fork.
             // Keep that authoritative RPU and never feed multiple dynamic
             // metadata NALs for one access unit to vendor Dolby Vision codecs.
-            outputLength = hdr10Fallback
-                    ? stripDolbyVisionNalus(outputScratch, outputLength)
-                    : stripProfile81Nalus(outputScratch, outputLength);
+            outputLength = stripProfile81Nalus(outputScratch, outputLength);
             if (converting && !invalidP81) {
                 invalidP81 = isInvalidP81Frame(outputScratch, outputLength);
             }
@@ -520,7 +526,7 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
             dispatchFormatIfNeeded();
             logAuStats(sourceStats, transformedStats,
                     inspectNalus(outputScratch, outputLength),
-                    hdr10Fallback ? "HDR10" : "P8.1");
+                    "P8.1");
             outputData.reset(outputScratch, outputLength);
             delegate.sampleData(
                     outputData, outputLength, SAMPLE_DATA_PART_MAIN);

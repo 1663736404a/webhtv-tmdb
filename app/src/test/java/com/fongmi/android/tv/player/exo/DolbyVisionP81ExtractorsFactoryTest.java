@@ -57,6 +57,14 @@ public class DolbyVisionP81ExtractorsFactoryTest {
     }
 
     @Test
+    public void transformsAccessUnitsOnlyForP81() {
+        assertTrue(DolbyVisionP81ExtractorsFactory.requiresAccessUnitTransformation(
+                DolbyVisionP81ExtractorsFactory.PlaybackPath.P81));
+        assertFalse(DolbyVisionP81ExtractorsFactory.requiresAccessUnitTransformation(
+                DolbyVisionP81ExtractorsFactory.PlaybackPath.HDR10));
+    }
+
+    @Test
     public void rewritesProfile81CodecAndCsdTogether() {
         Format output = DolbyVisionP81ExtractorsFactory.asProfile81(
                 formatWithInitializationData("dvhe.07.06", List.of(new byte[]{1})));
