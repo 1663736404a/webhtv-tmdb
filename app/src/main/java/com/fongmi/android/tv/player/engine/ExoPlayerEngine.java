@@ -285,7 +285,11 @@ public class ExoPlayerEngine implements PlayerEngine {
     }
 
     public boolean disableTunnelingForSession() {
-        if (!tunnelingEnabledForSession || tunnelingFallbackAttempted) return false;
+        // A confirmed P8.1 decoder failure must retry as HDR10, not rebuild the
+        // same failing P8.1 path once merely to disable tunneling.
+        if (dolbyVisionP81RuntimeFailureObserved
+                || !tunnelingEnabledForSession
+                || tunnelingFallbackAttempted) return false;
         tunnelingFallbackAttempted = true;
         tunnelingEnabledForSession = false;
         frameSchedulingOutput = ExoDecoderRuntimeProfiles.currentOutput(false);
@@ -696,36 +700,50 @@ public class ExoPlayerEngine implements PlayerEngine {
     }
 
     public boolean observeDecoderRuntimeFailure(PlaybackException error) {
-        if (!decoderRuntimeEnabledForPlayer || !isHard() || error == null) return false;
+        if (!isHard() || error == null) return false;
         cancelDecoderRuntimeStableWindow();
         ExoDecoderRuntimeSession.Evidence evidence = decoderRuntimeEvidence(error);
-        boolean observed = decoderRuntimeSession.recordFatalFailure(
+        ExoDolbyVisionPlaybackState.Snapshot snapshot =
+                dolbyVisionPlaybackState.snapshot();
+        dolbyVisionP81RuntimeFailureObserved = !dolbyVisionPlaybackState
+                .isHdr10FallbackRequested()
+                && snapshot.p81ConversionActive();
+        boolean observed = decoderRuntimeEnabledForPlayer
+                && decoderRuntimeSession.recordFatalFailure(
                 evidence,
                 error.errorCode,
                 android.os.SystemClock.elapsedRealtime(),
                 System.currentTimeMillis());
-        if (observed) {
-            ExoDolbyVisionPlaybackState.Snapshot snapshot =
-                    dolbyVisionPlaybackState.snapshot();
-            dolbyVisionP81RuntimeFailureObserved =
-                    snapshot.p81ConversionActive()
-                            || isDolbyVisionProfile81(evidence.format());
-        }
-        return observed;
+        return dolbyVisionP81RuntimeFailureObserved || observed;
     }
 
     public boolean prepareDecoderRuntimeFallback() {
+        if (dolbyVisionP81RuntimeFailureObserved) {
+            dolbyVisionP81RuntimeFailureObserved = false;
+            if (!isHard()
+                    || spec == null
+                    || dolbyVisionPlaybackState.isHdr10FallbackRequested()
+                    || dolbyVisionFallbackPreparedForNextStart) {
+                return false;
+            }
+            dolbyVisionFallbackPreparedForNextStart = true;
+            dolbyVisionFallbackSpec = spec;
+            dolbyVisionPlaybackState.requestHdr10Fallback();
+            PlaybackTrace.log(
+                    "exo-dv",
+                    getPlaybackTraceId(),
+                    "P8.1 decoder failed; prepare one-shot HDR10 fallback");
+            return true;
+        }
         boolean prepared = decoderRuntimeEnabledForPlayer
                 && isHard()
                 && decoderRuntimeSession.prepareRuntimeFallback();
         if (!prepared) return false;
-        if (dolbyVisionP81RuntimeFailureObserved) {
-            dolbyVisionFallbackPreparedForNextStart = true;
-            dolbyVisionFallbackSpec = spec;
-            dolbyVisionPlaybackState.requestHdr10Fallback();
-        }
-        dolbyVisionP81RuntimeFailureObserved = false;
         return true;
+    }
+
+    public boolean isDolbyVisionP81RuntimeFailurePending() {
+        return dolbyVisionP81RuntimeFailureObserved;
     }
 
     public void stopAutomaticPreload(String reason) {
@@ -817,14 +835,6 @@ public class ExoPlayerEngine implements PlayerEngine {
         return Objects.equals(expected.getPlaybackTraceId(), actual.getPlaybackTraceId())
                 && Objects.equals(expected.getKey(), actual.getKey())
                 && Objects.equals(expected.getUrl(), actual.getUrl());
-    }
-
-    private static boolean isDolbyVisionProfile81(Format format) {
-        if (format == null
-                || !MimeTypes.VIDEO_DOLBY_VISION.equals(format.sampleMimeType)
-                || format.codecs == null) return false;
-        String codecs = format.codecs.toLowerCase(Locale.US);
-        return codecs.startsWith("dvhe.08.") || codecs.startsWith("dvh1.08.");
     }
 
     private ExoDecoderRuntimeSession.Evidence currentDecoderRuntimeEvidence() {

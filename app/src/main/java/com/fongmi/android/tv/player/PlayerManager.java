@@ -7621,10 +7621,17 @@ public class PlayerManager implements ParseCallback {
     private boolean retryExoDecoderRuntimeFailure(PlaybackException e) {
         if (!(engine instanceof ExoPlayerEngine exo)
                 || player == null
-                || spec == null
-                || !experimentAllowed(
-                PlaybackExperimentPolicy.Action.EXO_DECODER_RUNTIME_REBUILD)
-                || !exo.prepareDecoderRuntimeFallback()) {
+                || spec == null) {
+            return false;
+        }
+        boolean dolbyVisionFallback =
+                exo.isDolbyVisionP81RuntimeFailurePending();
+        if (!dolbyVisionFallback
+                && !experimentAllowed(
+                PlaybackExperimentPolicy.Action.EXO_DECODER_RUNTIME_REBUILD)) {
+            return false;
+        }
+        if (!exo.prepareDecoderRuntimeFallback()) {
             return false;
         }
         hardDecodeSwitchRetryArmed = false;
