@@ -76,6 +76,7 @@ WebHome 主页、扩展、模板、示例和 AI skills 统一放在 [webhome-dev
 
 ### 环境要求
 
+- Android Studio 仅是可选 IDE，不是项目依赖。命令行构建不读取 Android Studio 的安装目录或内置 JBR，只需要 `JAVA_HOME`/`PATH` 中可用的 JDK 和独立配置的 Android SDK。
 - JDK 21。不要使用 JDK 17；当前 `sourceCompatibility` / `targetCompatibility` 均为 Java 21。
 - Python 3.10。Chaquo 运行时和构建时 Python 均固定为 3.10，仅安装 Python 3.11/3.12/3.13 会失败。
 - Android SDK Platform 37 和 Build Tools 37.0.0。当前 `compileSdk=37`、`minSdk=24`、`targetSdk=28`。
@@ -100,15 +101,15 @@ export all_proxy=socks5://127.0.0.1:7897
 
 ### 从零 clone 到打包
 
-先安装或确认 Android SDK。Android Studio 打开项目时通常会自动生成 `local.properties`；命令行构建需要进入仓库根目录后手动创建。macOS 默认 SDK 路径示例：
+先安装或确认 Android SDK Command-line Tools，并通过 `ANDROID_HOME`、`ANDROID_SDK_ROOT` 或根目录 `local.properties` 告诉构建系统 SDK 的位置。`local.properties` 是普通文本配置，直接在仓库根目录创建即可，不需要 Android Studio。macOS 常见 SDK 路径示例：
 
 ```bash
 export ANDROID_HOME="$HOME/Library/Android/sdk"
 ```
 
-Linux 常见路径是 `$HOME/Android/Sdk`，Windows 使用 Android Studio 打开项目或创建 `local.properties`，内容类似 `sdk.dir=C\:\\Users\\你的用户名\\AppData\\Local\\Android\\Sdk`。
+Linux 常见路径是 `$HOME/Android/Sdk`；Windows 可手动创建 `local.properties`，内容类似 `sdk.dir=C\:\\Users\\你的用户名\\AppData\\Local\\Android\\Sdk`。
 
-如 SDK 未安装 API 37、Build Tools 或 Platform Tools，可用 Android Studio SDK Manager 安装，或使用命令行工具：
+如 SDK 未安装 API 37、Build Tools 或 Platform Tools，使用 Android SDK 自带的 `sdkmanager` 安装；Android Studio 的 SDK Manager 只是可选的图形界面：
 
 ```bash
 "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
