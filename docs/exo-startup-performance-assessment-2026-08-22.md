@@ -273,7 +273,7 @@ E-SP2 要解决的不是“让所有 MKV 都不可 seek”，也不是“关闭 
 | 全局 `FLAG_DISABLE_SEEK_FOR_CUES` | 高 | 直接破坏 | 低实现成本、高产品风险 | 拒绝 |
 | DataSource/代理后台预取尾部 | 通常无，前台请求仍可能竞争 | 完整 | 受缓存、并发和服务端 Range 行为影响；不能阻止 extractor 等待 | 拒绝为主方案 |
 | 起播临时 unseekable，第一次 seek 重建播放器 | 高 | 可恢复，但会重建 Surface/音频状态 | App 状态复杂，首个 seek 可能丢状态 | 仅保底，不作为最终方案 |
-| Media3 deferred Cues + 可更新 SeekMap | 高 | 先播；首次随机访问精确读 Cues | 需要 extractor/ProgressiveMediaPeriod 联合 patch；可用测试和 feature gate 控制 | 推荐 |
+| Media3 deferred Cues + 可更新 SeekMap | 高 | 先播；首次随机访问精确读 Cues | 需要 extractor patch 和临时 SeekMap；可用输入门槛与 App URI 范围控制 | 推荐 |
 
 ### 9.4 推荐实现的状态机
 
@@ -284,8 +284,8 @@ prepare(position=0)
   -> Cluster samples -> first frame (不读尾部 Cues)
 
 first seek/非零 prepare
-  -> ProgressiveMediaPeriod 保留目标 timeUs，不把它归零
-  -> extractor 从 0 重读头部，在需要时 RESULT_SEEK 到 Cues
+  -> 临时 SeekMap 保留目标 timeUs，并把 byte position 指向已知 Cues
+  -> extractor 直接从 Cues 读取，不重读 EBML/Tracks
   -> 发布完整 MatroskaSeekMap
   -> RESULT_SEEK 到精确 CueClusterPosition
   -> 正常样本读取/章节/字幕/TrueHD/DV 继续
@@ -294,7 +294,7 @@ first seek/非零 prepare
 实现约束：
 
 - 只对 Matroska/WebM extractor 的显式实验 flag 生效；MP4、TS、HLS、DASH、RTSP、ISO、live 和未知长度非 VOD 不改变；
-- `DeferredSeekMap` 初始只承诺“可接受 seek 请求”，其首个 byte point 是 0；实际 seek 由 extractor 在 Cues 建好后重新定位；
+- `DeferredSeekMap` 的 0 秒 point 指向文件开头；非零 point 保留目标时间并指向已知 Cues 偏移，实际媒体位置由 extractor 建图后重新定位；
 - Cues 解析前不改变 `Format`、DV BlockAdditional RPU、HDR10 fallback、AV3A、TrueHD/Atmos、字幕原始数据和软解降载；
 - IO 重试必须清理“已访问 SeekHead/待处理跳转”状态，沿用 Media3 Extractor 的 unchanged-position contract；
 - 先加入 `FLAG_DEFER_SEEK_FOR_CUES`，默认只对符合输入条件的远程大文件启用；不把该 flag 写入所有 extractor；
@@ -304,7 +304,7 @@ first seek/非零 prepare
 
 - `MediaSourceFactory` 已集中创建 `DefaultExtractorsFactory` 和 `DolbyVisionP81ExtractorsFactory`，是唯一合适的 Exo extractor 注入点；不需要改 MPV 或共用 native 二进制。
 - `DolbyVisionP81ExtractorsFactory` 目前只重建 Matroska extractor 以发出 DV RPU；新构造函数必须同时保留 `FLAG_EMIT_RAW_SUBTITLE_DATA`、DV BlockAdditional 开关和 P8.1/HDR10 状态，不能用一个裸 `MatroskaExtractor` 替换。
-- `ProgressiveMediaPeriod` 的 `setSeekMap` 已支持 prepared 后更新，但 `seekToUs` 当前会把不可 seek 媒体的位置强制为 0；这是必须同步修正的第二个文件。
+- `ProgressiveMediaPeriod` 已支持 prepared 后更新 SeekMap；临时 SeekMap 保持 `isSeekable=true`，因此不需要修改该类，也不会触发“不可 seek 强制归零”的路径。
 - `PreCache` 使用同一 MediaItem 做后台预加载，但前台优先级更高；不把 E-SP2 逻辑放进 PreCache，避免尾部索引和预加载互相竞争。
 - `PlayerManager`、`PlaybackActivity`、MPV/IJK 路径不需要改；首帧 UI 由 E-SP1 独立负责，E-SP2 只改变 Exo extractor 的读取时机。
 
@@ -354,3 +354,27 @@ first seek/非零 prepare
 - Rollback anchor: `c07e2b27eddbbee3240ed25fd6e2c8e5a64c5c7e` (`recovery/exo-sp1-first-frame-visible-20260822/20260822224344-c07e2b27eddb`); revert the future E-SP2 source/AAR/App unit together if any acceptance gate regresses.
 - 未决风险：deferred seek 请求与 extractor 重入、递归 SeekHead、未知长度和网络重试必须由定向测试覆盖；设备性能验证需在候选 AAR 接入后进行。
 - 下一步：完成评估提交/tag，启动独立 E-SP2 upstream guard，修改 Media3 patch/测试、生成对应 AAR，并接入 `DolbyVisionP81ExtractorsFactory`。
+
+## Checkpoint 4：2026-08-23 E-SP2 实施中
+
+- 目标与权限：用户已批准实施 E-SP2；当前原子单元是生成并接入带 deferred Cues 的 Media3 AAR，在完成定向编译/seek 验证后提交并立即创建 recovery tag。
+- Lane/scope：`upstream`；范围限于 `third_party/patches/media3-deferred-cues.patch`、`scripts/build_media_deps.sh`、两个 Exo extractor factory、受补丁影响的 `third_party/maven/androidx/media3/**` 产物/校验文件以及本评估文档。
+- 工作区：分支 `fongmi-sync`，HEAD `3aae091dbba7a2140f4c157f86aa42d901f01ff9`；活动 task id 为 `exo-sp2-defer-cues-implementation-20260822`。
+- 已完成：新增显式 `FLAG_DEFER_SEEK_FOR_CUES`、64 MiB/已知长度门槛、临时可更新 SeekMap、首次非零 seek 时加载 Cues 的状态机，并等价纳入 Media3 `859f7b3b5388378698ff23a667d3e2db5ac41aed` 的 Tracks-after-Clusters 顺序修复；补丁顺序已固定。App 的 HTTP/HTTPS URI 收窄将在候选 AAR 接入单元中完成。
+- 已有验证：完整补丁链上的 `git apply --check` 和仓库 `git diff --check` 已通过；尚不能据此声明运行时 seek 或性能正确。
+- 构建环境：机器原先只有 JDK 17，已于 2026-08-23 安装 Homebrew OpenJDK `21.0.12.1`；后续构建显式设置 `JAVA_HOME=/usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home`。使用隔离临时 checkout，不清理或覆盖预存 `third_party/sources/media/`。
+- 保护路径：`.gitignore`、`third_party/fongmi-repositories-lock.json`、`.codex/`、`AGENTS.md`、`docs/agents-md-effective-constraints-review-2026-08-21.md`、`docs/upstream-player-dependency-merge-assessment-2026-08-20.md`、`third_party/sources/media/` 均保持在本提交之外。
+- 回滚锚点：`3aae091dbba7a2140f4c157f86aa42d901f01ff9`；若 extractor、seek、DV 或产物验证失败，整体撤销 E-SP2 source/AAR/App 单元，不改变 E-SP1。
+- 未决风险：首次/连续/反向 seek、Cues 缺失/损坏、未知长度、IO 重试、递归 SeekHead、Tracks-after-Clusters，以及 DV7→P8.1/HDR10、TrueHD/字幕邻接能力仍需由定向测试和代表性播放验证。
+- 下一步：在隔离 Media3 checkout 中用 JDK 21 应用完整补丁链，先运行 extractor 编译和定向 Matroska 测试。
+- 进度记录：E-SP2 implementation continues: final deferred-Cues patch and factory URI scoping remain; no source commit yet.
+- 唯一下一步：Replace patch, narrow extractor activation to remote HTTP/HTTPS Matroska, publish only lib-extractor AAR/sources, run targeted tests, then finish guard and tag immediately.
+
+## Checkpoint 5：2026-08-23 E-SP2 Media3 补丁单元完成
+
+- 完成：最终 438 行 `media3-deferred-cues.patch` 已落库，包含 deferred Cues 状态机、Tracks-after-Clusters 修复、Format 去重及 3 项 Matroska 定向测试；`build_media_deps.sh` 已固定四个 Media3 补丁的依赖顺序。
+- Source identities：WebHTV Media3 基线 `e3e922d5c01bc0b564849940fe589daf37360d15`；等价吸收上游 `859f7b3b5388378698ff23a667d3e2db5ac41aed`；FFmpeg 参考 `eb0bfa852e7b9c524960300607ba2c4617060a9b`；mpv 参考 `49418246f30a9c24af31ac184aa24f39755db89a`。
+- 验证：隔离 checkout 的 `:lib-extractor:compileDebugJavaWithJavac` 和 `MatroskaExtractorNonParameterizedTest` 已通过；同一源码树的 `:lib-extractor:publishReleasePublicationToMavenRepository` 于 2026-08-23 `BUILD SUCCESSFUL`。
+- 工作区：本单元只提交补丁、构建顺序和本评估文档；不提交 App 接入或 Maven 二进制，因此当前运行时行为不变且中间提交仍可编译。
+- 回滚：回滚本单元只移除尚未启用的补丁/构建配方，不影响 E-SP1 或现有播放器行为。
+- 下一步：启动独立 artifact/App 护栏，将候选 extractor AAR、sources、校验文件、URI 范围接入、锁和最终记录作为一个运行时单元提交并立即 tag。
