@@ -378,3 +378,16 @@ first seek/非零 prepare
 - 工作区：本单元只提交补丁、构建顺序和本评估文档；不提交 App 接入或 Maven 二进制，因此当前运行时行为不变且中间提交仍可编译。
 - 回滚：回滚本单元只移除尚未启用的补丁/构建配方，不影响 E-SP1 或现有播放器行为。
 - 下一步：启动独立 artifact/App 护栏，将候选 extractor AAR、sources、校验文件、URI 范围接入、锁和最终记录作为一个运行时单元提交并立即 tag。
+
+## Checkpoint 6：2026-08-23 E-SP2 候选 artifact/App 单元完成
+
+- 目标：把已验证的 Media3 extractor 补丁接入 WebHTV，但只让 HTTP/HTTPS Matroska 进入 deferred Cues；本地文件、MP4、TS、HLS、DASH、直播和未知 scheme 保持原读取策略。
+- App 适配：`DolbyVisionP81ExtractorsFactory.createExtractors(Uri, ...)` 按 URI scheme 收窄；远程 Matroska 在 DV7 设置关闭时仍启用 deferred Cues，但不发出 DV BlockAdditional RPU；DV7 设置开启时同时保留原始字幕和 RPU。无 URI 的 `createExtractors()` 不启用 deferred。
+- Artifact：`androidx.media3:media3-extractor:1.11.0-alpha01-fongmi`；AAR SHA-256 `ec3ac41088e496bdfe63925ca0751234e0178a9d92e8deedf8734dfe36fab8fe`；sources JAR SHA-256 `a9a813622f10b4735f71ba3c8e535981adca4941bd0f6d832efe31e80b033295`。只替换 AAR、sources JAR 及各自四类 checksum，未改 POM/module 或其他 Media3 模块。
+- Provenance：源码 `e3e922d5c01bc0b564849940fe589daf37360d15`；等价上游修复 `859f7b3b5388378698ff23a667d3e2db5ac41aed`；deferred patch SHA-256 `8bfcf98dadfd70e56ebec4c5fd49701ddc8ed66b02707a7f733b3aec1ed4b2c7`；构建命令为 `:lib-extractor:publishReleasePublicationToMavenRepository`，JDK `21.0.12.1`、compileSdk `36`。
+- 已验证：AAR 内含 `MatroskaExtractor$DeferredSeekMap.class`；发布任务 `BUILD SUCCESSFUL`；AAR/sources/module 与各自 sidecar checksum 一致，POM 未变化；Mobile/Leanback Arm64 Java 编译与 `DolbyVisionP81ExtractorsFactoryTest` 均 `BUILD SUCCESSFUL`。尚未声称设备起播/seek 性能通过。
+- 保护：不修改 MPV/native、nextlib FFmpeg、DV7→P8.1/HDR10 转换、AV3A、TrueHD、PreCache、LoadControl 或网络超时策略。
+- 提交链：补丁单元 `fb2a9ab839958a711a73ee34232d5baa082bddc7`（tag `recovery/exo-sp2-defer-cues-implementation-20260822/20260823101713-fb2a9ab83995`）；完整 Maven/lock 单元 `71514fdb101db56e836902405700f39c891428e5`（tag `recovery/exo-sp2-deferred-cues-artifact-20260823/20260823103155-71514fdb101d`）；本 checkpoint 所在提交是最终 App URI gate 单元。
+- 回滚：若只需关闭新行为，回滚最终 App URI gate 即可；若候选 artifact 有兼容问题，再一并回滚 `71514fdb101db56e836902405700f39c891428e5`；若要完全撤销 E-SP2，再回滚 `fb2a9ab839958a711a73ee34232d5baa082bddc7`，E-SP1 不受影响。
+- 未决：当前无 ADB 设备；实机首帧、首次 seek、连续 seek、DV7→P8.1、DV7→HDR10、字幕/TrueHD 及网络失败率需在候选包阶段验收。该限制不影响源码、AAR 与 App 编译结论，但禁止宣称性能提升已在设备上验证。
+- 下一步：提交并立即创建 App gate recovery tag；随后用同一远程大 MKV 做基线/候选至少 3 次中位数及 seek/fallback 回归。

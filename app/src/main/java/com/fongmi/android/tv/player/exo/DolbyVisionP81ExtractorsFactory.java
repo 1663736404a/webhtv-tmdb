@@ -73,29 +73,39 @@ final class DolbyVisionP81ExtractorsFactory implements ExtractorsFactory {
 
     @Override
     public Extractor[] createExtractors() {
-        return wrap(delegate.createExtractors());
+        return wrap(delegate.createExtractors(), false);
     }
 
     @Override
     public Extractor[] createExtractors(
             Uri uri, Map<String, List<String>> responseHeaders) {
-        return wrap(delegate.createExtractors(uri, responseHeaders));
+        return wrap(delegate.createExtractors(uri, responseHeaders), isRemoteUri(uri));
     }
 
-    private Extractor[] wrap(Extractor[] extractors) {
+    private Extractor[] wrap(Extractor[] extractors, boolean deferSeekForCues) {
         Extractor[] wrapped = new Extractor[extractors.length];
+        boolean dv7P81Enabled = PlaybackPerformanceSetting.isDv7P81Enabled();
         for (int i = 0; i < extractors.length; i++) {
             Extractor extractor = extractors[i];
             if (extractor instanceof MatroskaExtractor
-                    && PlaybackPerformanceSetting.isDv7P81Enabled()) {
+                    && (deferSeekForCues || dv7P81Enabled)) {
+                int flags = MatroskaExtractor.FLAG_EMIT_RAW_SUBTITLE_DATA
+                        | (deferSeekForCues ? MatroskaExtractor.FLAG_DEFER_SEEK_FOR_CUES : 0);
                 extractor = new MatroskaExtractor(
                         new DefaultSubtitleParserFactory(),
-                        MatroskaExtractor.FLAG_EMIT_RAW_SUBTITLE_DATA,
-                        true);
+                        flags,
+                        dv7P81Enabled);
             }
             wrapped[i] = new DolbyVisionExtractor(extractor, playbackState);
         }
         return wrapped;
+    }
+
+    private static boolean isRemoteUri(@Nullable Uri uri) {
+        if (uri == null) return false;
+        String scheme = uri.getScheme();
+        return scheme != null
+                && ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme));
     }
 
     static boolean shouldConvert(Format source) {
