@@ -1,8 +1,12 @@
-# Exo 起播速度评估：远程大体积 Matroska/MKV
+# E-SP2：Exo 远程大体积 Matroska/MKV 延后 Cues
 
-评估日期：2026-08-22（Asia/Tokyo）
-评估范围：Exo 起播速度、远程百度网盘 MKV、Matroska Cues/索引、首帧与 `STATE_READY` 的关系。
-当前状态：E-SP1 已实施并通过 Mobile/Leanback Java 编译；E-SP2 深度研究与本地代码审阅已完成，方案已获本次用户指令授权进入独立实现，当前尚未修改 Media3 依赖、AAR、APK 或 native 二进制。
+- 任务 ID：`E-SP2`
+- 类别：Exo 性能专项
+- 唯一文档：`docs/E-SP2-exo-remote-mkv-deferred-cues.md`
+- 评估日期：2026-08-22（Asia/Shanghai）
+- 范围：Exo 起播速度、远程百度网盘 MKV、Matroska Cues/索引，以及首次随机访问。
+- 状态：Media3 补丁、extractor AAR 和 HTTP/HTTPS App gate 已完成并提交；定向测试和双产品编译通过，真实设备起播/seek 性能验收待完成。
+- 下一动作：同一设备、资源和网络下完成基线/候选至少 3 次中位数及首次/连续 seek 回归；未取得该证据前不宣称性能验收完成。
 
 ## 结论先行
 
@@ -12,8 +16,8 @@
 
 | 类别 | 决定 | 说明 |
 | --- | --- | --- |
-| 推荐实施 | 首帧可见与完整 `READY` 分层 | 这是用户体感优化，不改变解码、seek 或音频能力；当前代码已有首帧事件和 `PlaybackStartupPolicy`，但 UI 消费仍需单独核对。 |
-| 批准实施 | 远程大 MKV 延后 Cues 读取，保留首次 seek 时按需建索引 | 成熟播放器普遍采用“启动先读 Tracks/首个 Cluster，索引按需读取或增量建立”；Media3 现成 flag 会直接让媒体不可 seek，最终方案必须增加按需建索引状态机。 |
+| 前置已完成 | [`E-SP1` 首帧立即可见](E-SP1-exo-first-frame-visible.md) | 只作为前置依赖引用；其实现、验证、commit 和 tag 不在本文重复记录。 |
+| 已实施待实机验收 | 远程大 MKV 延后 Cues 读取，保留首次 seek 时按需建索引 | 成熟播放器普遍采用“启动先读 Tracks/首个 Cluster，索引按需读取或增量建立”；Media3 现成 flag 会直接让媒体不可 seek，因此实现增加了按需建索引状态机。 |
 | 暂缓 | 直接降低 `startMs`/`rebufferMs`、禁用 TrueHD 初始化、关闭 Exo 预加载 | 当前证据不能证明这些措施减少首帧等待，且会增加卡顿、音频能力或缓存行为风险。 |
 | 忽略 | 通过增加连接超时、重试次数或替换 OkHttp 解决本问题 | 日志中 Range 请求正常返回 `206`；这类调整不会消除尾部 Cues 读取。 |
 
@@ -24,8 +28,8 @@
 ### 1.1 项目与回滚基线
 
 - 历史评估基线：`f2721c43b6654ae7307647ebaaaa4248a50a9ab7`（Checkpoint 1 记录；不是当前实现 HEAD）。
-- 当前实现 HEAD：`c07e2b27eddbbee3240ed25fd6e2c8e5a64c5c7e`；E-SP1 recovery tag：`recovery/exo-sp1-first-frame-visible-20260822/20260822224344-c07e2b27eddb`。
-- E-SP2 评估阶段没有生产代码或依赖变更；评估文档将作为独立提交和 recovery tag 后再进入实现。
+- E-SP2 评估前置 HEAD：`c07e2b27eddbbee3240ed25fd6e2c8e5a64c5c7e`；E-SP1 recovery tag：`recovery/exo-sp1-first-frame-visible-20260822/20260822224344-c07e2b27eddb`。
+- 该评估阶段没有生产代码或依赖变更；后续实现结果见 Checkpoint 4-6。
 - 预先存在的脏路径保持不变：`.gitignore`、`third_party/fongmi-repositories-lock.json`、`.codex/`、`AGENTS.md`、已有上游评估文档。
 
 ### 1.2 Exo 远程大 MKV 实测
@@ -157,19 +161,9 @@ VLC 将 MKV 的 seekability、fast-seekability、Cues/segment preload 分开管�
 
 ## 5. 候选阶段与实施边界
 
-### E-SP1（推荐）：首帧可见与完整 READY 分层
+### E-SP2：远程大 MKV 的 Cues 延后/按需索引
 
-- 用户决策：待批准。
-- 目标：视频首帧已经可靠输出后立即解除 Exo 黑屏/loading 体验；音频初始化、`READY`、后续缓冲仍由播放器内部继续完成。
-- 不改变：DV7→P8.1/HDR10 fallback、TrueHD、seek、Range、缓存、软解降载和 Exo `STATE_*` 语义。
-- 依赖：`PlaybackStartupPolicy`、`PlayerManager`、`PlaybackActivity`/`PlayerView` shutter 消费路径。
-- 风险：首帧可能短暂静止或无声；必须区分“画面可见”和“完整可交互/音频已播放”。
-- 最小验收：首帧后黑屏消失；首帧前仍保留错误/超时保护；首帧后 TrueHD 能正常出声；首帧后短暂 BUFFERING 不触发错误；音频-only 不误判为视频首帧。
-- 建议：先以窄范围 UI/状态适配实现，独立于 Cues 实验。
-
-### E-SP2（仅实验）：远程大 MKV 的 Cues 延后/按需索引
-
-- 用户决策：待批准，默认不进正式依赖锁。
+- 用户决策：已批准并实施，进入候选实机验收。
 - 目标：从文件头或可接受的起始位置播放时，不因尾部 Cues 读取阻塞 Tracks/首帧；第一次 seek/断点启动时再读取 Cues 或建立局部索引。
 - 不能直接做：全局设置 `FLAG_DISABLE_SEEK_FOR_CUES`。该 flag 会把 Cues 位于首个 Cluster 后的媒体标记为不可 seek。
 - 推荐实验形态：在本地 Media3 fork 中增加“defer Cues”实验模式，或在 DataSource/代理层做有界的 Cues 预取；仅对满足以下条件的远程 VOD 开启：可识别完整文件大小、起播位置为 0、来源不是 ISO/光盘、用户未要求立即 seek、DV/TrueHD/字幕轨道仍正常。
@@ -183,50 +177,30 @@ VLC 将 MKV 的 seekability、fast-seekability、Cues/segment preload 分开管�
   5. 至少同一设备、同一资源、同一网络条件下基线与候选各 3 次，比较中位数和失败率。
 - 建议：只做 feature flag + telemetry 实验，不直接更新正式 Media3 lock/AAR。
 
-### E-SP3（暂缓）：调低起播缓冲阈值
+### 被否决的替代方案：调低起播缓冲阈值
 
 - 当前证据：首帧前向缓冲只有约 187 ms，但轨道阶段已经耗时约 7.5 s；不是主瓶颈。
 - 风险：Range 波动、TrueHD 和高码率 DV7 资源更容易起播后卡顿。
-- 决定：除非 E-SP1/E-SP2 之后仍有明确的 `shouldStartPlayback` 等待证据，否则不实施。
+- 决定：除非 E-SP2 之后仍有明确的 `shouldStartPlayback` 等待证据，否则不实施。
 
-### E-SP4（暂缓）：禁用/延迟 TrueHD
+### 被否决的替代方案：禁用或延迟 TrueHD
 
 - 当前证据：TrueHD 初始化约 1.9 s，但发生在 Tracks 阶段之后，视频首帧主要延迟仍已形成。
 - 风险：损失 TrueHD/Atmos、音画同步、直通/降级能力。
 - 决定：不为追求起播速度默认禁用；只有单独的音频初始化 profiling 证明收益，才建立独立实验。
 
-### E-SP5（忽略）：关闭预加载或替换网络库
+### 被否决的替代方案：关闭预加载或替换网络库
 
 - 当前 `PreCache` 在首帧前处于等待/取消状态，前台播放 DataSource 优先级更高；没有证据证明它抢占主读取。
 - 远程请求为正常 `206`，连接建立不是主要耗时。
 - 决定：不作为本次 Exo 起播优化方案。
 
-## 6. E-SP1 实施记录
+## 6. 实施顺序
 
-### 6.1 实施目标
-
-E-SP1 解决的是“视频首帧已经由 Exo/Media3 渲染，但完整 `STATE_READY` 仍因音频或其他轨道初始化而延后”时的界面遮挡问题。它不承诺降低 `stage=first-frame` 的实际耗时，也不改变 Exo 的状态机、缓冲策略或错误判定。
-
-### 6.2 实施内容
-
-- `PlayerManager` 在 Exo `onRenderedFirstFrame()` 后新增 `onExoFirstFrame()` 回调；原有首帧 trace、超时取消和 telemetry 保持不变。
-- `PlaybackService` 只转发该 Exo 专用回调；MPV/native 不进入该路径。
-- `PlaybackActivity` 收到当前 owner 的 Exo 首帧后立即隐藏 `exo_shutter`、设置透明 shutter，并隐藏页面已有的 `R.id.progress` 启动遮罩。
-- 不修改 `STATE_READY`、`PlaybackStartupPolicy`、`DefaultLoadControl`、解码器选择、DV7→P8.1/HDR10 fallback、TrueHD、seek、Range/cache、软解降载或 MPV 输出策略。
-
-### 6.3 验证与回滚
-
-- 验证：`bash ./gradlew :app:compileMobileArm64_v8aDebugJavaWithJavac :app:compileLeanbackArm64_v8aDebugJavaWithJavac`，结果 `BUILD SUCCESSFUL`。
-- 静态检查：`git diff --check` 通过。
-- 回滚：恢复 E-SP1 原子提交即可；不涉及依赖锁或二进制重建。
-- 实施提交与 recovery tag：由本轮 task guard 在提交完成后记录；后续文档 checkpoint 会补充完整 40 位 commit/tag。
-
-## 7. 最小实施顺序
-
-1. 先实施/验证 E-SP1（首帧可见分层），不触碰依赖和 extractor。
-2. 若仍需降低实际首帧耗时，再批准 E-SP2 的实验分支/feature flag；实验只覆盖远程大 MKV、起始位置 0。
-3. E-SP2 通过同设备/同资源/同设置的基线比较后，才能讨论是否进入 Media3 fork、AAR 和 Exo 依赖锁。
-4. Exo 阶段稳定后，再按既定顺序评估 MPV；不得因为 MPV 更快而直接复制其 demux 实现到 Exo。
+1. 前置 `E-SP1` 已独立完成，不在本文重复记录。
+2. E-SP2 的 Media3 patch、AAR 和 HTTP/HTTPS gate 已按独立提交完成。
+3. 只有通过同设备/同资源/同设置的基线比较和 seek 回归，才能把候选实现视为性能验收完成。
+4. 不得因为 MPV 更快而直接复制其 demux 实现到 Exo。
 
 ## 8. 研究来源与证据等级
 
@@ -323,25 +297,17 @@ first seek/非零 prepare
 - 实现先补入上游 `859f7b3b5388378698ff23a667d3e2db5ac41aed` 的等价修正，再加入 deferred Cues 状态机、测试、Media3 AAR 和 App factory 接入，作为独立可回滚单元。
 - E-SP2 不修改 MPV/native、LoadControl、PreCache、DV7→P8.1/HDR10 转换、AV3A、TrueHD 或软解降载策略。
 
-## Checkpoint 1：2026-08-22 Exo 起播性能评估
+## Checkpoint 1：2026-08-22 E-SP2 初始评估
 
-- 完成：完成 Exo 远程大 MKV 起播性能评估；确认尾部 Cues Range 是主要实耗时；对照 Media3、mpv、FFmpeg、VLC；完成 E-SP1 首帧可见分层实现并通过双产品 Java 编译；E-SP2 仍保持实验边界。
-- 基线：`f2721c43b6654ae7307647ebaaaa4248a50a9ab7`；最新 recovery tag 为 `recovery/exo-dv7-timeout-after-first-frame/20260822212742-f2721c43b665`。
+- 完成：完成 Exo 远程大 MKV 起播性能评估；确认尾部 Cues Range 是主要实耗时，并对照 Media3、mpv、FFmpeg、VLC。
+- 前置：首帧 UI 分层已转入独立 [`E-SP1`](E-SP1-exo-first-frame-visible.md) 文档；本文不再保存其实现记录。
+- 基线：`c07e2b27eddbbee3240ed25fd6e2c8e5a64c5c7e`。
 - 工作区：只新增本评估文档；既有脏路径未触碰。
 - 证据：WebHTV trace `p-2vl4f6-g`；Media3、mpv、FFmpeg、VLC 官方源码链接见上文。
-- 验证：E-SP1 Java 编译 `BUILD SUCCESSFUL`；`git diff --check` 通过；未执行 APK/native 构建（本阶段不需要）。
-- 回滚：回滚 E-SP1 原子提交即可；既有依赖锁和其他脏路径保持不变。
+- 验证：本检查点为评估记录，未修改 E-SP2 生产代码或依赖。
+- 回滚：无生产变更；既有依赖锁和其他脏路径保持不变。
 - 未决：E-SP2 采用 Media3 fork 延后 Cues 还是有界代理/DataSource 预取，必须完成研究与实验后再决定。
-- 下一步：记录 E-SP1 提交/tag 后，启动独立 E-SP2 assessment/upstream 会话，先审阅本地 Media3 源码与实验边界。
-
-## Checkpoint 2：2026-08-22 E-SP1 已实施
-
-- 目标：首帧出现后立即解除 Exo 黑屏和启动遮罩，完整 `STATE_READY` 继续由播放器自行完成。
-- 改动：`PlayerManager.java`、`PlaybackService.java`、`PlaybackActivity.java`；只新增 Exo 专用首帧通知链。
-- 保护：MPV/native、音频-only、DV7 转换/fallback、AV3A、TrueHD、seek、Range/cache、软解降载均未改动。
-- 验证：Mobile Arm64 与 Leanback Arm64 Java 编译通过；`git diff --check` 通过。
-- 提交/tag：`c07e2b27eddbbee3240ed25fd6e2c8e5a64c5c7e`；`recovery/exo-sp1-first-frame-visible-20260822/20260822224344-c07e2b27eddb`。
-- 下一步：进入 E-SP2 深度研究；不重复检索已确认的 E-SP1 事实。
+- 下一步：进入 E-SP2 深度研究，审阅本地 Media3 源码与实验边界。
 
 ## Checkpoint 3：2026-08-22 E-SP2 最终方案已冻结
 
@@ -387,7 +353,7 @@ first seek/非零 prepare
 - Provenance：源码 `e3e922d5c01bc0b564849940fe589daf37360d15`；等价上游修复 `859f7b3b5388378698ff23a667d3e2db5ac41aed`；deferred patch SHA-256 `8bfcf98dadfd70e56ebec4c5fd49701ddc8ed66b02707a7f733b3aec1ed4b2c7`；构建命令为 `:lib-extractor:publishReleasePublicationToMavenRepository`，JDK `21.0.12.1`、compileSdk `36`。
 - 已验证：AAR 内含 `MatroskaExtractor$DeferredSeekMap.class`；发布任务 `BUILD SUCCESSFUL`；AAR/sources/module 与各自 sidecar checksum 一致，POM 未变化；Mobile/Leanback Arm64 Java 编译与 `DolbyVisionP81ExtractorsFactoryTest` 均 `BUILD SUCCESSFUL`。尚未声称设备起播/seek 性能通过。
 - 保护：不修改 MPV/native、nextlib FFmpeg、DV7→P8.1/HDR10 转换、AV3A、TrueHD、PreCache、LoadControl 或网络超时策略。
-- 提交链：补丁单元 `fb2a9ab839958a711a73ee34232d5baa082bddc7`（tag `recovery/exo-sp2-defer-cues-implementation-20260822/20260823101713-fb2a9ab83995`）；完整 Maven/lock 单元 `71514fdb101db56e836902405700f39c891428e5`（tag `recovery/exo-sp2-deferred-cues-artifact-20260823/20260823103155-71514fdb101d`）；本 checkpoint 所在提交是最终 App URI gate 单元。
+- 提交链：补丁单元 `fb2a9ab839958a711a73ee34232d5baa082bddc7`（tag `recovery/exo-sp2-defer-cues-implementation-20260822/20260823101713-fb2a9ab83995`）；完整 Maven/lock 单元 `71514fdb101db56e836902405700f39c891428e5`（tag `recovery/exo-sp2-deferred-cues-artifact-20260823/20260823103155-71514fdb101d`）；最终 App URI gate 单元 `8c6567adff1b5268b1aba7bb4c12b2faa1a6477e`（tag `recovery/exo-sp2-deferred-cues-app-gate-20260823/20260823103404-8c6567adff1b`）。
 - 回滚：若只需关闭新行为，回滚最终 App URI gate 即可；若候选 artifact 有兼容问题，再一并回滚 `71514fdb101db56e836902405700f39c891428e5`；若要完全撤销 E-SP2，再回滚 `fb2a9ab839958a711a73ee34232d5baa082bddc7`，E-SP1 不受影响。
 - 未决：当前无 ADB 设备；实机首帧、首次 seek、连续 seek、DV7→P8.1、DV7→HDR10、字幕/TrueHD 及网络失败率需在候选包阶段验收。该限制不影响源码、AAR 与 App 编译结论，但禁止宣称性能提升已在设备上验证。
-- 下一步：提交并立即创建 App gate recovery tag；随后用同一远程大 MKV 做基线/候选至少 3 次中位数及 seek/fallback 回归。
+- 下一步：用同一远程大 MKV 做基线/候选至少 3 次中位数及首次/连续 seek、DV fallback 回归；该实机证据完成前不宣称性能验收完成。

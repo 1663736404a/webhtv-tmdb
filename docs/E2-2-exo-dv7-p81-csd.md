@@ -1,13 +1,19 @@
-# Exo A1-2：DV7 转 P8.1 同步重写 CSD
+# E2-2：Exo DV7 转 P8.1 同步重写 CSD
 
-状态：已修复 A1-2 的 MTK 首帧回归；针对性单测通过；待用户在目标电视安装 APK 做最终首帧回归。
+- 任务 ID：`E2-2`
+- 类别：Exo 依赖
+- 所属功能：`E2` Dolby Vision/HDR
+- 历史别名：`A1-2`（只用于查找旧提交和 task guard 记录）
+- 唯一文档：`docs/E2-2-exo-dv7-p81-csd.md`
+- 状态：已实施；MTK 合成 CSD 首帧回归已修复，针对性单测通过，实机结论按下方检查点保留。
+- 下一动作：本 CSD 单元不继续扩展；后续 parser safety 使用 `E2-1`，output/fallback policy 另按其稳定任务 ID 记录。
 
 ## 范围与来源
 
 - 类别：Exo App 适配层，不重建 Media3/nextlib AAR，不修改 FFmpeg、MPV 或 native lock。
 - 上游参考：FFmpeg `177f090e0503b7e013922ca903bde14b1c375f18` 的 `dovi_rpu convert=p81` 配置语义。
 - 当前基线：`9f946cfb003e721c2c36dde1a197c4ce86422cee`；E1 已完成提交 `0b09fc0944a0ef3c21f423e470ece93f3193690c`，恢复 tag 为 `recovery/exo-e1-ffmpeg-9.0.1/20260822093504-0b09fc0944a0`。
-- 本阶段 task guard：`exo-a1-2-dv-csd`。
+- 历史 task guard：`exo-a1-2-dv-csd`。
 
 ## 目标
 
@@ -54,7 +60,7 @@ bash ./gradlew :app:testMobileArm64_v8aDebugUnitTest \\
 
 ## 2026-08-22 实机回归检查点
 
-- 当前基线 HEAD：`c49c13759b05677262a8dd227f4aa059b14eeef1`；本轮修复修改本文件、`DolbyVisionP81ExtractorsFactory.java` 及对应单测。
+- 当时基线 HEAD：`c49c13759b05677262a8dd227f4aa059b14eeef1`；该轮修复修改本任务文档、`DolbyVisionP81ExtractorsFactory.java` 及对应单测。
 - 同一百度网盘 DV7 资源的 HTTP 请求正常返回 `206 Partial Content`，输入访问单元持续到达，因此界面显示的“连接超时”不是网络根因，而是 15 秒内没有首帧后被通用启播计时器终止。
 - Exo 已选择 DV7→P8.1，`c2.mtk.dvhe.st.decoder` 初始化成功；转换输出持续包含 VCL 与 RPU，转换结果为有效，但始终没有首帧，也没有可用于证明“不支持 P8.1”的 decoder 异常。
 - 设备的 P8.1 与 HDR10 支持均视为既有事实。本轮禁止以设备能力不足为理由回退 HDR10，也不把 HDR10 当作修复 P8.1 的替代目标。

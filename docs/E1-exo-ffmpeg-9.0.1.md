@@ -1,15 +1,19 @@
-# E1 实施记录：Exo 底层 FFmpeg 9.0.1
+# E1：Exo 底层 FFmpeg 9.0.1
+
+- 任务 ID：`E1`
+- 类别：Exo 依赖
+- 唯一文档：`docs/E1-exo-ffmpeg-9.0.1.md`
+- 状态：已完成并提交。
+- 下一动作：无需继续修改 E1；由用户决定是否进入 `E2-1`，`C2` 继续保持未启用。
 
 ## 当前恢复锚点
 
-- 状态：E1 已完成并提交。
 - 分支：`fongmi-sync`
 - 回滚基线：`4b50754d3a2902eb4f94361669aa52079f3a2917`
 - 任务：将 Exo/nextlib 内置 FFmpeg 从 `04482c8d13ac27b2a9fe93f5d388929eef8af5f4` 升级到 `177f090e0503b7e013922ca903bde14b1c375f18`。
 - 新坐标：`io.github.anilbeesetti:nextlib-media3ext:1.10.0-0.12.1-fongmi-softload-av3a-ffmpeg901-r1`
 - 实施提交：`0b09fc0944a0ef3c21f423e470ece93f3193690c`
 - Recovery tag：`recovery/exo-e1-ffmpeg-9.0.1/20260822093504-0b09fc0944a0`
-- 下一动作：由用户决定是否进入后续 Exo 阶段；C2 继续保持未启用。
 
 ## 实施边界
 
