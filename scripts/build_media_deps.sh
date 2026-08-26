@@ -239,6 +239,7 @@ apply_media_patches() {
     "$patch_dir/media3-upstream-playback-fixes-2026-08.patch"
     "$patch_dir/media3-deferred-cues.patch"
     "$patch_dir/media3-exo-hdr-parser-safety.patch"
+    "$patch_dir/media3-exo-pixel-eac3-joc-guard.patch"
   )
   for patch_file in "${patches[@]}"; do
     [[ -f "$patch_file" ]] || continue

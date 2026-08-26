@@ -24,6 +24,10 @@
       {
         "path": "third_party/patches/media3-exo-hdr-parser-safety.patch",
         "sha256": "a6a8bbf95630e70938dacde7e36c97ed330c5c426644893090cfc3280dc6ed20"
+      },
+      {
+        "path": "third_party/patches/media3-exo-pixel-eac3-joc-guard.patch",
+        "sha256": "3c5b6ca8294603a1dfa12404a236513497afd0a78cef938360304c8484f28791"
       }
     ],
     "artifact_overrides": [
@@ -38,6 +42,12 @@
         "aar_sha256": "512160846b32c402f975489ca1499ecb4aa4bf6415050ba295db33274d95ee72",
         "sources_sha256": "c94d5735f0f9dabea5fd53f42803a1de21b24294835cab0899f753873fe7ad39",
         "reason": "E-SP2 deferred Cues plus E2-1 Dolby Vision parser safety"
+      },
+      {
+        "coordinate": "androidx.media3:media3-exoplayer:1.11.0-alpha01-fongmi",
+        "aar_sha256": "d7c79ed8e3e61821c7b01b4b998b999bb5a74deba6bd7517ca52a4527c126bcb",
+        "sources_sha256": "1e37d176ffdb6c4a5a41c0fc5d8dce8ca3fb289e39ceb92ec3e8ebfeb232eda2",
+        "reason": "E3-1a disables the known-incompatible Google/Pixel E-AC3 JOC alternative decoder"
       }
     ],
     "upstream_repo": "https://github.com/FongMi/media.git",
