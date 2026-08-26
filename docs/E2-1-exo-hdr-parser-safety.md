@@ -72,7 +72,7 @@
 - 隔离 checkout：`/private/tmp/e21-media-clean`，基线 `e3e922d5c01bc0b564849940fe589daf37360d15`。
 - 修改文件：`libraries/container/src/main/java/androidx/media3/container/DolbyVisionConfig.java`、`libraries/extractor/src/main/java/androidx/media3/extractor/mp4/BoxParser.java`、`libraries/extractor/src/main/java/androidx/media3/extractor/mkv/MatroskaExtractor.java`。
 - 内容：短配置/major version 拒绝；DV box 最小长度与 sample-entry/input-limit 边界检查；最低 mastering luminance 按 `10000` 倍缩放。
-- 验证：三组测试源码已补齐且 Java 编译到测试执行阶段；首次 Robolectric 运行因默认 JDK 17 不支持 SDK 36 而环境失败，测试 XML 明确报告 `Android SDK 36 requires Java 21 (have Java 17)`，尚无产品断言失败。
+- 验证：三组测试源码已补齐且 Java 编译到测试执行阶段；首次 Robolectric 运行因未使用项目所需的 JDK 21 而环境失败，尚无产品断言失败。
 - 下一动作：已使用 `/usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home` 重跑相同定向测试与 extractor 编译并通过；继续发布受影响 AAR 与 sources。
 
 ### 2026-08-26：定向验证与补丁固化
@@ -81,7 +81,7 @@
 - 覆盖：短于 4 字节、major version 异常、合法 DV box、sample-entry 越界、输入截断、最低 mastering luminance `0.0001 -> 1` 与 `0.005 -> 50`。
 - Patch：`third_party/patches/media3-exo-hdr-parser-safety.patch`；基线为四个既有 Media3 patch 已应用后的树；SHA-256 `a6a8bbf95630e70938dacde7e36c97ed330c5c426644893090cfc3280dc6ed20`。
 - 重放：从 `e3e922d5c01bc0b564849940fe589daf37360d15` 新 checkout，按 `media3-danmaku-live`、`media3-dolby-vision-matroska`、`media3-upstream-playback-fixes-2026-08`、`media3-deferred-cues`、`media3-exo-hdr-parser-safety` 顺序 `git apply --check/apply` 成功。
-- 备注：默认 JDK 17 的首次 Robolectric 运行因 SDK 36 要求 Java 21 失败；切换 JDK 21 后无测试失败，已作为环境问题记录，不改变产品代码。
+- 备注：首次 Robolectric 运行因未使用项目所需的 JDK 21 而失败；切换到 JDK 21 后无测试失败，已作为环境问题记录，不改变产品代码。
 
 ### 2026-08-26：主项目接线验证（已通过）
 

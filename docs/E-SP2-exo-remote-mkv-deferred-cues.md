@@ -328,7 +328,7 @@ first seek/非零 prepare
 - 工作区：分支 `fongmi-sync`，HEAD `3aae091dbba7a2140f4c157f86aa42d901f01ff9`；活动 task id 为 `exo-sp2-defer-cues-implementation-20260822`。
 - 已完成：新增显式 `FLAG_DEFER_SEEK_FOR_CUES`、64 MiB/已知长度门槛、临时可更新 SeekMap、首次非零 seek 时加载 Cues 的状态机，并等价纳入 Media3 `859f7b3b5388378698ff23a667d3e2db5ac41aed` 的 Tracks-after-Clusters 顺序修复；补丁顺序已固定。App 的 HTTP/HTTPS URI 收窄将在候选 AAR 接入单元中完成。
 - 已有验证：完整补丁链上的 `git apply --check` 和仓库 `git diff --check` 已通过；尚不能据此声明运行时 seek 或性能正确。
-- 构建环境：机器原先只有 JDK 17，已于 2026-08-23 安装 Homebrew OpenJDK `21.0.12.1`；后续构建显式设置 `JAVA_HOME=/usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home`。使用隔离临时 checkout，不清理或覆盖预存 `third_party/sources/media/`。
+- 构建环境：使用 JDK 21；后续构建显式设置 `JAVA_HOME=/usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home`。使用隔离临时 checkout，不清理或覆盖预存 `third_party/sources/media/`。
 - 保护路径：`.gitignore`、`third_party/fongmi-repositories-lock.json`、`.codex/`、`AGENTS.md`、`docs/agents-md-effective-constraints-review-2026-08-21.md`、`docs/upstream-player-dependency-merge-assessment-2026-08-20.md`、`third_party/sources/media/` 均保持在本提交之外。
 - 回滚锚点：`3aae091dbba7a2140f4c157f86aa42d901f01ff9`；若 extractor、seek、DV 或产物验证失败，整体撤销 E-SP2 source/AAR/App 单元，不改变 E-SP1。
 - 未决风险：首次/连续/反向 seek、Cues 缺失/损坏、未知长度、IO 重试、递归 SeekHead、Tracks-after-Clusters，以及 DV7→P8.1/HDR10、TrueHD/字幕邻接能力仍需由定向测试和代表性播放验证。

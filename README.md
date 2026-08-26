@@ -77,7 +77,7 @@ WebHome 主页、扩展、模板、示例和 AI skills 统一放在 [webhome-dev
 ### 环境要求
 
 - 项目使用纯命令行工具链，不依赖任何 IDE。必须在 `JAVA_HOME`/`PATH` 中配置独立 JDK 21，并单独配置 Android SDK Command-line Tools。
-- JDK 21。不要使用 JDK 17；当前 `sourceCompatibility` / `targetCompatibility` 均为 Java 21。
+- 需要 JDK 21；当前 `sourceCompatibility` / `targetCompatibility` 均为 Java 21。
 - Python 3.10。Chaquo 运行时和构建时 Python 均固定为 3.10，仅安装 Python 3.11/3.12/3.13 会失败。
 - Android SDK Platform 37 和 Build Tools 37.0.0。当前 `compileSdk=37`、`minSdk=24`、`targetSdk=28`。
 - Android NDK 29.0.14206865（r29）用于重建 MPV/FFmpeg/libplacebo 和 MPV JNI；NDK 28.2.13676358（r28c）继续用于 IJK/DVD。普通 Gradle 打包直接使用仓库已提交二进制，不要求安装 NDK。`scripts/build_mpv_player_jni.sh` 只重建 JNI 桥接库 `libplayer.so`，不会重编 `libmpv.so`、FFmpeg 或 libplacebo。
