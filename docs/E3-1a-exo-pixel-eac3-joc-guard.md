@@ -2,7 +2,7 @@
 
 - 任务 ID：`E3-1a`
 - 所属分类：Exo
-- 状态：验证完成，待原子提交闭环
+- 状态：实现提交完成，文档闭环待完成
 - 唯一任务文档：`docs/E3-1a-exo-pixel-eac3-joc-guard.md`
 - 用户授权：2026-08-26 明确批准实施
 - 上游基线：`FongMi/media@e3e922d5c01bc0b564849940fe589daf37360d15`
@@ -16,9 +16,9 @@
 - 允许路径：本文件、主评估索引、`scripts/build_media_deps.sh`、`third_party/media-lock.json`、`third_party/patches/media3-exo-pixel-eac3-joc-guard.patch`、`third_party/maven/androidx/media3/media3-exoplayer/1.11.0-alpha01-fongmi/`。
 - 保护路径：`AGENTS.md`、`.codex/scripts/task_guard.sh`、`docs/agents-md-effective-constraints-review-2026-08-21.md`；`third_party/sources/media` 是预存 dirty checkout，始终不直接修改。
 - 已完成：基线 tag 与 task guard 已建立；上游/本地差异及现有 fallback 架构已核对。
-- 当前状态：guard/test 已在干净 Media3 checkout 中实现，源码 diff 与六补丁顺序重放通过；定向测试、`lib-exoplayer` Java 编译、独立 exoplayer AAR 发布和主项目 Mobile/Leanback arm64 Debug Java 编译均已通过，待任务守卫原子提交与 recovery tag。
+- 当前状态：guard/test 已在干净 Media3 checkout 中实现，源码 diff 与六补丁顺序重放通过；定向测试、`lib-exoplayer` Java 编译、独立 exoplayer AAR 发布和主项目 Mobile/Leanback arm64 Debug Java 编译均已通过；实现提交与 recovery tag 已创建，待文档索引闭环。
 - 未解决风险：manufacturer 字符串判断覆盖范围比具体机型宽；FFmpeg 不可用时 Google 设备仍可能无可用 decoder；软件二维解码可能增加 CPU，且尚无 Pixel 实机证据。上述风险不改变本阶段 guard 的正确性目标。
-- 下一动作：执行 `bash .codex/scripts/task_guard.sh finish`，提交并创建 E3-1a recovery tag。
+- 下一动作：在文档 guard 中记录实现提交/tag，更新总索引为已完成并指向 E3-1b。
 
 ## 实际能力与范围
 
@@ -89,4 +89,6 @@
 - 发布：仅执行 `:lib-exoplayer:publishReleasePublicationToMavenRepository`，`BUILD SUCCESSFUL in 1m 20s`；未重发其它 Media3 模块。
 - 产物：`media3-exoplayer-1.11.0-alpha01-fongmi.aar` SHA-256 `d7c79ed8e3e61821c7b01b4b998b999bb5a74deba6bd7517ca52a4527c126bcb`；sources SHA-256 `1e37d176ffdb6c4a5a41c0fc5d8dce8ca3fb289e39ceb92ec3e8ebfeb232eda2`。sources 内已确认 guard 代码存在。
 - 主项目接线验证：`bash gradlew --no-daemon --console=plain :app:compileMobileArm64_v8aDebugJavaWithJavac :app:compileLeanbackArm64_v8aDebugJavaWithJavac`，`BUILD SUCCESSFUL in 42s`。
-- 下一动作：执行任务守卫原子提交并立即创建 recovery tag；随后追加提交/tag 记录完成文档闭环。
+- 实现提交：`cda1ac8cf2f5d4d9c3beec68b0b520d6f7c218ec`；恢复标签：`recovery/E3-1a/20260826175658-cda1ac8cf2f5`。
+- 提交内容：仅包含 E3-1a patch、`media3-exoplayer` AAR/sources 及校验文件、构建脚本、lock、任务文档和总索引；受保护 dirty 路径未纳入。
+- 下一动作：完成本次文档提交后，开始 E3-1b 评估。
