@@ -3,11 +3,13 @@
 ## Recovery anchor
 
 - 目标：在不改变 WebHTV 当前 raw bitmap 字幕和默认关闭 extraction 策略的前提下，修复文本字幕有效长度、字符集白名单和 TTML XML 声明处理。
-- 状态：A4-1a/A4-1b 已通过定向测试、干净重放、两个模块发布校验和 App 接线编译；待原子提交与 recovery tag。
+- 状态：A4-1a/A4-1b 已通过定向测试、干净重放、两个模块发布校验和 App 接线编译；实现已提交并创建 recovery tag，文档闭环待提交。
 - 基线：`cafd4f69e613a5db49df5e38e762b6bf4fe58819`；恢复 tag `recovery/E4-1/baseline-20260826210500-cafd4f69e6`。
 - 上游来源：`FongMi/media@d82fb7b9c93fa2ca0331d3ad455f5805aef47d37`；当前 fork 部分实现 `63531ddcd508b646e0cf515df3bb6caf4835120e`。
 - 保护：`AGENTS.md`、`.codex/scripts/task_guard.sh`、`docs/agents-md-effective-constraints-review-2026-08-21.md` 及所有其他初始脏路径不修改、不提交。
-- 下一步：运行 task guard finish，提交任务路径并立即创建 recovery tag；现有 AAR/sources 已与最终补丁实现一致，无需重复发布。
+- 实现提交：`9018f2b5c2b132644cde3841f33fe306209d2499`（`Exo: harden subtitle byte and charset handling`）。
+- 实现恢复 tag：`recovery/E4-1/20260827074736-9018f2b5c2b1`。
+- 下一步：完成本文件与总评估索引的文档闭环提交；不重复发布 AAR/sources，不修改受保护脏路径。
 
 ## 决策与范围
 

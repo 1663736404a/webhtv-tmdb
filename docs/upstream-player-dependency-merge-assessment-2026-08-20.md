@@ -4120,7 +4120,7 @@ E3 只构建 Media3 AAR 和 App APK，不更新 nextlib/MPV FFmpeg。E3-1a、E3-
 | 子阶段 | 代码动作 | 建议 | 验收/回滚 |
 | --- | --- | --- | --- |
 | E4-0 基线/覆盖 | `ccc11523...`、`e8573d8c...`、`7feb0801...` 已覆盖；冻结 ASS/TTML/PGS/DVB 截图与 cue dump | 无代码 | 若基线不可复现，停止后续 E4 |
-| E4-1 字节安全 | 从 `d82fb7b9...` 取有效 length/bytesRead、文本 MIME 白名单和非 UTF TTML declaration；safe factory/extraction 灰度后置 | **建议合并 1a/1b** | decoder/extractor AAR 独立回滚；bitmap raw path 不变 |
+| E4-1 字节安全 | 从 `d82fb7b9...` 取有效 length/bytesRead、文本 MIME 白名单和非 UTF TTML declaration；safe factory/extraction 灰度后置 | **已实施 1a/1b**：`9018f2b5c2b132644cde3841f33fe306209d2499`，tag `recovery/E4-1/20260827074736-9018f2b5c2b1` | decoder/extractor AAR 独立回滚；bitmap raw path 不变；1c/1d 仍待独立批准 |
 | E4-J1 Cue 契约 | `6794d75b...` + `3c2cbe8a...` 的 `collisionAvoidance`、`textRegionHeight`、LetterSpacingSpan、Bundle/equals/hashCode | **建议先建数据契约** | common/UI 数据模型独立回滚，默认不启用碰撞 |
 | E4-J2 viewport | `92b1570a...`、`6794d75b...`、`3c2cbe8a...`、`aaddc2b9...` 的 viewport/region/bitmap scale 适配 | **截图后条件合并** | PlayerView/SubtitleView UI 回滚，不回滚 parser 字段 |
 | E4-2 ASS | `6794d75b...` 的 layer/collision/margin；关闭或 feature-gate fork `applyStacking()` | **条件合并** | Normal/Reverse、绝对定位、留黑边、字号；禁止双 stacking |
@@ -4388,14 +4388,14 @@ E9 的共同特点是会新增一套资产生产者、数千行状态机或当�
 | 需要明确产品策略 | E2-3；E3-3；E5 的 CEA/DRM/广告策略；E6-3；E7-6；E8-1/4 | 结果不是纯 bugfix，可能改变用户选择、网络行为、资源占用或输出路径 |
 | 当前跳过/独立架构线 | E6-4；E9-1/2/3/4/5/6；E8 overlay | 会引入第二资产生产者、大量新状态机、未闭环格式或重复 UI |
 
-若只追求第一轮低风险增量，建议发布顺序是：**E1 → E2-1 → E3-1a → E3-1b → E4-1/J1 → E6-1 → E7-1**。每一步先发布独立测试 AAR/APK并保存样片、日志与哈希，再进入下一步；不要为了减少构建次数把它们压成一个无法归因的 Media3 大版本。
+若只追求第一轮低风险增量，建议发布顺序是：**E1 → E2-1 → E3-1a → E3-1b → E4-1/J1 → E6-1 → E7-1**。E4-1 的 1a/1b 已由提交 `9018f2b5c2b132644cde3841f33fe306209d2499` 实施并以 tag `recovery/E4-1/20260827074736-9018f2b5c2b1` 锚定；1c/1d 和 J1 仍是独立阶段。每一步先发布独立测试 AAR/APK并保存样片、日志与哈希，再进入下一步；不要为了减少构建次数把它们压成一个无法归因的 Media3 大版本。
 
 ### 41.15 恢复锚点
 
 - Exo 可决策实施总表已完成：E0--E9、完整 commit 归属、必须保留的本地实现、通用项搭载、产物边界、验收和独立回滚均已记录。
 - `media` #1--82 已在 41.13 各分配一个主要阶段；没有提交因“已覆盖”而从审计记录消失。
 - 第一轮建议顺序已固定为 E1 → E2-1 → E3-1a → E3-1b → E4-1/J1 → E6-1 → E7-1；其余按样片、截图或产品策略决策。
-- 下一检查点整理 MPV 可决策实施总表：合并 mpv-android B1--B3、libplacebo B4、mpv B5--B11、FFmpeg C0/C1/C2 和 WebHTV 本地 native patch，形成少量成套 rebuild 批次。
+- E4-1 实现提交及恢复 tag 已完成；下一步整理 MPV 可决策实施总表：合并 mpv-android B1--B3、libplacebo B4、mpv B5--B11、FFmpeg C0/C1/C2 和 WebHTV 本地 native patch，形成少量成套 rebuild 批次。
 
 ## 检查点 42：2026-08-21 MPV 可决策实施批次总表
 
