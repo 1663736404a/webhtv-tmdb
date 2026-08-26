@@ -26,7 +26,7 @@
 | 2 | `E2-2` | Exo | DV7→P8.1 codec/CSD 一致性 | 已实施 | [E2-2-exo-dv7-p81-csd.md](E2-2-exo-dv7-p81-csd.md) |
 | 3 | `E-SP1` | Exo 性能 | 首帧已渲染时立即解除遮罩 | 已完成 | [E-SP1-exo-first-frame-visible.md](E-SP1-exo-first-frame-visible.md) |
 | 4 | `E-SP2` | Exo 性能 | 远程大 MKV 延后 Cues、首次 seek 按需建索引 | 候选已实现，待实机性能/seek 验收 | [E-SP2-exo-remote-mkv-deferred-cues.md](E-SP2-exo-remote-mkv-deferred-cues.md) |
-| 5 | `E2-1` | Exo | HDR/Dolby Vision parser safety | **下一项待评估/决策** | `docs/E2-1-exo-hdr-parser-safety.md` |
+| 5 | `E2-1` | Exo | HDR/Dolby Vision parser safety | **实施完成（待提交/tag）** | [E2-1-exo-hdr-parser-safety.md](E2-1-exo-hdr-parser-safety.md) |
 | 6 | `E3-1a` | Exo | Pixel E-AC3 JOC capability guard | 待处理 | `docs/E3-1a-exo-pixel-eac3-joc-guard.md` |
 | 7 | `E3-1b` | Exo | DTS 14-bit 解析 | 待处理 | `docs/E3-1b-exo-dts-14bit.md` |
 | 8 | `E4-1` | Exo | 字幕字节与边界安全 | 待处理 | `docs/E4-1-exo-subtitle-byte-safety.md` |
