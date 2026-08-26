@@ -2,7 +2,7 @@
 
 - 任务 ID：`E3-1b`
 - 所属分类：Exo
-- 状态：验证完成，待原子提交闭环
+- 状态：已实施并完成验证
 - 唯一任务文档：`docs/E3-1b-exo-dts-14bit.md`
 - 用户授权：2026-08-26 明确要求开始下一个任务并优先快速完成
 - 实施基线：`recovery/E3-1b-baseline/20260826-9c347cc688c2`
@@ -13,8 +13,8 @@
 - 目标：修正 14-bit DTS core 帧大小的整数换算，避免 DTS-CD WAV、raw DTS 和 TS 中帧边界多算 1 字节，导致后续 sync word 错位和音频损坏。
 - 范围：只移植 `DtsUtil.getDtsFrameSize` 的 14-bit 公式和最小边界测试；不移植上游无关的 `findDtsCoreSync`、WAV 探测或 reader 主体。
 - 接受标准：补丁按现有六个 Media3 patch 后可重放；14-bit BE/LE 与 `FSIZE+1=3585` 测试通过；`lib-extractor` 定向测试和 Java 编译通过；只更新 `media3-extractor` AAR/sources 及 lock；初始 dirty 文件不被覆盖或提交。
-- 当前状态：窄补丁、DtsUtilTest、`lib-extractor` Java 编译、AAR 最小更新和 App 接线编译已完成，待原子提交闭环。
-- 下一动作：执行 task guard finish，提交并创建 E3-1b recovery tag。
+- 当前状态：窄补丁、DtsUtilTest、`lib-extractor` Java 编译、AAR 最小更新和 App 接线编译已完成；实现提交 `27b85eeeed5ceb55e56a67ae3b5cf8ff64b8da40`，恢复标签 `recovery/E3-1b/20260826201735-27b85eeeed5c` 已创建。
+- 下一动作：完成本次修正提交后，开始 E4-1 评估。
 
 ## 实际能力
 
@@ -36,7 +36,7 @@
 
 ## 实施记录
 
-- 补丁：`third_party/patches/media3-exo-dts-14bit-frame-size.patch`，SHA-256 `0462945cba7cc9c136ccdefb6e6f222ddc42fc2ac040522df3342a13d1c55b70`。
+- 补丁：`third_party/patches/media3-exo-dts-14bit-frame-size.patch`，SHA-256 `328fe823b824fd36e359ea16eea4c77334ea707676e9a2803258f29b661e3d77`。
 - 定向验证：独立 Temurin JDK `21.0.12.1+1`、Gradle 9.1.0、工作区 Gradle 缓存和代理；`:lib-extractor:testDebugUnitTest --tests androidx.media3.extractor.DtsUtilTest :lib-extractor:compileDebugJavaWithJavac`，`BUILD SUCCESSFUL in 7m 45s`。
 - App 接线验证：独立 Temurin JDK `21.0.12.1+1`、`bash gradlew --no-daemon --console=plain :app:compileMobileArm64_v8aDebugJavaWithJavac :app:compileLeanbackArm64_v8aDebugJavaWithJavac`，`BUILD SUCCESSFUL in 4m 56s`。
 - AAR：仅替换既有已验证 `media3-extractor` AAR 内的 `DtsUtil.class`，保留 E-SP2/E2-1 其他 classes；SHA-256 `33109a547e7f27c1110e785ae77e8ab1e9584a24a9f904573ce770129aa4475a`。

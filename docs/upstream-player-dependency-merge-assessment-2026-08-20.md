@@ -28,7 +28,7 @@
 | 4 | `E-SP2` | Exo 性能 | 远程大 MKV 延后 Cues、首次 seek 按需建索引 | 候选已实现，待实机性能/seek 验收 | [E-SP2-exo-remote-mkv-deferred-cues.md](E-SP2-exo-remote-mkv-deferred-cues.md) |
 | 5 | `E2-1` | Exo | HDR/Dolby Vision parser safety | **已完成** | [E2-1-exo-hdr-parser-safety.md](E2-1-exo-hdr-parser-safety.md) |
 | 6 | `E3-1a` | Exo | Pixel E-AC3 JOC capability guard | 已实施：`cda1ac8cf2f5d4d9c3beec68b0b520d6f7c218ec` / `recovery/E3-1a/20260826175658-cda1ac8cf2f5` | [E3-1a-exo-pixel-eac3-joc-guard.md](E3-1a-exo-pixel-eac3-joc-guard.md) |
-| 7 | `E3-1b` | Exo | DTS 14-bit 解析 | 实施中：仅修正 14-bit frame-size 取整 | [E3-1b-exo-dts-14bit.md](E3-1b-exo-dts-14bit.md) |
+| 7 | `E3-1b` | Exo | DTS 14-bit 解析 | 已实施：`27b85eeeed5ceb55e56a67ae3b5cf8ff64b8da40` / `recovery/E3-1b/20260826201735-27b85eeeed5c` | [E3-1b-exo-dts-14bit.md](E3-1b-exo-dts-14bit.md) |
 | 8 | `E4-1` | Exo | 字幕字节与边界安全 | 待处理 | `docs/E4-1-exo-subtitle-byte-safety.md` |
 | 9 | `E4-J1` | Exo | Cue 数据契约 | 待处理 | `docs/E4-J1-exo-cue-data-contract.md` |
 | 10 | `E6-1` | Exo | SMB/代理/缓存 correctness | 待处理 | `docs/E6-1-exo-smb-proxy-cache-correctness.md` |
@@ -44,7 +44,7 @@
 | 20 | `C2` | 通用 | FFmpeg DV7→P8.1 BSF | 暂缓；不自动启用 | `docs/C2-dv7-p81-bsf.md` |
 | 21 | `C3` | 通用 | ISO multi-extent App resolver | 随 `E7-2` 联合评估/实施 | `docs/C3-iso-multi-extent-resolver.md` |
 
-`C1` 是跨播放器真实输入验收维度，不单独形成代码任务或文档；它写入对应的 E/P 任务文档。当前下一项是 `E3-1b`，开始前先读取其唯一文档并给出功能目标、收益、代价和是否建议合并的决策包。
+`C1` 是跨播放器真实输入验收维度，不单独形成代码任务或文档；它写入对应的 E/P 任务文档。当前下一项是 `E4-1`，开始前先读取其唯一文档并给出功能目标、收益、代价和是否建议合并的决策包。
 
 ## 目标与决策顺序
 

@@ -31,7 +31,7 @@
       },
       {
         "path": "third_party/patches/media3-exo-dts-14bit-frame-size.patch",
-        "sha256": "0462945cba7cc9c136ccdefb6e6f222ddc42fc2ac040522df3342a13d1c55b70"
+        "sha256": "328fe823b824fd36e359ea16eea4c77334ea707676e9a2803258f29b661e3d77"
       }
     ],
     "artifact_overrides": [

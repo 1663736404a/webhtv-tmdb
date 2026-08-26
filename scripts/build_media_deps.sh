@@ -245,8 +245,8 @@ apply_media_patches() {
   for patch_file in "${patches[@]}"; do
     [[ -f "$patch_file" ]] || continue
     echo "Applying Media3 patch $(basename "$patch_file")"
-    git -C "$MEDIA_DIR" apply --check "$patch_file"
-    git -C "$MEDIA_DIR" apply "$patch_file"
+    git -C "$MEDIA_DIR" apply --check --unidiff-zero "$patch_file"
+    git -C "$MEDIA_DIR" apply --unidiff-zero "$patch_file"
   done
 }
 
