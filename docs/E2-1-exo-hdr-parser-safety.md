@@ -2,7 +2,7 @@
 
 - 任务 ID：`E2-1`
 - 所属分类：Exo
-- 状态：实施中
+- 状态：已完成
 - 唯一任务文档：`docs/E2-1-exo-hdr-parser-safety.md`
 - 上游基线：`FongMi/media@e3e922d5c01bc0b564849940fe589daf37360d15`
 - 目标行为来源：`FongMi/media@f70e4b6f14d9f3b38ef953be80c53184f9c50bed` 与 `FongMi/media@0cefd3ceec27444cf8faf02486b472bab39109fe`
@@ -14,10 +14,10 @@
 - 接受标准：Media3 container/extractor 定向测试通过；独立 parser-safety patch 可在现有四个 Media3 补丁之后重放；只发布受影响的 `media3-container`/`media3-extractor` AAR 与 sources；App Mobile/Leanback Java 编译通过；无初始脏文件被覆盖或提交。
 - 允许路径：本任务文档、主评估索引、`third_party/patches/media3-exo-hdr-parser-safety.patch`、`scripts/build_media_deps.sh`、`third_party/media-lock.json`、Media3 container/extractor Maven 产物。
 - 保护路径：`AGENTS.md`、`docs/agents-md-effective-constraints-review-2026-08-21.md`；另有主仓库 `third_party/sources/media` 的预存修改，始终不直接操作。
-- 当前状态：窄源码修改、三组定向测试、独立 patch、五个 patch 的顺序重放及两个 Media3 release AAR 发布均已完成；主项目 App Mobile/Leanback Java 编译即将执行，之后只剩原子提交与 recovery tag。
+- 当前状态：已完成实施、定向测试、五个 patch 顺序重放、Media3 release AAR 发布、主项目 Mobile/Leanback Java 编译、原子提交和 recovery tag；E2-1 已完成。
 - 已完成证据：JDK 21 下三个定向测试类与 `:lib-extractor:compileDebugJavaWithJavac` 通过（`BUILD SUCCESSFUL in 5m 8s`）；五个 patch 顺序重放成功；`lib-container`/`lib-extractor` 发布成功（`BUILD SUCCESSFUL in 3m 30s`）；AAR/sources 哈希已写入 lock。
 - 当前未解决风险：真实厂商 DV codec 和设备级 HDR 输出尚未验证；这些属于设备验收风险，不阻塞本阶段 parser safety 合并。治理守卫已移除文件数门禁，E2-1 可按单一逻辑单元提交。
-- 下一动作：记录 App 编译结果并执行 E2-1 原子提交，随后立即创建 recovery tag。
+- 下一动作：进入队列中的下一项 Exo 任务 `E3-1a`，先评估再等待用户批准。
 
 ## 实际能力与范围
 
@@ -87,4 +87,6 @@
 
 - 在 JDK 21 下运行 `./gradlew :app:compileMobileArm64_v8aDebugJavaWithJavac :app:compileLeanbackArm64_v8aDebugJavaWithJavac --no-daemon`，结果 `BUILD SUCCESSFUL in 42s`；Mobile 与 Leanback arm64-v8a Debug Java 编译均通过。
 - lock 已更新为补丁实际 SHA-256 `a6a8bbf95630e70938dacde7e36c97ed330c5c426644893090cfc3280dc6ed20`。
-- 下一动作：完成 task guard `finish`，生成 E2-1 原子提交和恢复 tag。
+- 实施提交：`e19289a3c9871563f891500bdc2d42be6be23f3d`。
+- 恢复 tag：`recovery/E2-1-final/20260826132916-e19289a3c987`。
+- 完成状态：E2-1 已完成；真实厂商 DV codec 和设备级 HDR 输出仍属于后续设备验收风险，不阻塞本阶段合并。
