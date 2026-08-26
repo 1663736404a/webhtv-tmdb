@@ -33,7 +33,7 @@ C2 有一项明确参考价值：它会让转换后的 DV 配置与 P8.1 码流�
 
 下一动作：清理非 Git 的旧 nextlib 缓存目录并运行双 ABI nextlib 构建。
 
-检查点：nextlib `6ff6cf9d0820382b3c233d018c52e4163b09d345` 已重新检出，两个 nextlib 补丁均已成功应用；首次构建未进入编译，原因是指定的 Android Studio JBR 路径不存在。主机实际可用 Java 为 `/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home`。
+检查点：nextlib `6ff6cf9d0820382b3c233d018c52e4163b09d345` 已重新检出，两个 nextlib 补丁均已成功应用；首次构建未进入编译，原因是当时指定的外部 JDK 路径不存在。随后发现主机只有 JDK 17，而项目要求独立 JDK 21。
 
 下一动作：使用该真实 JDK 仅重试一次同一 `--nextlib-only` 构建；若 Gradle 明确要求 JDK 21，则记录环境阻塞，不继续重复尝试。
 
