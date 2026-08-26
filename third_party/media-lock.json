@@ -28,6 +28,10 @@
       {
         "path": "third_party/patches/media3-exo-pixel-eac3-joc-guard.patch",
         "sha256": "3c5b6ca8294603a1dfa12404a236513497afd0a78cef938360304c8484f28791"
+      },
+      {
+        "path": "third_party/patches/media3-exo-dts-14bit-frame-size.patch",
+        "sha256": "0462945cba7cc9c136ccdefb6e6f222ddc42fc2ac040522df3342a13d1c55b70"
       }
     ],
     "artifact_overrides": [
@@ -39,9 +43,9 @@
       },
       {
         "coordinate": "androidx.media3:media3-extractor:1.11.0-alpha01-fongmi",
-        "aar_sha256": "512160846b32c402f975489ca1499ecb4aa4bf6415050ba295db33274d95ee72",
-        "sources_sha256": "c94d5735f0f9dabea5fd53f42803a1de21b24294835cab0899f753873fe7ad39",
-        "reason": "E-SP2 deferred Cues plus E2-1 Dolby Vision parser safety"
+        "aar_sha256": "33109a547e7f27c1110e785ae77e8ab1e9584a24a9f904573ce770129aa4475a",
+        "sources_sha256": "b4d65656b5d56ea8a66580d03178b98dbecac3840791a30820ae184f3d1ca416",
+        "reason": "E-SP2/E2-1 baseline plus E3-1b DTS 14-bit frame-size correction"
       },
       {
         "coordinate": "androidx.media3:media3-exoplayer:1.11.0-alpha01-fongmi",
