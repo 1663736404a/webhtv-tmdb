@@ -303,3 +303,27 @@ TV-exo-preload: ... mime=application/x-mpegURL
 - 诊断日志限制：三次 seek 在 30 秒追踪窗口内复用了 `seq=2`，因此 `elapsed`/`bufferingDuration` 为该窗口累计值；每次 `discontinuity`、`playback-buffer event=start/end` 和视频帧 gap 仍能独立确定上述时序，不影响根因结论。
 - 最小修复边界：不得降低正常首次启动或普通网络断流的全局阈值；应把用户 seek 恢复识别为独立 episode，仅调整 seek 后启动门槛，并阻止主动 seek 被计入网络 rebuffer 风险历史。
 - 下一动作：补充 E-SP3 seek-specific threshold 的决策设计与验收/回滚条件，取得该播放行为阶段批准后实施、构建并在同一视频复测三次。
+
+## E-SP3-C：seek 专用恢复门槛
+
+- 用户决定：用户于 2026-08-27 明确要求修复，批准该窄播放行为单元。
+- 决策问题：如何消除“seek 目标帧已出现但仍冻结约 0.6--1.7 秒”，同时不降低首次启动或真正网络 buffer depletion 的保护门槛？
+- 官方/上游语义（A）：当前锁定 Media3 sources `e3e922d5c01bc0b564849940fe589daf37360d15` 的 `DefaultLoadControl` 明确定义 `bufferForPlaybackMs` 用于首次启动和 seek 等用户动作，默认值为 `1000 ms`；`bufferForPlaybackAfterRebufferMs` 只用于非用户动作导致的 buffer depletion，默认值为 `2000 ms`。同一 sources 中 `ExoPlayerImplInternal.seekToPeriodPosition()` 在 seek 时显式把 `isRebuffering` 重置为 false。
+- WebHTV 实机证据（A）：`/tmp/e-sp3-3seek-app-debug.log` 的三次 seek 都被本地自适应层锁成 `episode=startup startMs=8000`，目标首帧先出现，随后冻结 `1734/1003/642 ms`，直到前向缓冲达到 `9054/8466/9088 ms` 才进入 READY。
+- 当前代码原因：`AutoLoadControl` 只区分 `STARTUP/REBUFFER`；Media3 正确地把 seek 报为 `rebuffering=false`，但 WebHTV 因此误选 `STARTUP`。同时 `PlaybackAnalyticsListener` 把 seek 后 BUFFERING 计入网络 rebuffer 历史，进一步抬高后续风险。
+- 方案比较：不变更无法满足用户；把全局 startup/rebuffer 降到 1 秒会破坏真实弱网保护；依赖 seek 时间猜测或固定 sleep 不可靠；推荐在现有 App 协调器增加一次性 `SEEK` episode，沿用 Media3 的 `1000 ms` 用户动作门槛，并只从网络 rebuffer 统计中排除该 seek 区间。
+- 最终设计：收到 `DISCONTINUITY_REASON_SEEK/SEEK_ADJUSTMENT` 时标记当前 Exo session 的 seek recovery；`AutoLoadControl` 在 `rebuffering=false` 且标记有效时选择 `SEEK`，阈值为 `min(当前自适应 startMs, 1000 ms)`；READY/IDLE/ENDED 或超时后清除。真实 `rebuffering=true` 始终优先选择 `REBUFFER`，首次启动仍选择 `STARTUP`。
+- 保护契约：不改用户配置值、target bytes、min/max buffer、ABR、网络保护、预载、decoder/renderer、Surface、MIME、Media3 AAR、MPV 或 native；不允许 seek 风险覆盖真实 rebuffer。
+- 验收：单测覆盖 `REBUFFER > SEEK > STARTUP` 分类和 `SEEK <= 1000 ms`；arm64 Java 编译通过；同一 vivo/视频三次 seek 日志必须为 `episode=seek`，READY 不再等待约 8--9 秒媒体缓冲，目标首帧后的额外 gap 不超过 `300 ms`，且 seek 不增加网络 rebuffer count/total。
+- 回滚：单独回滚 E-SP3-C App commit，恢复旧 `STARTUP/REBUFFER` 分类；E-SP3-A/B、诊断日志和 Media3 产物不动。
+- 不适用证据：不涉及 ABI、native、codec 算法、安全解析或新依赖，学术论文、跨播放器代码和二进制供应链研究不会改变该 App 层分类修复。
+
+## Checkpoint 12：2026-08-27 E-SP3-C App 行为实现
+
+- 基线：分支 `fongmi-sync-bugfix`，HEAD `0d2f80fb3a0f92717d820556f739b68b9d9a62db`；诊断单元已提交并有 recovery tag。
+- 实现：阈值协调器新增 session-bound、30 秒自动过期的 `SEEK` 标记；`AutoLoadControl` 按 `REBUFFER > SEEK > STARTUP` 分类，seek 实际门槛为 `min(startMs, 1000 ms)`；Analytics 在 seek recovery 中不增加自适应阈值使用的 rebuffer 历史。
+- 保持契约：首次启动、真实 rebuffer、target bytes、min/max buffer、ABR、网络保护、预载、decoder/renderer、Media3 AAR 和其他播放器未改变。
+- 验证：`AutoLoadControlTest` 与 `ExoPlaybackThresholdCoordinatorTest` 共 17 个测试通过，`:app:compileMobileArm64_v8aDebugJavaWithJavac` 通过；Gradle `BUILD SUCCESSFUL`。
+- 未决风险：`PlayerManager` 的公共 `PlaybackBufferingTracker` 仍可能把 seek 后 BUFFERING 记入通用网络重缓冲 telemetry；该统计排除应作为独立窄单元完成，不与 LoadControl 行为提交混合。
+- 回滚锚点：回滚 E-SP3-C App commit 即恢复旧阈值分类，不影响 E-SP3-A/B 和诊断单元。
+- 下一动作：提交并标记 E-SP3-C 行为单元；随后单独排除公共 buffering tracker 的用户 seek 事件，再打包安装实机验收。

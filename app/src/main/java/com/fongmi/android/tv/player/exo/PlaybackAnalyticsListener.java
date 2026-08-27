@@ -23,6 +23,7 @@ import com.fongmi.android.tv.setting.ExoPerformanceSetting;
 import com.fongmi.android.tv.setting.PlaybackPerformanceCatalog;
 import com.fongmi.android.tv.setting.PlaybackPerformanceSetting;
 import com.fongmi.android.tv.setting.PlayerSetting;
+import com.fongmi.android.tv.player.PlaybackAutoContext;
 import com.fongmi.android.tv.player.PlaybackTrace;
 import com.github.catvod.crawler.DebugEventLimiter;
 import com.github.catvod.crawler.SpiderDebug;
@@ -173,9 +174,11 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
             @Player.State int state,
             long bufferedPositionMs,
             long totalBufferedDurationMs,
-            boolean isLoading,
-            boolean isPlaying) {
+                boolean isLoading,
+                boolean isPlaying) {
         long now = SystemClock.elapsedRealtime();
+        ExoPlaybackThresholdCoordinator.process().markSeek(
+                ExoPlaybackThresholdCoordinator.currentSession(), now);
         long sequence = seekSequence == Long.MAX_VALUE ? 1 : seekSequence + 1;
         seekSequence = sequence;
         activeSeekSequence = sequence;
@@ -283,6 +286,10 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
     @Override
     public void onPlaybackStateChanged(EventTime eventTime, @Player.State int state) {
         long now = SystemClock.elapsedRealtime();
+        PlaybackAutoContext.SessionToken thresholdSession =
+                ExoPlaybackThresholdCoordinator.currentSession();
+        boolean seekRecovery = ExoPlaybackThresholdCoordinator.process()
+                .isSeekPending(thresholdSession, now);
         Snapshot previous = snapshot;
         Snapshot next = snapshot.withState(stateName(state), eventTime.currentPlaybackPositionMs, eventTime.totalBufferedDurationMs);
         if (state == Player.STATE_BUFFERING) {
@@ -290,7 +297,9 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
             BITRATE_ESTIMATOR.disrupt();
             BUFFER_TREND.reset();
             FRAME_TIMING_METRICS.resetReleaseContinuity();
-            if (next.everReady() && next.rebufferStartMs() <= 0) next = next.withRebufferStart(now);
+            if (next.everReady() && next.rebufferStartMs() <= 0 && !seekRecovery) {
+                next = next.withRebufferStart(now);
+            }
         }
         if (state != Player.STATE_BUFFERING && next.rebufferStartMs() > 0) next = next.withRebufferEnd(now);
         if (state == Player.STATE_READY) next = next.withEverReady();
@@ -311,7 +320,7 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
                 || state == Player.STATE_IDLE
                 || state == Player.STATE_ENDED) {
             ExoPlaybackThresholdCoordinator.process().endEpisode(
-                    ExoPlaybackThresholdCoordinator.currentSession());
+                    thresholdSession);
         }
         if (!SpiderDebug.isEnabled()) return;
         if (rebufferStarted) {
@@ -544,21 +553,24 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
 
     @Override
     public void onPositionDiscontinuity(EventTime eventTime, Player.PositionInfo oldPosition, Player.PositionInfo newPosition, int reason) {
+        boolean seek = reason == Player.DISCONTINUITY_REASON_SEEK
+                || reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT;
+        long now = nowElapsed();
         BITRATE_ESTIMATOR.disrupt();
         FRAME_RATE_ESTIMATOR.reset();
         FRAME_TIMING_METRICS.resetReleaseContinuity();
-        if (reason == Player.DISCONTINUITY_REASON_SEEK
-                || reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT) {
+        if (seek) {
             FRAME_SCHEDULING_METRICS.observeBoundary(
                     ExoFrameSchedulingExperimentMetrics.Boundary.SEEK);
         }
         BUFFER_TREND.reset();
         lastStableBufferTrend = ForwardBufferTrend.Snapshot.unknown();
-        ExoPlaybackThresholdCoordinator.process().disrupt(
-                ExoPlaybackThresholdCoordinator.currentSession());
-        if ((reason == Player.DISCONTINUITY_REASON_SEEK
-                || reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT)) {
-            long now = nowElapsed();
+        PlaybackAutoContext.SessionToken thresholdSession =
+                ExoPlaybackThresholdCoordinator.currentSession();
+        ExoPlaybackThresholdCoordinator.process().disrupt(thresholdSession);
+        if (seek) {
+            ExoPlaybackThresholdCoordinator.process().markSeek(
+                    thresholdSession, now);
             if (!activeSeek(now) && SpiderDebug.isEnabled()) {
                 long sequence = seekSequence == Long.MAX_VALUE ? 1 : seekSequence + 1;
                 seekSequence = sequence;
@@ -606,6 +618,13 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
                     presentationTimeUs, releaseTimeNs, System.nanoTime());
         }
         long now = nowElapsed();
+        PlaybackAutoContext.SessionToken thresholdSession =
+                ExoPlaybackThresholdCoordinator.currentSession();
+        if ("READY".equals(snapshot.state())
+                && ExoPlaybackThresholdCoordinator.process()
+                .isSeekPending(thresholdSession, now)) {
+            ExoPlaybackThresholdCoordinator.process().endEpisode(thresholdSession);
+        }
         if (!activeSeek(now)) return;
         seekVideoFrameCount++;
         if (seekFirstVideoFrameAtMs <= 0) {
