@@ -526,6 +526,39 @@ PlayerView output Surface
 - Compaction recovery: branch/HEAD and three task-owned dirty files match E9-3f checkpoint; generated app/.cxx is the only guard violation.
 - Next action: Preserve app/.cxx outside worktree, capture one PID-bound all-buffer logcat reproduction, and fix only the first confirmed failure.
 
+- Checkpoint: A fresh device log confirms Exo's custom renderer receives valid Profile 5
+  RPU metadata and renders without failures, but the target SurfaceView is not retained by
+  SurfaceFlinger as an HDR layer (`mIsHdrLayerPresent=false`). The renderer was advertising
+  a 4000-nit BT.2020/PQ target, so the compositor can display PQ values as SDR, producing the
+  reported near-black image. The current bounded fix changes only the swapchain hint to the
+  explicit sRGB color contract; DV5 IPT/RPU mapping and Exo routing remain unchanged.
+- Next action: Build the arm64 debug APK, install once, replay `P5_Dolby_Amaze.mkv`, and read
+  only `ExoDv5` logs to verify the target contract is sRGB and rendering remains failure-free.
+
+### E9-3g SDR output contract correction
+
+- Root cause: the compatibility renderer advertised the decoded DV source itself as the
+  swapchain target (`BT.2020/PQ`, 0.005-3999.7 nit). That bypassed libplacebo output tone
+  mapping and depended on Android retaining and correctly mapping the custom Vulkan child
+  surface as HDR. The user-visible result on V2453A was an almost-black picture.
+- Fix: retain raw Profile 5 sampling and per-frame RPU reshape, but request an explicit
+  sRGB/BT.709 swapchain target. libplacebo now performs the DV-to-display tone mapping before
+  presentation; Exo routing, MediaCodec selection, RPU parsing and component mapping are
+  unchanged.
+- Build: `:app:assembleMobileArm64_v8aDebug` passed with JDK 17. APK SHA-256:
+  `cf01c3fc4ebbbce8833f7d066f23ac2a175731db9ae481f7a25038583139961b`.
+- Device: installed on V2453A (`10CF6H1D2L0009S`) and launched
+  `P5_Dolby_Amaze.mkv`. The renderer remained Exo with `c2.qti.hevc.decoder`; RPU parsing and
+  initial frame scheduling succeeded, with no MPV switch, `VideoSinkException`, native render
+  failure or crash in the focused run.
+- Output contract: SurfaceFlinger reports the active 3840x2160 video layer as
+  `dataspace=V0_SRGB`, display `colorMode=SRGB`, and SDR white point about 400 nit. This proves
+  the renderer no longer presents 4000-nit PQ as its final output and now performs GPU tone
+  mapping. Per the user's instruction, no screenshot or subjective image comparison was used;
+  final visual color acceptance remains user-observed.
+- Rollback: revert this unit's commit/tag to restore the previous HDR10 swapchain hint without
+  changing the earlier RPU queue and timestamp fixes.
+
 - Replan: vivo shell `logcat` and application-UID `run-as logcat` both omit the App's Java/native playback logs even though the installed APK hash matches the local candidate; repeated logcat capture cannot identify the disable cause.
 - Next action: replace the existing bounded `Log.i` probes with an App-private diagnostic file, reinstall once, and read that file after one P5 reproduction.
 

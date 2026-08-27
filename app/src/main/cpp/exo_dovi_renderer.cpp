@@ -88,6 +88,7 @@ struct Renderer {
     std::atomic<int64_t> malformedRpus{0};
     std::atomic<int64_t> rpuQueueDrops{0};
     std::atomic<int64_t> metadataLogs{0};
+    std::atomic<int> inputFormatLogs{0};
     std::atomic<int64_t> renderedFrames{0};
     std::atomic<int64_t> renderFailures{0};
     std::atomic<int> colorPipelineLogs{0};
@@ -259,6 +260,29 @@ bool renderImage(Renderer *renderer, AImage *image, int64_t ptsUs) {
                             " ahbFormat=%u usage=0x%" PRIx64,
                             ptsUs, desc.format, desc.usage);
         return false;
+    }
+    const int inputFormatLog = renderer->inputFormatLogs.fetch_add(
+            1, std::memory_order_relaxed);
+    if (inputFormatLog < 2) {
+        __android_log_print(
+                ANDROID_LOG_INFO, "ExoDv5",
+                "input format ahb=%u usage=0x%" PRIx64
+                " vkFormat=%d external=%" PRIu64
+                " model=%d range=%d components=%d/%d/%d/%d"
+                " chroma=%d/%d features=0x%" PRIx64
+                " sourceMap=%d/%d/%d",
+                desc.format, desc.usage, formatProps.format,
+                formatProps.externalFormat,
+                static_cast<int>(formatProps.suggestedYcbcrModel),
+                static_cast<int>(formatProps.suggestedYcbcrRange),
+                static_cast<int>(formatProps.samplerYcbcrConversionComponents.r),
+                static_cast<int>(formatProps.samplerYcbcrConversionComponents.g),
+                static_cast<int>(formatProps.samplerYcbcrConversionComponents.b),
+                static_cast<int>(formatProps.samplerYcbcrConversionComponents.a),
+                static_cast<int>(formatProps.suggestedXChromaOffset),
+                static_cast<int>(formatProps.suggestedYChromaOffset),
+                static_cast<uint64_t>(formatProps.formatFeatures),
+                PL_CHANNEL_CR, PL_CHANNEL_Y, PL_CHANNEL_CB);
     }
     VkExternalFormatANDROID externalFormat{
             .sType = VK_STRUCTURE_TYPE_EXTERNAL_FORMAT_ANDROID,
@@ -462,10 +486,12 @@ bool renderImage(Renderer *renderer, AImage *image, int64_t ptsUs) {
         source.color.hdr.avg_pq_y = renderer->sceneAvgPq;
     }
     source.crop = {0, 0, static_cast<float>(desc.width), static_cast<float>(desc.height)};
-    // The Vulkan swapchain defaults to sRGB. Profile 5 has already been
-    // reshaped to BT.2020/PQ here, so advertise that output contract before
-    // acquiring the target frame and let Android compose it as HDR10.
-    pl_swapchain_colorspace_hint(renderer->swapchain, &source.color);
+    // Keep this compatibility path on an explicit SDR swapchain. Advertising
+    // the 4000-nit source as the target bypasses libplacebo output tone mapping
+    // and leaves the result dependent on Android's child-surface HDR handling.
+    // Apply the per-frame DV reshape above, then tone-map into the stable
+    // sRGB/BT.709 output contract here.
+    pl_swapchain_colorspace_hint(renderer->swapchain, &pl_color_space_srgb);
     failureStage = "swapchain-resize";
     if (!pl_swapchain_resize(renderer->swapchain, &width, &height)) goto cleanup;
     failureStage = "swapchain-start-frame";
