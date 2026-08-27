@@ -52,6 +52,10 @@
       {
         "path": "third_party/patches/media3-exo-iso-multi-extent.patch",
         "sha256": "b4954d32f5c98dc5caf2a3cbc8cd72f72d24f4fdeec9425e5061a252d1ccaf68"
+      },
+      {
+        "path": "third_party/patches/media3-precache-hls-safety.patch",
+        "sha256": "9b48e895bd3923159f880152a54160e7c937b2b0369d717da559a7ad98fd14f7"
       }
     ],
     "artifact_overrides": [
@@ -75,9 +79,9 @@
       },
       {
         "coordinate": "androidx.media3:media3-exoplayer:1.11.0-alpha01-fongmi",
-        "aar_sha256": "11d572f59f0404878353d9c85e022e153e114ecbb4d43cf61c910cd9e8c2536d",
-        "sources_sha256": "c2a74d177abff6e91de2b26d0680920a966672796a080572d6477a2e3c9aa6db",
-        "reason": "E3-1a/E4-1 baseline plus E7-2 Blu-ray/DVD logical multi-extent routing"
+        "aar_sha256": "cfea29681799509923174cac7ce31b7e944e542db9df58fd56b7a86499a5c07e",
+        "sources_sha256": "83f4f83b4f44e621d52002c161f63fbcb77be6856af4b1e4a4cb0982b04549e1",
+        "reason": "E3-1a/E4-1 baseline plus E7-2 Blu-ray/DVD logical multi-extent routing and E-SP3-B HLS pre-cache request safety"
       },
       {
         "coordinate": "androidx.media3:media3-datasource:1.11.0-alpha01-fongmi",
