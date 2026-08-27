@@ -4,8 +4,8 @@
 - 类别：Exo 性能/生命周期
 - 唯一文档：`docs/E-SP3-exo-seek-preload-isolation.md`
 - 评估日期：2026-08-27（Asia/Shanghai）
-- 当前状态：用户已批准 `E-SP3-A + E-SP3-B`；评估单元待原子关闭，随后开始 E-SP3-A 实施。
-- 评估权限：本轮只修改任务文档和主索引；未修改 Java、Media3 patch、AAR、lock、APK 或 native 产物。
+- 当前状态：`E-SP3-A + E-SP3-B` 已实施并形成独立 recovery tag；Media3 产物和 App Java 编译已验证，候选 APK 因仓库现有 Material 资源链接缺失而未生成，实机 seek/HLS 回归仍待该构建阻塞解除后完成。
+- 实施边界：只修改 Exo App 预载策略、Media3 `PreCacheHelper` 补丁、锁文件和 `media3-exoplayer` 产物；未修改前台 HLS、解码器、MIME、MPV、FFmpeg、nextlib native 或共享 `.so`。
 - 现场设备：vivo V2453A，Android 15 / SDK 35，`com.fongmi.android.tv`，序列号 `10CF6H1D2L0009S`。
 - 原始证据：[`/tmp/webhtv-repro-logcat.txt`](/tmp/webhtv-repro-logcat.txt)、用户截图 `/var/folders/ty/xxvjkz4s4pb9mndtj0hys0w40000gn/T/IMAGE 2026-08-27 10:13:59.jpg`。
 
@@ -218,3 +218,41 @@ TV-exo-preload: ... mime=application/x-mpegURL
 - 完成记录：Assessment packet approved by user; begin E-SP3-A App seek isolation, then E-SP3-B Media3 HLS request-build guard.
 - 权限边界：批准范围只包含本文已列的两个原子单元；不授权修改 decoder/renderer、MIME、MPV/FFmpeg/native 或其他播放器行为。
 - 下一动作：Start upstream guard for E-SP3-A with declared App source/test paths.
+
+## Checkpoint 3：2026-08-27 E-SP3-A 已实施
+
+- 实现：seek 发生时停止当前预载并进入 `seekPreloadSuppressed`；只有前台恢复到 `STATE_READY + isPlaying + !isLoading + safeBuffer` 才恢复预载。连续两次非 loopback 预载错误后，仅打开当前媒体的 preload-only circuit。
+- 保持的契约：不改前台播放、`DefaultLoadControl`、MIME、解码器、Range、代理、网络 timeout、MPV 或 native 依赖。
+- 验证：`PreCachePolicyTest` 与 `:app:compileMobileArm64_v8aDebugJavaWithJavac` 在该原子单元完成时通过。
+- 提交：`41b1276111f37bdef75b0d057e4458b70bd8ad28`。
+- Recovery tag：`recovery/E-SP3-A/20260827112014-41b1276111f3`。
+- 回滚：回滚该提交即可恢复旧 App 预载策略，不触碰 Media3 AAR。
+
+## Checkpoint 4：2026-08-27 E-SP3-B 源补丁已实施
+
+- 实现：`PreCacheHelper.DownloadCallback.onPrepared()` 捕获 `getDownloadRequest()` 的 `RuntimeException`，release helper，并把 cause 包装成 `IOException("Pre-cache download request unavailable", cause)` 交给已有 `onPrepareError()`。
+- 保持的契约：不伪造 stream keys，不修改 `HlsMediaPeriod`、playlist tracker 或前台 HLS 播放路径。
+- 补丁：`third_party/patches/media3-precache-hls-safety.patch`，SHA-256 `9b48e895bd3923159f880152a54160e7c937b2b0369d717da559a7ad98fd14f7`。
+- 提交：`a007af32c85cb120f469c3dc34a58c2c7cd907ef`。
+- Recovery tag：`recovery/E-SP3-B/20260827113637-a007af32c85c`。
+
+## Checkpoint 5：2026-08-27 E-SP3-B Media3 产物已发布
+
+- 固定源码：`e3e922d5c01bc0b564849940fe589daf37360d15`；构建脚本按显式顺序应用全部既有补丁和 E-SP3-B 补丁。
+- 构建：Media3 发布成功，`474 actionable tasks: 474 executed`。全模块发布产生的无关机械改写已恢复，只保留真正受补丁影响的 `media3-exoplayer` AAR、sources JAR 和校验侧车。
+- AAR SHA-256：`485805506d44b739f3cd4bf179241f0322a3e52de6b29625c3133832eaa187ea`。
+- Sources SHA-256：`f378864ac3817fd95132268170e6c0ca6d3dc76f9a7eb09c51d60cb06027d442`。
+- 内容验证：sources 与 AAR bytecode 均包含 `Pre-cache download request unavailable`；MD5/SHA-1/SHA-256/SHA-512 发布侧车与实际文件一致。
+- App 验证：干净构建已成功完成 `:app:compileMobileArm64_v8aDebugJavaWithJavac`，证明新 AAR 可被当前 App 编译消费。
+- 提交：`97d02d72b1b4a3eed92d42cd6857fd822c036a8d`。
+- Recovery tag：`recovery/E-SP3-B-PUBLISH/20260827123702-97d02d72b1b4`。
+- 回滚：成套回滚该提交与前一补丁提交；不回滚 E-SP3-A、MPV 或 native 依赖。
+
+## Checkpoint 6：2026-08-27 设备验收阻塞
+
+- 设备：vivo V2453A，Android 15 / SDK 35，序列号 `10CF6H1D2L0009S` 已连接。
+- APK 构建：`:app:assembleMobileArm64_v8aDebug` 在完成 App Java 编译、dex 和 native merge 后，失败于既有 `:app:processMobileArm64_v8aDebugResources`。
+- 阻塞证据：缺少 `attr/selectableItemBackgroundBorderless`、`attr/resize_mode`、`Theme.Material3.DynamicColors.DayNight.NoActionBar`、`TextAppearance.MaterialComponents.Tooltip` 等 Material/UI 资源。该失败不在本任务声明路径，也不是 Exo AAR 编译错误。
+- 结论：没有候选 APK，故未安装到设备；不得宣称两次 seek suppression 或原 HLS 崩溃场景已通过实机验证。
+- 当前风险：代码与依赖产物已完成并可编译，但 Go/No-Go 的设备运行项仍未关闭。
+- 下一动作：单独解决或取得已知可构建基线中的 Material 资源链接问题后，重新构建 arm64 APK，安装到同一 vivo，清空 logcat，并按 6.2 的 seek/HLS 场景完成验收。
