@@ -307,15 +307,19 @@ PlayerView output Surface
   `:app:externalNativeBuildMobileArmeabi_v7aDebug`，两 ABI 均 `BUILD SUCCESSFUL`。
   此结果证明 native 源码、libplacebo/libdovi/shaderc 本地闭包和双 ABI 链接成立，
   不证明目标设备已经正常出帧、颜色正确或性能达标。
-- 保留门槛：renderer 仍未注册到生产 renderer 列表；capability probe 的版本位
-  名称/要求仍是 Vulkan 1.1，而 libplacebo 7 的实际最低版本是 Vulkan 1.2。
-  必须在下一独立单元修正 gate、增加 render 成败统计并以显式实验开关接线，
-  再进行目标设备 DV5 播放、截图、logcat、seek/lifecycle 验收。
-- E9-3d-wiring 准备：native capability bit 已按 libplacebo 7 的最低 Vulkan
+- 真机门槛：renderer 虽已具备受控注册条件，但内部实验默认关闭；没有目标设备
+  DV5 播放、截图、logcat、seek/lifecycle 证据前，不开启自动生产选择，也不宣称
+  色彩或性能验收通过。
+- E9-3d-wiring：native capability bit 已按 libplacebo 7 的最低 Vulkan
   1.2 要求校正，renderer 名称由 diagnostic 改为 experimental，统计新增
-  `renderedFrames` 与 `renderFailures`。注册前审查发现 PlayerView Surface 可能
-  先于 native renderer 设置，现有 sink 初始化不会补传已保存 Surface；因此本
-  单元不提前注册黑屏路径，下一小单元先修复该生命周期契约再完成 opt-in 接线。
+  `renderedFrames` 与 `renderFailures`。自定义 renderer 仅在现有内部实验总开关
+  与 Exo 域开关同时开启、native probe 完整通过时加入列表；它位于列表最前，
+  但对检测到“DV 显示能力 + 硬件 DV decoder”的设备主动返回 unsupported，保留
+  原生 DV。其余 Profile 5 才走普通硬件 HEVC decoder + VideoSink/Vulkan 路径，
+  并显式关闭 tunneling。sink 初始化会补传已经设置的 PlayerView Surface，避免
+  Surface 先到导致 native renderer 黑屏；native 首个成功 present 会触发 Media3
+  首帧通知，连续 3 次 Vulkan 渲染失败则上报 video-frame-processing error，避免
+  永久静默黑屏。
 - 回滚：回退本单元提交/恢复标签即可恢复到仅有 RPU 输送和本地头文件的状态；
   vendored native 依赖与现有 Exo/MPV 默认路径不受影响。
 

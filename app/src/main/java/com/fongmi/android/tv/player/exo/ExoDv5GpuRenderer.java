@@ -13,6 +13,7 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecInfo;
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector;
 import androidx.media3.decoder.DecoderInputBuffer;
 import androidx.media3.exoplayer.ExoPlaybackException;
+import androidx.media3.exoplayer.RendererCapabilities;
 import androidx.media3.exoplayer.video.MediaCodecVideoRenderer;
 import androidx.media3.exoplayer.video.VideoRendererEventListener;
 
@@ -23,6 +24,7 @@ import java.util.List;
 /** Experimental MediaCodec renderer targeting {@link ExoDv5VideoSink}. */
 final class ExoDv5GpuRenderer extends MediaCodecVideoRenderer {
 
+    private final Context context;
     private final ExoDv5VideoSink sink;
 
     ExoDv5GpuRenderer(
@@ -44,6 +46,7 @@ final class ExoDv5GpuRenderer extends MediaCodecVideoRenderer {
                         .setEventHandler(eventHandler)
                         .setEventListener(eventListener)
                         .setVideoSink(sink)));
+        this.context = context;
         this.sink = sink;
     }
 
@@ -60,7 +63,14 @@ final class ExoDv5GpuRenderer extends MediaCodecVideoRenderer {
                 || format.cryptoType != C.CRYPTO_TYPE_NONE) {
             return C.FORMAT_UNSUPPORTED_TYPE;
         }
-        return super.supportsFormat(selector, asHevc(format));
+        if (supportsNativeDolbyVision(selector, format)) {
+            return C.FORMAT_UNSUPPORTED_TYPE;
+        }
+        if (getDecoderInfos(selector, format, false).isEmpty()) {
+            return C.FORMAT_UNSUPPORTED_TYPE;
+        }
+        return super.supportsFormat(selector, asHevc(format))
+                & ~RendererCapabilities.TUNNELING_SUPPORT_MASK;
     }
 
     @Override
@@ -71,7 +81,14 @@ final class ExoDv5GpuRenderer extends MediaCodecVideoRenderer {
                 format.sampleMimeType, format.codecs)) {
             return List.of();
         }
-        return super.getDecoderInfos(selector, asHevc(format), false);
+        if (supportsNativeDolbyVision(selector, format)) return List.of();
+        List<MediaCodecInfo> infos = super.getDecoderInfos(
+                selector, asHevc(format), false);
+        List<MediaCodecInfo> hardwareInfos = new ArrayList<>(infos.size());
+        for (MediaCodecInfo info : infos) {
+            if (info != null && info.hardwareAccelerated) hardwareInfos.add(info);
+        }
+        return hardwareInfos;
     }
 
     @Override
@@ -102,6 +119,33 @@ final class ExoDv5GpuRenderer extends MediaCodecVideoRenderer {
                         DolbyVisionP81ExtractorsFactory.removeDolbyVisionCsd(
                                 format.initializationData))
                 .build();
+    }
+
+    private boolean supportsNativeDolbyVision(
+            MediaCodecSelector selector, Format format)
+            throws androidx.media3.exoplayer.mediacodec.MediaCodecUtil.DecoderQueryException {
+        if (android.os.Build.VERSION.SDK_INT < 26) return false;
+        android.hardware.display.DisplayManager displayManager =
+                (android.hardware.display.DisplayManager) context.getSystemService(
+                        Context.DISPLAY_SERVICE);
+        android.view.Display display = displayManager == null
+                ? null : displayManager.getDisplay(android.view.Display.DEFAULT_DISPLAY);
+        if (display == null || !display.isHdr()
+                || display.getHdrCapabilities() == null) return false;
+        boolean dolbyDisplay = false;
+        for (int hdrType : display.getHdrCapabilities().getSupportedHdrTypes()) {
+            if (hdrType == android.view.Display.HdrCapabilities.HDR_TYPE_DOLBY_VISION) {
+                dolbyDisplay = true;
+                break;
+            }
+        }
+        if (!dolbyDisplay) return false;
+        for (MediaCodecInfo info : selector.getDecoderInfos(
+                format.sampleMimeType, false, false)) {
+            if (info != null && info.hardwareAccelerated
+                    && info.isFormatSupported(context, format)) return true;
+        }
+        return false;
     }
 
     static List<byte[]> findRpuNalus(ByteBuffer source) {

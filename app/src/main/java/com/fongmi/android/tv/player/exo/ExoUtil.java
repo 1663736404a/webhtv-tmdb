@@ -828,6 +828,21 @@ public class ExoUtil {
         @Override
         protected void buildVideoRenderers(Context context, int extensionRendererMode, MediaCodecSelector mediaCodecSelector, boolean enableDecoderFallback, Handler eventHandler, VideoRendererEventListener eventListener, long allowedVideoJoiningTimeMs, ArrayList<Renderer> out) {
             MediaCodecSelector videoCodecSelector = getVideoCodecSelector(mediaCodecSelector);
+            try {
+                ExoDv5GpuRenderer dv5Renderer = ExoDv5GpuRendererFactory.create(
+                        PlaybackExperimentSetting.isDomainEnabled(
+                                PlaybackExperimentPolicy.Domain.EXO),
+                        context,
+                        getCodecAdapterFactory(),
+                        videoCodecSelector,
+                        allowedVideoJoiningTimeMs,
+                        enableDecoderFallback,
+                        eventHandler,
+                        eventListener,
+                        frameSchedulingDecision);
+                if (dv5Renderer != null) out.add(dv5Renderer);
+            } catch (Throwable ignored) {
+            }
             if (decoderRuntimeSession != null
                     && videoRenderMode == EXTENSION_RENDERER_MODE_OFF) {
                 out.add(new ExoRuntimeAwareVideoRenderer(

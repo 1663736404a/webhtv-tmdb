@@ -21,14 +21,14 @@ import java.util.Queue;
 import java.util.concurrent.Executor;
 
 /**
- * Diagnostic Media3 sink for validating MediaCodec -> AImageReader/AHardwareBuffer delivery.
- * This stage does not render to the display Surface and must not be registered in production.
+ * Experimental Media3 sink for MediaCodec -> AImageReader -> Vulkan/libplacebo output.
  */
 final class ExoDv5VideoSink implements VideoSink {
 
     static final int MAX_PENDING_FRAMES = 8;
     static final long EARLY_RELEASE_THRESHOLD_US = 50_000L;
     static final long DROP_THRESHOLD_US = -30_000L;
+    static final int MAX_CONSECUTIVE_RENDER_FAILURES = 3;
 
     private final Queue<PendingFrame> pendingFrames;
     private Listener listener;
@@ -43,6 +43,10 @@ final class ExoDv5VideoSink implements VideoSink {
     private boolean allowBeforeStarted;
     private boolean inputEnded;
     private boolean released;
+    private boolean firstFrameRendered;
+    private long observedRenderedFrames;
+    private long observedRenderFailures;
+    private int consecutiveRenderFailures;
 
     ExoDv5VideoSink() {
         pendingFrames = new ArrayDeque<>();
@@ -77,12 +81,15 @@ final class ExoDv5VideoSink implements VideoSink {
                         sourceFormat.sampleMimeType, sourceFormat.codecs)
                 || sourceFormat.cryptoType != C.CRYPTO_TYPE_NONE) {
             throw new VideoSinkException(
-                    new IllegalArgumentException("unsupported DV5 diagnostic format"),
+                    new IllegalArgumentException("unsupported DV5 Vulkan format"),
                     sourceFormat == null ? inputFormat : sourceFormat);
         }
         try {
             nativeRenderer = ExoDv5Native.create(
                     sourceFormat.width, sourceFormat.height);
+            if (outputSurface != null) {
+                nativeRenderer.setOutputSurface(outputSurface);
+            }
             inputFormat = sourceFormat;
             initialized = true;
             inputEnded = false;
@@ -99,7 +106,7 @@ final class ExoDv5VideoSink implements VideoSink {
 
     @Override
     public void redraw() {
-        // No display output exists in the E9-3b diagnostic stage.
+        // The swapchain retains the most recently presented frame.
     }
 
     @Override
@@ -109,6 +116,7 @@ final class ExoDv5VideoSink implements VideoSink {
         if (renderer != null) renderer.clearFrames();
         inputEnded = false;
         if (resetPosition) allowBeforeStarted = false;
+        if (resetPosition) resetRenderObservation();
     }
 
     @Override
@@ -170,6 +178,7 @@ final class ExoDv5VideoSink implements VideoSink {
     @Override
     public void setOutputSurfaceInfo(Surface outputSurface, Size outputResolution) {
         this.outputSurface = outputSurface;
+        resetRenderObservation();
         ExoDv5Native.NativeRenderer renderer = nativeRenderer;
         if (renderer != null) renderer.setOutputSurface(outputSurface);
     }
@@ -177,13 +186,14 @@ final class ExoDv5VideoSink implements VideoSink {
     @Override
     public void clearOutputSurfaceInfo() {
         outputSurface = null;
+        resetRenderObservation();
         ExoDv5Native.NativeRenderer renderer = nativeRenderer;
         if (renderer != null) renderer.setOutputSurface(null);
     }
 
     @Override
     public void setChangeFrameRateStrategy(int changeFrameRateStrategy) {
-        // E9-3b has no display Surface rendering.
+        // Surface frame-rate hints are left to the outer Media3 renderer.
     }
 
     @Override
@@ -230,6 +240,7 @@ final class ExoDv5VideoSink implements VideoSink {
     @Override
     public void render(long positionUs, long elapsedRealtimeUs)
             throws VideoSinkException {
+        updateRenderObservation();
         PendingFrame frame = pendingFrames.peek();
         if (frame == null) return;
         long earlyUs = frame.presentationTimeUs() - positionUs;
@@ -303,6 +314,44 @@ final class ExoDv5VideoSink implements VideoSink {
         if (presentationTimeUs > Long.MAX_VALUE / 1_000L) return Long.MAX_VALUE;
         if (presentationTimeUs < Long.MIN_VALUE / 1_000L) return Long.MIN_VALUE;
         return presentationTimeUs * 1_000L;
+    }
+
+    private void updateRenderObservation() throws VideoSinkException {
+        ExoDv5Native.NativeRenderer renderer = nativeRenderer;
+        if (renderer == null || outputSurface == null) return;
+        ExoDv5Native.Stats stats = renderer.stats();
+        long renderedDelta = Math.max(0,
+                stats.renderedFrames() - observedRenderedFrames);
+        long failureDelta = Math.max(0,
+                stats.renderFailures() - observedRenderFailures);
+        observedRenderedFrames = stats.renderedFrames();
+        observedRenderFailures = stats.renderFailures();
+        if (renderedDelta > 0) {
+            consecutiveRenderFailures = 0;
+            if (!firstFrameRendered) {
+                firstFrameRendered = true;
+                listenerExecutor.execute(listener::onFirstFrameRendered);
+            }
+        } else if (failureDelta > 0) {
+            consecutiveRenderFailures = (int) Math.min(
+                    MAX_CONSECUTIVE_RENDER_FAILURES,
+                    consecutiveRenderFailures + failureDelta);
+        }
+        if (consecutiveRenderFailures >= MAX_CONSECUTIVE_RENDER_FAILURES) {
+            throw new VideoSinkException(
+                    new IllegalStateException("DV5 Vulkan rendering failed"),
+                    inputFormat);
+        }
+    }
+
+    private void resetRenderObservation() {
+        firstFrameRendered = false;
+        consecutiveRenderFailures = 0;
+        ExoDv5Native.NativeRenderer renderer = nativeRenderer;
+        ExoDv5Native.Stats stats = renderer == null
+                ? ExoDv5Native.Stats.empty() : renderer.stats();
+        observedRenderedFrames = stats.renderedFrames();
+        observedRenderFailures = stats.renderFailures();
     }
 
     private void skipPendingFrames(boolean notify) {
