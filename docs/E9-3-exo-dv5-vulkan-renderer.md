@@ -220,6 +220,17 @@ PlayerView output Surface
 - 未完成：libplacebo Vulkan 外部图像导入、PlayerView 输出和逐帧 Dolby Vision RPU 映射仍属于后续功能单元；当前 renderer 仍保持诊断/显式 opt-in，默认播放行为不变。
 - 回滚：回退本单元提交即可移除本地依赖和 CMake 链接，恢复 `c94ba7c9464f4cb43df351e471e8aa2df7132178` 的诊断底座。
 - 下一动作：在独立后续单元中补齐 Vulkan/AHardwareBuffer 到输出 Surface 的实际渲染，再进行目标设备 DV5 色彩验收。
+
+## 15. E9-3c-render 检查点
+
+- 检查点摘要：libdovi-3.3.2 builds for both Android ABIs in isolated output; current libplacebo archive lacks libdovi mapping support; no incomplete renderer was committed
+- 下一动作：Start a new native asset unit to vendor libdovi C API and both ABI archives before wiring Vulkan renderer
+- 已验证：`libdovi-3.3.2`（commit `4fd2b2235c9f93582dd4a00e65ee34a07800afd7`）使用 NDK `29.0.14206865`、Android API 26 linker 在独立临时目录成功生成 `aarch64-linux-android` 与 `armv7-linux-androideabi` 静态库；未写入其他工作区。
+- 已验证：当前本地 libplacebo 归档是 `pl_has_dovi=1` 但 `pl_has_libdovi=0`；因此仅链接现有归档不能解析 RPU，也不能生成 `pl_dovi_metadata`。现有 ExoplayerHdrUtils JNI 只提供 profile/frame info，不能替代该接口。
+- 未完成：本单元没有提交伪 Vulkan 输出或不完整 RPU 映射；当前 `VideoSink` 仍是诊断底座，生产路径和默认播放行为不变。
+- 原因：要继续实现必须新增独立 libdovi C API 头/双 ABI归档，并将 `RpuDataMapping` 完整映射到 libplacebo 的 `pl_dovi_metadata`；这是新的 native 资产和 ABI 单元，不能在没有完整头文件/真机输出验证时冒充完成。
+- 回滚锚点：`893a2cca7b56f953976d74d52317862bca6deb6c`。
+- 下一动作：启动新的独立 native 资产单元，先把 libdovi C API（含 mapping structs）和双 ABI 归档本地化，再接入 Vulkan renderer。
 - 目标：把 Exo DV5 renderer 所需的 libplacebo/shaderc 双 ABI 静态闭包复制进当前仓库，禁止运行时或构建时引用 `main-2` 绝对路径。
 - 分支/基线：`exo-dv5` / `c94ba7c9464f4cb43df351e471e8aa2df7132178`；恢复时工作树无预先存在的脏文件。
 - 已确认来源：libplacebo `b694a21bf2dc176c1e98b8a13c6421a0de5f3da5`（7.375.0/API 375），arm64-v8a 与 armeabi-v7a 各自独立构建；shaderc 来自 Android NDK `29.0.14206865` 随附源码，组合归档包含 239 个对象。
