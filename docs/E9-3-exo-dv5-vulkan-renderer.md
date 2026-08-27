@@ -171,6 +171,15 @@ PlayerView output Surface
 
 ## 10. 当前检查点
 
-- 已完成：方案、证据、替代比较、验收和回滚边界；用户已明确要求按最佳实践继续实现。
+- 已完成：方案、证据、替代比较、验收和回滚边界；用户已明确要求按最佳实践继续实现。E9-3a 已新增纯 Java 路由/能力策略，覆盖原生 DV、API 31+ codec tone-map、实验性 GPU mapping、显式旧 HDR10 兼容和不支持结果；现有 P5 兼容 renderer 已接入该策略但保持原默认行为。
 - 未完成风险：尚未用目标设备验证 Exo 自建 AImageReader Surface 是否得到与 MPV 相同的 10-bit external format；这是 E9-3b 的硬门槛。
-- 下一动作：实现 E9-3a 的纯 Java 能力/路由契约和测试，并建立不抢占生产 renderer 的 native capability 接口。
+- 下一动作：完成 E9-3a 的定向 JVM 验证并提交恢复点，然后为 E9-3b 声明 native/Java/build 的独立范围。
+
+## 11. E9-3a 实施记录
+
+- 代码：新增 `ExoDv5GpuMappingPolicy`。GPU 路由要求 Profile 5、非 DRM、API 26+、非 tunneling、普通 HEVC 硬解器、独立 renderer native 库、Vulkan/AHardwareBuffer probe 和实验开关全部通过；原生 DV 和 API 31+ 已接受的 codec tone-map 优先。DRM 即使允许旧兼容也不会进入 GPU 或旧 HDR10 fallback。
+- 接线：`ExoUtil.shouldUseDolbyVisionHdr10Fallback` 的 Profile 5 分支改由策略返回值决定。E9-3a 没有注册不存在的 `VideoSink`，现有非 DRM Profile 5 默认仍进入旧兼容 renderer，等待 E9-3b/c 真机成立后再调整生产优先级。
+- 测试：独立 JUnit 4.13.2 执行 `ExoDv5GpuMappingPolicyTest`，9 个用例通过；`:app:compileMobileArm64_v8aDebugJavaWithJavac` 成功，证明 App/Media3 接线可编译。
+- 已知验证阻断：`:app:testMobileArm64_v8aDebugUnitTest` 在执行测试前的 `processMobileArm64_v8aDebugResources` 失败，缺少既有 Material/Media3 style/attr/color 资源。本单元未修改资源或依赖，故没有扩大范围处理该基线问题，也不把新增 JUnit 结果表述为 Android Gradle 测试任务通过。
+- 回滚：回退 E9-3a commit/tag 即恢复原 Profile 5 fallback 判断；没有 native 资产、Media3 AAR、设置或数据库变更。
+- 下一动作：启动 E9-3b 独立实现单元，先完成 AImageReader/`AHardwareBuffer` capability bridge、`VideoSink` Surface 生命周期和有界 PTS 配对；DV 映射仍保持关闭。
