@@ -4,7 +4,7 @@
 
 文档状态：进行中。本文按检查点持续落盘；未标记“已完成逐提交审阅”的仓库，不应据此直接升级依赖。
 
-当前恢复入口：以“稳定任务 ID 与唯一文档索引”及各任务文档顶部状态为准。完整逐提交审计已完成至检查点 43；`E1`、`E2-2`、`E-SP1`、`E2-1`、`E3-1a`、`E7-1`、`E7-2 + C3` 已实施，`E-SP2` 候选已接入但仍待实机性能/seek 验收。后续仍按 Exo → MPV 顺序处理；`C2` 默认暂缓。
+当前恢复入口：以“稳定任务 ID 与唯一文档索引”及各任务文档顶部状态为准。完整逐提交审计已完成至检查点 43；`E1`、`E2-2`、`E-SP1`、`E2-1`、`E3-1a`、`E7-1`、`E7-2 + C3` 以及 `E-SP3` 已合入 `fongmi-sync`，`E-SP2` 候选已接入但仍待实机性能/seek 验收。后续仍按 Exo → MPV 顺序处理；`C2` 默认暂缓。
 
 ## 稳定任务 ID 与唯一文档索引
 
@@ -26,7 +26,8 @@
 | 2 | `E2-2` | Exo | DV7→P8.1 codec/CSD 一致性 | 已实施 | [E2-2-exo-dv7-p81-csd.md](E2-2-exo-dv7-p81-csd.md) |
 | 3 | `E-SP1` | Exo 性能 | 首帧已渲染时立即解除遮罩 | 已完成 | [E-SP1-exo-first-frame-visible.md](E-SP1-exo-first-frame-visible.md) |
 | 4 | `E-SP2` | Exo 性能 | 远程大 MKV 延后 Cues、首次 seek 按需建索引 | 候选已实现，待实机性能/seek 验收 | [E-SP2-exo-remote-mkv-deferred-cues.md](E-SP2-exo-remote-mkv-deferred-cues.md) |
-| 5 | `E2-1` | Exo | HDR/Dolby Vision parser safety | **已完成** | [E2-1-exo-hdr-parser-safety.md](E2-1-exo-hdr-parser-safety.md) |
+| 5 | `E-SP3` | Exo 性能/生命周期 | seek 预载隔离、HLS 预缓存崩溃防护和 seek 恢复门槛 | **已合入 `fongmi-sync`**：App `17f1a4cfe2547b8f3ddc61fab34212e77ae719ff`，Media3 `c9d3bd912b90ec0ca440c28455f3e6d9bba019ea` | [E-SP3-exo-seek-preload-isolation.md](E-SP3-exo-seek-preload-isolation.md) |
+| 6 | `E2-1` | Exo | HDR/Dolby Vision parser safety | **已完成** | [E2-1-exo-hdr-parser-safety.md](E2-1-exo-hdr-parser-safety.md) |
 | 6 | `E3-1a` | Exo | Pixel E-AC3 JOC capability guard | 已实施：`cda1ac8cf2f5d4d9c3beec68b0b520d6f7c218ec` / `recovery/E3-1a/20260826175658-cda1ac8cf2f5` | [E3-1a-exo-pixel-eac3-joc-guard.md](E3-1a-exo-pixel-eac3-joc-guard.md) |
 | 7 | `E3-1b` | Exo | DTS 14-bit 解析 | 已实施：`27b85eeeed5ceb55e56a67ae3b5cf8ff64b8da40` / `recovery/E3-1b/20260826201735-27b85eeeed5c` | [E3-1b-exo-dts-14bit.md](E3-1b-exo-dts-14bit.md) |
 | 8 | `E4-1` | Exo | 字幕字节与边界安全 | **已完成：A4-1a/A4-1b** | [E4-1-exo-subtitle-byte-safety.md](E4-1-exo-subtitle-byte-safety.md) |
@@ -44,7 +45,7 @@
 | 20 | `C2` | 通用 | FFmpeg DV7→P8.1 BSF | 暂缓；不自动启用 | `docs/C2-dv7-p81-bsf.md` |
 | 21 | `C3` | 通用 | ISO multi-extent App resolver | **已随 `E7-2` 联合实施并通过 App 编译**：`5f7d834bfdd00f215609df7b41c2ea7cadc2cd4f` / `recovery/E7-2-C3/20260827193629-5f7d834bfdd0`；真实 split metadata 未验收 | [C3-iso-multi-extent-resolver.md](C3-iso-multi-extent-resolver.md) |
 
-`C1` 是跨播放器真实输入验收维度，不单独形成代码任务或文档；它写入对应的 E/P 任务文档。当前 Exo 队列已推进至 `E7-2 + C3`，下一项按既定顺序进入 `P0` MPV native 基线、等价提交与运行验收评估。
+`C1` 是跨播放器真实输入验收维度，不单独形成代码任务或文档；它写入对应的 E/P 任务文档。`E-SP3` 已在 `fongmi-sync` 完成 App/Media3 合并，保留既有 `E4-J1`/`E6-1`/`E7-1`/`E7-2 + C3` 能力；下一项仍按既定顺序进入 `P0` MPV native 基线、等价提交与运行验收评估。
 
 ## 目标与决策顺序
 
