@@ -170,11 +170,15 @@ final class ExoDv5VideoSink implements VideoSink {
     @Override
     public void setOutputSurfaceInfo(Surface outputSurface, Size outputResolution) {
         this.outputSurface = outputSurface;
+        ExoDv5Native.NativeRenderer renderer = nativeRenderer;
+        if (renderer != null) renderer.setOutputSurface(outputSurface);
     }
 
     @Override
     public void clearOutputSurfaceInfo() {
         outputSurface = null;
+        ExoDv5Native.NativeRenderer renderer = nativeRenderer;
+        if (renderer != null) renderer.setOutputSurface(null);
     }
 
     @Override
@@ -280,6 +284,11 @@ final class ExoDv5VideoSink implements VideoSink {
     ExoDv5Native.Stats stats() {
         ExoDv5Native.NativeRenderer renderer = nativeRenderer;
         return renderer == null ? ExoDv5Native.Stats.empty() : renderer.stats();
+    }
+
+    void queueRpu(long presentationTimeUs, byte[] rpu) {
+        ExoDv5Native.NativeRenderer renderer = nativeRenderer;
+        if (renderer != null) renderer.queueRpu(presentationTimeUs, rpu);
     }
 
     static FrameAction frameAction(

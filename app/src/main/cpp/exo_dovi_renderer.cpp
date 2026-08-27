@@ -39,8 +39,10 @@ struct ExpectedFrame {
 
 struct Renderer {
     AImageReader *reader = nullptr;
+    ANativeWindow *outputWindow = nullptr;
     std::mutex callbackMutex;
     std::mutex expectedMutex;
+    std::mutex rpuMutex;
     std::deque<ExpectedFrame> expectedFrames;
     std::atomic<int64_t> acquiredFrames{0};
     std::atomic<int64_t> ahbFrames{0};
@@ -52,6 +54,10 @@ struct Renderer {
     std::atomic<int64_t> lastImageTimestampNs{0};
     std::atomic<int64_t> lastPresentationTimeUs{0};
     std::atomic<int64_t> lastAhbFormat{0};
+    std::atomic<int64_t> parsedRpus{0};
+    std::atomic<int64_t> malformedRpus{0};
+    std::atomic<int64_t> rpuQueueDrops{0};
+    std::deque<int64_t> pendingRpus;
 };
 
 bool hasExtension(const std::vector<VkExtensionProperties> &extensions,
@@ -368,8 +374,68 @@ Java_com_fongmi_android_tv_player_exo_ExoDv5Native_nativeClearFrames(
         JNIEnv *, jclass, jlong handle) {
     Renderer *renderer = fromHandle(handle);
     if (renderer == nullptr) return;
-    std::lock_guard<std::mutex> lock(renderer->expectedMutex);
-    renderer->expectedFrames.clear();
+    {
+        std::lock_guard<std::mutex> lock(renderer->expectedMutex);
+        renderer->expectedFrames.clear();
+    }
+    {
+        std::lock_guard<std::mutex> lock(renderer->rpuMutex);
+        renderer->pendingRpus.clear();
+    }
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_fongmi_android_tv_player_exo_ExoDv5Native_nativeQueueRpu(
+        JNIEnv *env, jclass, jlong handle, jlong presentationTimeUs,
+        jbyteArray rpuArray) {
+    Renderer *renderer = fromHandle(handle);
+    if (renderer == nullptr || rpuArray == nullptr) return JNI_FALSE;
+    const jsize length = env->GetArrayLength(rpuArray);
+    if (length < 2) return JNI_FALSE;
+    jbyte *bytes = env->GetByteArrayElements(rpuArray, nullptr);
+    if (bytes == nullptr) return JNI_FALSE;
+    DoviRpuOpaque *rpu = dovi_parse_unspec62_nalu(
+            reinterpret_cast<const uint8_t *>(bytes), static_cast<size_t>(length));
+    env->ReleaseByteArrayElements(rpuArray, bytes, JNI_ABORT);
+    if (rpu == nullptr) {
+        renderer->malformedRpus.fetch_add(1, std::memory_order_relaxed);
+        return JNI_FALSE;
+    }
+    const DoviRpuDataHeader *header = dovi_rpu_get_header(rpu);
+    const DoviRpuDataMapping *mapping = dovi_rpu_get_data_mapping(rpu);
+    const bool valid = header != nullptr && header->rpu_type == 2;
+    if (mapping != nullptr) dovi_rpu_free_data_mapping(mapping);
+    if (header != nullptr) dovi_rpu_free_header(header);
+    const char *error = dovi_rpu_get_error(rpu);
+    if (!valid || error != nullptr) {
+        renderer->malformedRpus.fetch_add(1, std::memory_order_relaxed);
+        dovi_rpu_free(rpu);
+        return JNI_FALSE;
+    }
+    dovi_rpu_free(rpu);
+    std::lock_guard<std::mutex> lock(renderer->rpuMutex);
+    if (renderer->pendingRpus.size() >= kMaxExpectedFrames) {
+        renderer->pendingRpus.pop_front();
+        renderer->rpuQueueDrops.fetch_add(1, std::memory_order_relaxed);
+    }
+    renderer->pendingRpus.push_back(presentationTimeUs);
+    renderer->parsedRpus.fetch_add(1, std::memory_order_relaxed);
+    return JNI_TRUE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_fongmi_android_tv_player_exo_ExoDv5Native_nativeSetOutputSurface(
+        JNIEnv *env, jclass, jlong handle, jobject surface) {
+    Renderer *renderer = fromHandle(handle);
+    if (renderer == nullptr) return;
+    ANativeWindow *newWindow = surface == nullptr
+            ? nullptr : ANativeWindow_fromSurface(env, surface);
+    std::lock_guard<std::mutex> lock(renderer->callbackMutex);
+    if (renderer->outputWindow != nullptr) {
+        ANativeWindow_release(renderer->outputWindow);
+        renderer->outputWindow = nullptr;
+    }
+    renderer->outputWindow = newWindow;
 }
 
 extern "C" JNIEXPORT jlongArray JNICALL
@@ -381,6 +447,11 @@ Java_com_fongmi_android_tv_player_exo_ExoDv5Native_nativeGetStats(
     {
         std::lock_guard<std::mutex> lock(renderer->expectedMutex);
         pending = static_cast<int64_t>(renderer->expectedFrames.size());
+    }
+    int64_t pendingRpus = 0;
+    {
+        std::lock_guard<std::mutex> lock(renderer->rpuMutex);
+        pendingRpus = static_cast<int64_t>(renderer->pendingRpus.size());
     }
     jlong values[] = {
             renderer->acquiredFrames.load(std::memory_order_relaxed),
@@ -394,6 +465,10 @@ Java_com_fongmi_android_tv_player_exo_ExoDv5Native_nativeGetStats(
             renderer->lastPresentationTimeUs.load(std::memory_order_relaxed),
             renderer->lastAhbFormat.load(std::memory_order_relaxed),
             pending,
+            renderer->parsedRpus.load(std::memory_order_relaxed),
+            renderer->malformedRpus.load(std::memory_order_relaxed),
+            renderer->rpuQueueDrops.load(std::memory_order_relaxed),
+            pendingRpus,
     };
     jlongArray result = env->NewLongArray(std::size(values));
     if (result != nullptr) {
@@ -412,6 +487,10 @@ Java_com_fongmi_android_tv_player_exo_ExoDv5Native_nativeRelease(
         std::lock_guard<std::mutex> callbackLock(renderer->callbackMutex);
         AImageReader_delete(renderer->reader);
         renderer->reader = nullptr;
+    }
+    if (renderer->outputWindow != nullptr) {
+        ANativeWindow_release(renderer->outputWindow);
+        renderer->outputWindow = nullptr;
     }
     delete renderer;
 }

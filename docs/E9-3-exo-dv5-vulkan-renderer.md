@@ -262,3 +262,26 @@ PlayerView output Surface
   CMake 导入和 capability parser probe；上一阶段 libplacebo 诊断底座不变。
 - 下一动作：覆盖 `MediaCodecRenderer.onQueueInputBuffer` 提取 NAL type 62，
   以 PTS 有界排队到 native 并完成 metadata 生命周期，然后接入 Vulkan 输出。
+
+## 17. E9-3c-renderer RPU 接线记录
+
+- Media3：`ExoDv5GpuRenderer` 覆盖 `onQueueInputBuffer`；该 hook 在锁定版
+  Media3 的 `DecoderInputBuffer.flip()` 之后、`MediaCodec.queueInputBuffer()`
+  之前执行。扫描器不修改原 ByteBuffer，支持 Annex-B 3/4 字节起始码和
+  1/2/4 字节长度前缀，只复制 HEVC NAL type 62。
+- JNI/native：每个 RPU 带原始 `buffer.timeUs` 送入 native；libdovi 必须
+  成功解析 header（`rpu_type == 2`）和 mapping 才进入 16 帧有界队列。
+  统计有效 RPU、malformed RPU、队列丢弃和当前 pending；flush/seek 同时
+  清除 expected-frame 与 RPU 队列，避免旧 metadata 污染 seek 后帧。
+- Surface：`VideoSink.setOutputSurfaceInfo/clearOutputSurfaceInfo` 已转发到 JNI，
+  native 使用 `ANativeWindow_fromSurface` 获取独立引用，并在 Surface 替换、
+  clear 和 renderer release 时成对释放；当前尚未用该 window 创建 swapchain。
+- 验证边界：App Java 与 arm64-v8a/armeabi-v7a native 构建通过。NAL 扫描
+  测试新增 Annex-B、四字节长度前缀和输入 position 不变断言；Android Gradle
+  单测任务仍受既有资源链接基线错误约束。
+- 当前限制：本单元完成 AU→RPU parser 与 Surface 所有权接线，但 AHB 尚未
+  import 为 Vulkan external image，RPU mapping 也尚未转换成
+  `pl_dovi_metadata` 并送入 `pl_render_image`，所以仍不能宣称色彩恢复。
+- 下一动作：本地化完整 libplacebo API 375 公共头，然后实现 Vulkan context、
+  Android swapchain、AHB external-format import、raw DV component mapping 和
+  同步 `pl_render_image` 输出。

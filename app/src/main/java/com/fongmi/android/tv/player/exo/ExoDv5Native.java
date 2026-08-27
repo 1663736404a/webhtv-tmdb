@@ -14,12 +14,14 @@ final class ExoDv5Native {
     static final int CAPABILITY_YCBCR_CONVERSION = 1 << 3;
     static final int CAPABILITY_FOREIGN_QUEUE = 1 << 4;
     static final int CAPABILITY_LIBPLACEBO_375 = 1 << 5;
+    static final int CAPABILITY_LIBDOVI = 1 << 6;
     static final int REQUIRED_CAPABILITIES = CAPABILITY_IMAGE_READER
             | CAPABILITY_VULKAN_11
             | CAPABILITY_AHB_IMPORT
             | CAPABILITY_YCBCR_CONVERSION
             | CAPABILITY_FOREIGN_QUEUE
-            | CAPABILITY_LIBPLACEBO_375;
+            | CAPABILITY_LIBPLACEBO_375
+            | CAPABILITY_LIBDOVI;
 
     private static final LoadResult LOAD_RESULT = loadLibrary();
 
@@ -92,10 +94,15 @@ final class ExoDv5Native {
             long lastImageTimestampNs,
             long lastPresentationTimeUs,
             long lastAhbFormat,
-            long pendingFrames) {
+            long pendingFrames,
+            long parsedRpus,
+            long malformedRpus,
+            long rpuQueueDrops,
+            long pendingRpus) {
 
         static Stats empty() {
-            return new Stats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            return new Stats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0);
         }
     }
 
@@ -124,14 +131,24 @@ final class ExoDv5Native {
             if (handle != 0) nativeClearFrames(handle);
         }
 
+        synchronized boolean queueRpu(long presentationTimeUs, byte[] rpu) {
+            return handle != 0 && rpu != null && rpu.length >= 2
+                    && nativeQueueRpu(handle, presentationTimeUs, rpu);
+        }
+
+        synchronized void setOutputSurface(@Nullable Surface surface) {
+            if (handle != 0) nativeSetOutputSurface(handle, surface);
+        }
+
         synchronized Stats stats() {
             if (handle == 0) return Stats.empty();
             long[] values = nativeGetStats(handle);
-            if (values == null || values.length < 11) return Stats.empty();
+            if (values == null || values.length < 15) return Stats.empty();
             return new Stats(
                     values[0], values[1], values[2], values[3], values[4],
                     values[5], values[6], values[7], values[8], values[9],
-                    values[10]);
+                    values[10], values[11], values[12], values[13],
+                    values[14]);
         }
 
         @Override
@@ -158,6 +175,12 @@ final class ExoDv5Native {
             long handle, long imageTimestampNs, long presentationTimeUs);
 
     private static native void nativeClearFrames(long handle);
+
+    private static native boolean nativeQueueRpu(
+            long handle, long presentationTimeUs, byte[] rpu);
+
+    private static native void nativeSetOutputSurface(
+            long handle, @Nullable Surface surface);
 
     @Nullable private static native long[] nativeGetStats(long handle);
 

@@ -11,9 +11,13 @@ import androidx.media3.common.MimeTypes;
 import androidx.media3.exoplayer.mediacodec.MediaCodecAdapter;
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo;
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector;
+import androidx.media3.decoder.DecoderInputBuffer;
+import androidx.media3.exoplayer.ExoPlaybackException;
 import androidx.media3.exoplayer.video.MediaCodecVideoRenderer;
 import androidx.media3.exoplayer.video.VideoRendererEventListener;
 
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.List;
 
 /** Diagnostic-only MediaCodec renderer targeting {@link ExoDv5VideoSink}. */
@@ -76,6 +80,16 @@ final class ExoDv5GpuRenderer extends MediaCodecVideoRenderer {
         return super.getMediaCodecConfiguration(info, asHevc(format), crypto, rate);
     }
 
+    @Override
+    protected void onQueueInputBuffer(DecoderInputBuffer buffer)
+            throws ExoPlaybackException {
+        ByteBuffer data = buffer.data;
+        if (data == null || buffer.isEncrypted()) return;
+        for (byte[] rpu : findRpuNalus(data)) {
+            sink.queueRpu(buffer.timeUs, rpu);
+        }
+    }
+
     ExoDv5Native.Stats diagnosticStats() {
         return sink.stats();
     }
@@ -88,5 +102,75 @@ final class ExoDv5GpuRenderer extends MediaCodecVideoRenderer {
                         DolbyVisionP81ExtractorsFactory.removeDolbyVisionCsd(
                                 format.initializationData))
                 .build();
+    }
+
+    static List<byte[]> findRpuNalus(ByteBuffer source) {
+        ByteBuffer data = source.duplicate();
+        int start = data.position();
+        int limit = data.limit();
+        List<byte[]> result = new ArrayList<>();
+        if (findStartCode(data, start, limit) >= 0) {
+            int cursor = start;
+            while (true) {
+                int prefix = findStartCode(data, cursor, limit);
+                if (prefix < 0) break;
+                int prefixSize = data.get(prefix + 2) == 1 ? 3 : 4;
+                int nalStart = prefix + prefixSize;
+                int next = findStartCode(data, nalStart, limit);
+                int nalEnd = next < 0 ? limit : next;
+                addRpu(data, nalStart, nalEnd, result);
+                if (next < 0) break;
+                cursor = next;
+            }
+            return result;
+        }
+        for (int lengthSize : new int[] {4, 2, 1}) {
+            List<byte[]> candidate = parseLengthPrefixed(
+                    data, start, limit, lengthSize);
+            if (candidate != null) return candidate;
+        }
+        return result;
+    }
+
+    private static List<byte[]> parseLengthPrefixed(
+            ByteBuffer data, int start, int limit, int lengthSize) {
+        List<byte[]> result = new ArrayList<>();
+        int cursor = start;
+        boolean sawNal = false;
+        while (cursor < limit) {
+            if (limit - cursor < lengthSize) return null;
+            long length = 0;
+            for (int i = 0; i < lengthSize; i++) {
+                length = (length << 8) | (data.get(cursor + i) & 0xffL);
+            }
+            cursor += lengthSize;
+            if (length < 2 || length > limit - cursor) return null;
+            int nalEnd = cursor + (int) length;
+            addRpu(data, cursor, nalEnd, result);
+            sawNal = true;
+            cursor = nalEnd;
+        }
+        return sawNal ? result : null;
+    }
+
+    private static void addRpu(
+            ByteBuffer data, int start, int end, List<byte[]> output) {
+        if (end - start < 2 || ((data.get(start) & 0x7e) >> 1) != 62) return;
+        byte[] nal = new byte[end - start];
+        ByteBuffer copy = data.duplicate();
+        copy.position(start);
+        copy.limit(end);
+        copy.get(nal);
+        output.add(nal);
+    }
+
+    private static int findStartCode(ByteBuffer data, int start, int limit) {
+        for (int i = start; i + 3 <= limit; i++) {
+            if (data.get(i) != 0 || data.get(i + 1) != 0) continue;
+            if (data.get(i + 2) == 1) return i;
+            if (i + 4 <= limit && data.get(i + 2) == 0
+                    && data.get(i + 3) == 1) return i;
+        }
+        return -1;
     }
 }

@@ -2,6 +2,10 @@ package com.fongmi.android.tv.player.exo;
 
 import org.junit.Test;
 
+import java.nio.ByteBuffer;
+import java.util.List;
+
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -66,5 +70,34 @@ public class ExoDv5GpuRendererTest {
         assertTrue(probe.has(ExoDv5Native.CAPABILITY_IMAGE_READER));
         assertTrue(probe.has(ExoDv5Native.CAPABILITY_AHB_IMPORT));
         assertFalse(probe.has(ExoDv5Native.CAPABILITY_YCBCR_CONVERSION));
+    }
+
+    @Test
+    public void extractsRpuFromAnnexBWithoutMutatingInput() {
+        ByteBuffer sample = ByteBuffer.wrap(new byte[] {
+                0, 0, 0, 1, 0x40, 1, 9,
+                0, 0, 1, 0x7c, 1, 2, 3,
+        });
+        sample.position(2);
+        int position = sample.position();
+
+        List<byte[]> rpus = ExoDv5GpuRenderer.findRpuNalus(sample);
+
+        assertEquals(position, sample.position());
+        assertEquals(1, rpus.size());
+        assertArrayEquals(new byte[] {0x7c, 1, 2, 3}, rpus.get(0));
+    }
+
+    @Test
+    public void extractsRpuFromFourByteLengthPrefixedAccessUnit() {
+        ByteBuffer sample = ByteBuffer.wrap(new byte[] {
+                0, 0, 0, 3, 0x40, 1, 9,
+                0, 0, 0, 4, 0x7c, 1, 2, 3,
+        });
+
+        List<byte[]> rpus = ExoDv5GpuRenderer.findRpuNalus(sample);
+
+        assertEquals(1, rpus.size());
+        assertArrayEquals(new byte[] {0x7c, 1, 2, 3}, rpus.get(0));
     }
 }
