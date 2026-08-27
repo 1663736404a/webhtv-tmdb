@@ -13,11 +13,13 @@ final class ExoDv5Native {
     static final int CAPABILITY_AHB_IMPORT = 1 << 2;
     static final int CAPABILITY_YCBCR_CONVERSION = 1 << 3;
     static final int CAPABILITY_FOREIGN_QUEUE = 1 << 4;
+    static final int CAPABILITY_LIBPLACEBO_375 = 1 << 5;
     static final int REQUIRED_CAPABILITIES = CAPABILITY_IMAGE_READER
             | CAPABILITY_VULKAN_11
             | CAPABILITY_AHB_IMPORT
             | CAPABILITY_YCBCR_CONVERSION
-            | CAPABILITY_FOREIGN_QUEUE;
+            | CAPABILITY_FOREIGN_QUEUE
+            | CAPABILITY_LIBPLACEBO_375;
 
     private static final LoadResult LOAD_RESULT = loadLibrary();
 

@@ -7,6 +7,8 @@
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_android.h>
 
+#include <libplacebo/config.h>
+
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
@@ -26,6 +28,7 @@ constexpr jint kCapabilityVulkan11 = 1 << 1;
 constexpr jint kCapabilityAhbImport = 1 << 2;
 constexpr jint kCapabilityYcbcrConversion = 1 << 3;
 constexpr jint kCapabilityForeignQueue = 1 << 4;
+constexpr jint kCapabilityLibplacebo375 = 1 << 5;
 
 struct ExpectedFrame {
     int64_t imageTimestampNs;
@@ -284,6 +287,11 @@ Java_com_fongmi_android_tv_player_exo_ExoDv5Native_nativeProbeCapabilities(
         JNIEnv *env, jclass) {
     jint result = probeVulkan();
     if (probeImageReader(env)) result |= kCapabilityImageReader;
+    const char *placeboVersion = pl_version();
+    if (PL_API_VER == 375 && placeboVersion != nullptr
+            && placeboVersion[0] != '\0') {
+        result |= kCapabilityLibplacebo375;
+    }
     return result;
 }
 

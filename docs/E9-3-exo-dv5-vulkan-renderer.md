@@ -204,3 +204,26 @@ PlayerView output Surface
 - 未解决风险：目标设备尚未运行 capability probe/codec Surface 出帧；AImageReader 回调销毁只完成静态审计，尚无设备压力验证；本阶段不具备显示输出和 DV mapping。
 - 回滚锚点：`7f665b7d858454fa19919b1e0b69b0f239ac9587`。
 - 下一动作：Run ExoDv5GpuRendererTest with Gradle JDK 21, finish release-lifecycle review, then commit and tag E9-3b.
+
+## 13. E9-3c 依赖本地化检查点
+
+- 检查点摘要：E9-3c dependency provenance and missing armv7 shaderc resolved; isolated r29 build succeeded
+- 下一动作：Copy the two-ABI libplacebo/shaderc closure into third_party/exo-dv5-native and link it from local CMake
+
+## 14. E9-3c 依赖本地化实施记录
+
+- 已完成：在当前仓库新增 `third_party/exo-dv5-native`，复制 libplacebo 7.375.0/API 375 的 arm64-v8a、armeabi-v7a 静态库，以及使用 NDK r29/API 24 独立生成的两 ABI shaderc 组合归档；构建和运行时不再读取 `main-2` 路径。
+- CMake：`app/src/main/cpp/CMakeLists.txt` 通过 `${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/exo-dv5-native` 引入 ABI 对应归档，链接 `libdl`、`libm`、Android/MediaNDK/Vulkan，并启用 libplacebo 的静态 pthread 配置。
+- Native 探针：`exo_dovi_renderer.cpp` 调用 `pl_version()` 并只在 API 375 库可用时上报 `CAPABILITY_LIBPLACEBO_375`；Java 能力门控已将该位列为必需能力。
+- 资产哈希：见 `third_party/exo-dv5-native/MANIFEST.sha256`。来源版本为 libplacebo `b694a21bf2dc176c1e98b8a13c6421a0de5f3da5`；shaderc 使用 NDK `29.0.14206865` 的 staged source，armv7 归档在独立临时输出目录生成。
+- 验证：`JAVA_HOME=.../Contents/Home bash gradlew :app:externalNativeBuildMobileArm64_v8aDebug :app:externalNativeBuildMobileArmeabi_v7aDebug --no-daemon` 成功；两 ABI 均完成 CMake 链接。该验证只证明 native 资产和 JNI 探针可编译，不证明 DV5 已完成 Vulkan 图像导入、RPU 映射或色彩恢复。
+- 未完成：libplacebo Vulkan 外部图像导入、PlayerView 输出和逐帧 Dolby Vision RPU 映射仍属于后续功能单元；当前 renderer 仍保持诊断/显式 opt-in，默认播放行为不变。
+- 回滚：回退本单元提交即可移除本地依赖和 CMake 链接，恢复 `c94ba7c9464f4cb43df351e471e8aa2df7132178` 的诊断底座。
+- 下一动作：在独立后续单元中补齐 Vulkan/AHardwareBuffer 到输出 Surface 的实际渲染，再进行目标设备 DV5 色彩验收。
+- 目标：把 Exo DV5 renderer 所需的 libplacebo/shaderc 双 ABI 静态闭包复制进当前仓库，禁止运行时或构建时引用 `main-2` 绝对路径。
+- 分支/基线：`exo-dv5` / `c94ba7c9464f4cb43df351e471e8aa2df7132178`；恢复时工作树无预先存在的脏文件。
+- 已确认来源：libplacebo `b694a21bf2dc176c1e98b8a13c6421a0de5f3da5`（7.375.0/API 375），arm64-v8a 与 armeabi-v7a 各自独立构建；shaderc 来自 Android NDK `29.0.14206865` 随附源码，组合归档包含 239 个对象。
+- 已完成证据：`main-2` 缓存中存在双 ABI `libplacebo.a` 和 arm64 `libshaderc.a`；armv7 shaderc 缓存缺失，已用同一 NDK r29/API 24 在独立临时输出目录成功生成，没有写入 `main-2` 的 `obj/libs/prefix`。
+- 当前限制：尚未把资产复制到 `third_party/exo-dv5-native`，尚未接入当前仓库 CMake，也尚未完成双 ABI 链接验证；不能据此声称 DV5 色彩映射已经可用。
+- 回滚锚点：`c94ba7c9464f4cb43df351e471e8aa2df7132178`；删除本单元新增的本地依赖目录并回退 CMake/本文档即可。
+- 下一动作：复制双 ABI libplacebo/shaderc、公共头和许可证，写入来源/哈希清单并完成当前项目双 ABI native 链接。
