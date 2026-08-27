@@ -33,7 +33,7 @@
 | 9 | `E4-J1` | Exo | Cue 数据契约 | **已实施并验证**：`af78e3b7656d6a0f210d7344b3852f301690c417` / `recovery/E4-J1/20260827133106-af78e3b7656d`；默认不启用碰撞或新渲染行为 | [E4-J1-exo-cue-data-contract.md](E4-J1-exo-cue-data-contract.md) |
 | 10 | `E6-1` | Exo | 有界缓存写入 correctness | **已实施并验证**：`0a8ed3b910679a08a7e41c735338c3804a2eb938` / `recovery/E6-1/20260827145043-0a8ed3b91067`；不引入并行预加载 | [E6-1-exo-smb-proxy-cache-correctness.md](E6-1-exo-smb-proxy-cache-correctness.md) |
 | 11 | `E7-1` | Exo | ISO reader safety | **已实施并验证**：`491a7def30484b0936426bbc57b09f5b6435ae80` / `recovery/E7-1/20260827160011-491a7def3048`；仅移植 IsoDataReader 安全修复 | [E7-1-exo-iso-reader-safety.md](E7-1-exo-iso-reader-safety.md) |
-| 12 | `E7-2` | Exo | ISO multi-extent reader/API | 已实施并编译验证；按用户要求未跑测试/真实 split ISO | [E7-2-exo-iso-multi-extent-api.md](E7-2-exo-iso-multi-extent-api.md) |
+| 12 | `E7-2` | Exo | ISO multi-extent reader/API | **已实施并编译验证**：`5f7d834bfdd00f215609df7b41c2ea7cadc2cd4f` / `recovery/E7-2-C3/20260827193629-5f7d834bfdd0`；按用户要求未跑测试/真实 split ISO | [E7-2-exo-iso-multi-extent-api.md](E7-2-exo-iso-multi-extent-api.md) |
 | 13 | `P0` | MPV | native 基线、等价提交与运行验收 | Exo 阶段后处理 | `docs/P0-mpv-native-baseline.md` |
 | 14 | `P1` | MPV | 格式与 shader correctness | 待处理 | `docs/P1-mpv-format-shader-correctness.md` |
 | 15 | `P2-1` | MPV | Vulkan generic UV | 待处理 | `docs/P2-1-mpv-vulkan-generic-uv.md` |
@@ -42,7 +42,7 @@
 | 18 | `P4-1` | MPV | JNI shutdown/lifecycle | 待处理 | `docs/P4-1-mpv-jni-shutdown.md` |
 | 19 | `C0-M` | 通用/MPV 搭载 | MPV 使用 FFmpeg 9.0.1 同源 revision 独立重建 | E1 验证后随 MPV 候选处理 | `docs/C0-M-mpv-ffmpeg-9.0.1.md` |
 | 20 | `C2` | 通用 | FFmpeg DV7→P8.1 BSF | 暂缓；不自动启用 | `docs/C2-dv7-p81-bsf.md` |
-| 21 | `C3` | 通用 | ISO multi-extent App resolver | 已随 `E7-2` 联合实施并通过 App 编译；真实 split metadata 未验收 | [C3-iso-multi-extent-resolver.md](C3-iso-multi-extent-resolver.md) |
+| 21 | `C3` | 通用 | ISO multi-extent App resolver | **已随 `E7-2` 联合实施并通过 App 编译**：`5f7d834bfdd00f215609df7b41c2ea7cadc2cd4f` / `recovery/E7-2-C3/20260827193629-5f7d834bfdd0`；真实 split metadata 未验收 | [C3-iso-multi-extent-resolver.md](C3-iso-multi-extent-resolver.md) |
 
 `C1` 是跨播放器真实输入验收维度，不单独形成代码任务或文档；它写入对应的 E/P 任务文档。当前 Exo 队列已推进至 `E7-2 + C3`，下一项按既定顺序进入 `P0` MPV native 基线、等价提交与运行验收评估。
 

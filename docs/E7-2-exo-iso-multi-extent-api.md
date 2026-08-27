@@ -11,8 +11,8 @@
 - Source: `FongMi/media@990abc2368fd74779f525ee345734470659f3d53`, parent `c85d124102c5b25a1bcd270d78f78603e87a6214`; local ISO/UDF origin `39585f19e01324308213e2bdc9aa84dcfa4d5ebc`; Media3 base `e3e922d5c01bc0b564849940fe589daf37360d15`.
 - Acceptance: single-extent behavior remains one direct upstream range; multiple recorded extents and unrecorded zero-filled extents are represented in logical order; allocation continuation is bounded; App metadata reads all extents; affected Media3 and product compilation pass. Tests are explicitly omitted by user direction.
 - Known evidence limit: no real split ISO/MPLS/CLPI image is available. No test fixture was added or run by user direction, so this task does not claim real-disc behavioral coverage.
-- Current status: implementation, reproducible patch, three affected AAR publications, and Mobile/Leanback arm64 App Java compilation are complete. No tests or real split-disc playback were run by user direction. The task is ready for its atomic implementation commit and recovery tag.
-- Next action: run the one final static/guard check, then finish the task atomically.
+- Current status: implemented and committed as `5f7d834bfdd00f215609df7b41c2ea7cadc2cd4f`; recovery tag `recovery/E7-2-C3/20260827193629-5f7d834bfdd0`. The reproducible patch, three affected AAR publications, and Mobile/Leanback arm64 App Java compilation are complete. No tests or real split-disc playback were run by user direction.
+- Next action: optional real split ISO/MPLS/CLPI device validation when representative media is available; no implementation work remains in E7-2 + C3.
 
 ## Decision and best-practice review
 
@@ -45,7 +45,8 @@ Security/correctness decision: reject invalid lengths/offsets and overflow, boun
   - extractor AAR `12e03f413c9251109515011249c7151e1f33b55715d7bfad3b8687adcf876c58`, sources `c80e000e7960fca4f256ead3ed830aa1661bdb23d06b1c6ecfae6ac7e3ba73b0`, module `4b7a4df9b09f1e62c5d61f57cbe70ab4c3e14f5d50837e588edf5ee62a931128`, POM `32fb358a5f4ecee7bb58ac8f97b975e8af89cdd19533e35b520533bf76c5979b`.
   - exoplayer AAR `11d572f59f0404878353d9c85e022e153e114ecbb4d43cf61c910cd9e8c2536d`, sources `c2a74d177abff6e91de2b26d0680920a966672796a080572d6477a2e3c9aa6db`, module `f20106bb4c89f0b167dec34a2909daf427149800e14f11db130431e95523e95d`, POM `ca5be4f0911931b82df270917cb91d2f1d221a97bcecd11f0d78eeaa620308a5`.
 - Patch hash: `b4954d32f5c98dc5caf2a3cbc8cd72f72d24f4fdeec9425e5061a252d1ccaf68`.
+- Implementation commit and recovery tag: `5f7d834bfdd00f215609df7b41c2ea7cadc2cd4f` / `recovery/E7-2-C3/20260827193629-5f7d834bfdd0`.
 - App consumption: `:app:compileMobileArm64_v8aDebugJavaWithJavac` and `:app:compileLeanbackArm64_v8aDebugJavaWithJavac` both executed and passed in one Gradle invocation (`BUILD SUCCESSFUL in 1m26s`, 4 executed / 46 up-to-date tasks).
 - Performance preservation: legacy scalar constructors remain; a single recorded extent opens one upstream range and does not reopen while reading. Extra range opens and extent traversal occur only for genuinely split files. No benchmark was run, so this is a structural preservation claim rather than a measured performance result.
 - Verification deliberately omitted: unit tests, real split ISO/MPLS/CLPI playback, HTTP/SMB/content-URI extent boundary playback, seek/device testing, and SACD cross-extent stripping. These remain residual risks rather than hidden completion claims.
-- Rollback: revert the atomic E7-2-C3 commit or restore `recovery/E7-2-C3/baseline-202608271739-9ab038c91adb`; source patch, lock, three AAR publication directories, App adapter, and documentation must move together.
+- Rollback: revert `5f7d834bfdd00f215609df7b41c2ea7cadc2cd4f` or restore `recovery/E7-2-C3/baseline-202608271739-9ab038c91adb`; the completed implementation is anchored by `recovery/E7-2-C3/20260827193629-5f7d834bfdd0`. Source patch, lock, three AAR publication directories, App adapter, and documentation must move together.
