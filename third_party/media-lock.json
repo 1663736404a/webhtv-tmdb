@@ -44,6 +44,10 @@
       {
         "path": "third_party/patches/media3-exo-bounded-cache-writer.patch",
         "sha256": "1b591c618fdbba91b0880284126ac8bd5c55f6fe6532187d891b4225a87cc200"
+      },
+      {
+        "path": "third_party/patches/media3-exo-iso-reader-safety.patch",
+        "sha256": "d042b6c177910604f7f251571909d018d0227abc4af7846b15a0b5d499be5893"
       }
     ],
     "artifact_overrides": [
@@ -73,9 +77,9 @@
       },
       {
         "coordinate": "androidx.media3:media3-datasource:1.11.0-alpha01-fongmi",
-        "aar_sha256": "ce5c9919bcfe611ecc9de5c4d40c0baa94f2e5858bebc54431c400a90fc37b18",
-        "sources_sha256": "4ac57076178a78996a4ab9ffe4466d28db71d804f735d179b9d8cbdf3d2325e7",
-        "reason": "E6-1 makes bounded CacheWriter requests stop at DataSpec.length even when a data source ignores the requested range"
+        "aar_sha256": "1f0927aa4ab78e17163efb83b03119f385eb2cc803ad46dbead0399c0d8897eb",
+        "sources_sha256": "fde247c59fca0325b8a346495f91af32eb6c544b08a1dac4119d66ed8b245daa",
+        "reason": "E6-1 bounds CacheWriter requests; E7-1 hardens ISO reader range, allocation, EOF, and data source lifecycle boundaries"
       }
     ],
     "upstream_repo": "https://github.com/FongMi/media.git",
@@ -100,6 +104,11 @@
         "commit": "dd00f94b58b7324ab29febb0b50f3a190d544a3b",
         "scope": "libraries/datasource CacheWriter bounded read/count/end-position hunks and focused test only",
         "reason": "E6-1 fixes bounded cache writes; progressive parallel download, DiskPreloadManager, priority setter, and factory/cancel changes are intentionally excluded"
+      },
+      {
+        "commit": "990abc2368fd74779f525ee345734470659f3d53",
+        "scope": "libraries/datasource IsoDataReader zero-length, prefetch bound, open/close, and EOF hunks plus focused tests only",
+        "reason": "E7-1 hardens the existing single-extent ISO reader; multi-extent UDF, virtual data source, and App resolver changes remain isolated to E7-2"
       }
     ]
   },
