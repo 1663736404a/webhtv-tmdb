@@ -263,6 +263,57 @@ PlayerView output Surface
 - 下一动作：覆盖 `MediaCodecRenderer.onQueueInputBuffer` 提取 NAL type 62，
   以 PTS 有界排队到 native 并完成 metadata 生命周期，然后接入 Vulkan 输出。
 
+## 17. E9-3d-vulkan 实施检查点
+
+- 当前基线：`exo-dv5` / `3df132a68e1aa67ce54b61cb091c41f88ceba00e`；
+  当前单元只修改 native renderer 与本文档，无预先存在的用户脏文件。
+- 已完成代码：创建 libplacebo Vulkan instance/device/swapchain，导入
+  `AImageReader` 的 `AHardwareBuffer`，按 Profile 5 raw IPT 语义设置 full-range
+  RGB-identity YCbCr sampler 与 Cr/Y/Cb 分量映射，解析 libdovi RPU 并调用
+  `pl_render_image` 输出到 PlayerView Surface。
+- 已验证：`externalNativeBuildMobileArm64_v8aDebug` 编译成功；该结果仅证明
+  arm64 native 源码和链接闭包成立，不代表设备播放或色彩验收成功。
+- 收尾风险：补齐 foreign queue ownership 的 semaphore 契约、失败路径回收、
+  libplacebo log 销毁、seek 后旧 RPU 状态清理，并依据 AHB format feature
+  选择采样 filter；随后执行 arm64-v8a/armeabi-v7a 双 ABI clean native build。
+- 回滚锚点：`3df132a68e1aa67ce54b61cb091c41f88ceba00e`。
+- 下一动作：核对 vendored libplacebo API 375 的 release/hold 同步契约并完成
+  上述最小安全修复。
+- 检查点摘要：arm64 native Vulkan renderer build succeeded; patched semaphore ownership, failure cleanup, log release, seek RPU reset, and AHB sampling feature gating
+- 下一动作：Run dual-ABI native build, inspect result, then finish E9-3d-vulkan atomically.
+
+### E9-3d-vulkan 完成记录
+
+- Vulkan 输出：native renderer 现已创建 Android `VkSurfaceKHR`、libplacebo
+  Vulkan device/swapchain/renderer，并把 `AImageReader` 的
+  `AHardwareBuffer` 作为 external-memory `VkImage` 导入。输出 Surface 替换时
+  串行销毁并重建 Vulkan 资源，release 会先停止 image listener 并等待当前
+  callback 退出。
+- DV5 映射：AHB sampler 强制使用 `RGB_IDENTITY + ITU_FULL`，libplacebo plane
+  按 `Cr/Y/Cb` 解释 raw Profile 5 分量；输入 AU 的 NAL type 62 RPU 经 libdovi
+  解析为每帧 `pl_dovi_metadata`，交给 `PL_COLOR_SYSTEM_DOLBYVISION` 的
+  `pl_render_image` 完成 reshape/tone-map。
+- 同步与回收：external image 在 `VK_QUEUE_FAMILY_FOREIGN_EXT` 与 libplacebo
+  之间用 `pl_vulkan_release_ex`/`pl_vulkan_hold_ex` 转移 ownership；hold 使用
+  libplacebo 创建的 binary semaphore，并在 `pl_gpu_finish` 后销毁 semaphore、
+  wrapper、VkImage 和 imported memory。失败路径会在回收前尝试重新取得
+  ownership；Vulkan/log/swapchain/renderer 均有配对释放。
+- 格式门控：要求 AHB Vulkan format 支持 sampled image；YCbCr conversion
+  仅在 format features 声明支持时使用 linear chroma filter，否则降为 nearest，
+  并传递 separate-reconstruction-filter 能力。seek/flush 同时清空 pending RPU
+  和 last-DV metadata，避免沿用上一时间线的元数据。
+- 验证：使用 JDK 21、NDK `29.0.14206865` 执行
+  `:app:externalNativeBuildMobileArm64_v8aDebug` 与
+  `:app:externalNativeBuildMobileArmeabi_v7aDebug`，两 ABI 均 `BUILD SUCCESSFUL`。
+  此结果证明 native 源码、libplacebo/libdovi/shaderc 本地闭包和双 ABI 链接成立，
+  不证明目标设备已经正常出帧、颜色正确或性能达标。
+- 保留门槛：renderer 仍未注册到生产 renderer 列表；capability probe 的版本位
+  名称/要求仍是 Vulkan 1.1，而 libplacebo 7 的实际最低版本是 Vulkan 1.2。
+  必须在下一独立单元修正 gate、增加 render 成败统计并以显式实验开关接线，
+  再进行目标设备 DV5 播放、截图、logcat、seek/lifecycle 验收。
+- 回滚：回退本单元提交/恢复标签即可恢复到仅有 RPU 输送和本地头文件的状态；
+  vendored native 依赖与现有 Exo/MPV 默认路径不受影响。
+
 ## 17. E9-3c-renderer RPU 接线记录
 
 - Media3：`ExoDv5GpuRenderer` 覆盖 `onQueueInputBuffer`；该 hook 在锁定版
