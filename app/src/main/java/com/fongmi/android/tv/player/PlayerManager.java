@@ -7390,10 +7390,32 @@ public class PlayerManager implements ParseCallback {
                     : ResUtil.getString(R.string.error_play_stage_network);
             case MEDIA_PARSING -> ResUtil.getString(R.string.error_play_stage_media);
             case DECODER -> ResUtil.getString(R.string.error_play_stage_decoder);
-            case OUTPUT -> ResUtil.getString(R.string.error_play_stage_output);
+            case OUTPUT -> isAudioOutputFailure(failure)
+                    ? ResUtil.getString(R.string.error_play_stage_audio_output)
+                    : isVideoOutputFailure(failure)
+                    ? ResUtil.getString(R.string.error_play_stage_video_output)
+                    : ResUtil.getString(R.string.error_play_stage_output);
             case DRM -> ResUtil.getString(R.string.error_play_stage_drm);
             case UNKNOWN -> ResUtil.getString(R.string.error_play_stage_unknown);
         };
+    }
+
+    private boolean isAudioOutputFailure(PlaybackErrorClassifier.Failure failure) {
+        return hasErrorCode(failure, PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED)
+                || hasErrorCode(failure, PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED)
+                || hasErrorCode(failure, PlaybackException.ERROR_CODE_AUDIO_TRACK_OFFLOAD_INIT_FAILED)
+                || hasErrorCode(failure, PlaybackException.ERROR_CODE_AUDIO_TRACK_OFFLOAD_WRITE_FAILED);
+    }
+
+    private boolean isVideoOutputFailure(PlaybackErrorClassifier.Failure failure) {
+        return hasErrorCode(failure, PlaybackException.ERROR_CODE_VIDEO_FRAME_PROCESSOR_INIT_FAILED)
+                || hasErrorCode(failure, PlaybackException.ERROR_CODE_VIDEO_FRAME_PROCESSING_FAILED)
+                || "mpv-video-output-marker".equals(failure.evidence());
+    }
+
+    private boolean hasErrorCode(
+            PlaybackErrorClassifier.Failure failure, int errorCode) {
+        return PlaybackException.getErrorCodeName(errorCode).equals(failure.errorCode());
     }
 
     private boolean handleExoDecoderResourcesReclaimed(

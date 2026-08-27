@@ -384,3 +384,84 @@ PlayerView output Surface
 - 回滚锚点：`c943d7659bf9f03d2cf3cdaa670d5b82231168ca`。
 - 下一动作：为 `renderImage()` 增加有界的首个失败阶段与 AHB/Vulkan 格式日志，
   在同一设备复现后只修复首个确定失败的 native 契约。
+
+## 20. E9-3d-render-fix 实施检查点
+
+- 根因：目标设备返回 Android Vulkan `externalFormat` 时，旧实现仍把
+  `formatProps.format` 写入 `VkImageCreateInfo.format` 和 libplacebo wrap。
+  Android external-format image 必须使用 `VK_FORMAT_UNDEFINED`，实际格式由
+  `VkExternalFormatANDROID.externalFormat` 描述；设备日志中的
+  `Unsupported VkFormat: 1000330000...` 与此契约错误相符。
+- 修复：`renderImage()` 在 external format 非零时同时使用
+  `VK_FORMAT_UNDEFINED` 创建/包装 image；保留 concrete format 路径不变。
+  所有失败出口增加首个阶段、`VkResult`、AHB geometry/format/usage、Vulkan
+  format/externalFormat/features、PTS 和 RPU 状态日志。
+- 误报修复：Media3 音频错误仍保持原 `OUTPUT` 分类；视频帧处理错误仍属于
+  output stage，但 `PlayerManager` 根据精确错误码显示独立的“音频输出失败”
+  或“视频输出失败”，不再把 DV5 Vulkan 错误提示成音频故障。
+- 验证：JDK 21 下 `:app:externalNativeBuildMobileArm64_v8aDebug`
+  `:app:externalNativeBuildMobileArmeabi_v7aDebug` 与
+  `:app:compileMobileArm64_v8aDebugJavaWithJavac` 均 `BUILD SUCCESSFUL`。
+- 当前状态：尚未完成修复后目标设备播放验收；下一动作是用无构建缓存的
+  arm64 debug APK 安装到 `10CF6H1D2L0009S`，复现同一 DV5 样片并检查首个
+  `render failed stage=` 日志、`renderedFrames` 和错误提示。
+
+### E9-3d-render-fix 设备复测检查点
+
+- 检查点摘要：external-format 修复已安装；普通视频回归已排除；DV5 精确复测待执行。
+- 下一动作：启动应用，从当前历史列表点击 `P5_Dolby_Amaze.mkv`，读取首个
+  `ExoDv5 render failed stage`。
+- Next action (guard): launch app and tap P5_Dolby_Amaze.mkv from history, then inspect first ExoDv5 render failed stage
+- 分支/基线：`exo-dv5` / `38a4fdb84f3c28391c43f1a98f866960981046aa`；
+  当前未提交范围仍为 native external-format 修复、精确输出错误文案与本文档，
+  没有新增其它播放器行为。
+- 设备状态：V2453A（Android API 35，`10CF6H1D2L0009S`）在线；当前工作区
+  `app-mobile-arm64_v8a-debug.apk` 已于 2026-08-27 20:46:29 重新安装。
+- 已排除：用户复核后确认普通视频播放正常，不存在实验 renderer 抢占非 DV5
+  轨道的回归；继续只处理 `dvhe.05.09` 样片。
+- 未完成：安装后的 DV5 样片尚未完成一次有效复测，因前一次自动点击命中了
+  历史列表中的其它条目，没有产生新的 `ExoDv5` 日志。
+- 下一动作：重新启动应用，读取当前历史列表 UI 坐标后精确点击
+  `P5_Dolby_Amaze.mkv`，保存完整 logcat 和屏幕证据，并按首个
+  `render failed stage=` 决定唯一下一处 native 修复。
+
+### E9-3d-render-fix FIFO 时间戳修复检查点
+
+- 已确认 RPU 解析成功，但目标设备的 `AImage` timestamp 是 monotonic clock，
+  与媒体 PTS 不在同一时间域；旧代码精确比较两者导致每帧都误报 `missing-rpu`。
+- 已改为按 MediaCodec 输出顺序 FIFO 关联已排队的媒体 PTS，保留 AImage
+  timestamp 仅用于队列为空时的诊断；arm64 debug APK 已于 22:37 构建完成。
+- 工作区仍只包含既有 E9-3d native 修复、输出错误分类和本文档修改；Gradle
+  生成的未跟踪 `app/.cxx` 已移至 `/tmp/e9-app-cxx-20260827-2237`，不纳入任务。
+- Rollback anchor：`38a4fdb84f3c28391c43f1a98f866960981046aa`。
+- Next action: install FIFO candidate and reproduce P5_Dolby_Amaze.mkv once, then fix only the first new native failure stage
+
+### E9-3d-render-fix 色彩修复检查点
+
+- 设备复测已确认 FIFO candidate 可以稳定出帧，但画面接近全黑。
+- 根因已收敛到 RPU 状态映射：libdovi 的压缩 DM 对象不携带新的静态颜色
+  矩阵，当前实现却把其中的零字段写入 `pl_dovi_metadata`；同时没有继承
+  `use_prev_vdr_rpu_flag` 指向的 reshape 状态，也没有向 libplacebo 传递
+  RPU 的源 PQ 亮度元数据。
+- 修复边界：只调整 `exo_dovi_renderer.cpp` 的 RPU 状态继承、Profile 5
+  标准静态矩阵回退和 HDR 元数据映射，不改变 Exo/MPV 路由或其它格式行为。
+- Next action: implement compressed-DM inheritance and Profile 5 luminance mapping, then build and install one arm64 APK
+
+### E9-3d-render-fix 黑屏语义复核检查点
+
+- DV5 black-output review: libplacebo/mpv standard path applies P5 RPU reshape; hand-mapped coefficient normalization matches upstream, so disabling mapping is unsupported. Current decisive uncertainty is Android external-format sampler channel/range contract versus first-frame RPU state.
+- 已核对 libplacebo 7.375.0 的 `pl_map_dovi_metadata()` 与 shader：P5 的 RPU
+  mapping 会在颜色矩阵前执行；libdovi C API 的整数/小数系数组合与 FFmpeg
+  signed fixed-point 语义一致。`profile5.bin` 的零 luma 曲线只是单帧 fixture，
+  不能据此把所有 P5 mapping 当成错误。
+- 下一动作：检查已保存的最新设备日志和 Android external-format 通道契约，
+  只修复一个确定的 native 输入解释错误，然后执行 arm64 native build。
+- Inspect saved latest device log and external-format channel contract, then apply one minimal native fix and arm64 build
+
+### E9-3d-render-fix 当前候选构建检查点
+
+- 当前 DM/RPU 色彩修复候选已通过 `:app:externalNativeBuildMobileArm64_v8aDebug` 与 `:app:assembleMobileArm64_v8aDebug`，APK SHA-256 为 `956e972b272ca219c4c48233000280af75fa5598171118fc0bb19ee970a0f5b7`。
+- 目标设备 `10CF6H1D2L0009S` 当前未连接，尚不能把编译成功表述为色彩修复通过。
+- 下一动作：设备上线后覆盖安装该 APK，播放 `P5_Dolby_Amaze.mkv` 并只读取 `ExoDv5`/renderer 定向日志。
+- Checkpoint: arm64 DV5 DM/RPU color candidate built successfully; device offline; app/.cxx preserved under /tmp
+- Next action: install candidate on 10CF6H1D2L0009S and capture focused ExoDv5 playback logs

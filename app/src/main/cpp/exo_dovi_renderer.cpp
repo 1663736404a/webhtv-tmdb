@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <cinttypes>
 #include <cstring>
 #include <deque>
 #include <map>
@@ -44,6 +45,16 @@ struct ExpectedFrame {
 struct RpuMetadata {
     int64_t presentationTimeUs;
     pl_dovi_metadata dovi;
+    bool hasMapping = false;
+    bool hasColor = false;
+    bool fullRange = true;
+    bool hasSourceLuma = false;
+    float sourceMinPq = 0.0f;
+    float sourceMaxPq = 0.0f;
+    bool updatesSceneLuma = false;
+    bool hasSceneLuma = false;
+    float sceneMaxPq = 0.0f;
+    float sceneAvgPq = 0.0f;
 };
 
 struct Renderer {
@@ -75,11 +86,19 @@ struct Renderer {
     std::atomic<int64_t> parsedRpus{0};
     std::atomic<int64_t> malformedRpus{0};
     std::atomic<int64_t> rpuQueueDrops{0};
+    std::atomic<int64_t> metadataLogs{0};
     std::atomic<int64_t> renderedFrames{0};
     std::atomic<int64_t> renderFailures{0};
     std::deque<RpuMetadata> pendingRpus;
     bool hasLastDovi = false;
     pl_dovi_metadata lastDovi{};
+    bool lastFullRange = true;
+    bool hasSourceLuma = false;
+    float sourceMinPq = 0.0f;
+    float sourceMaxPq = 0.0f;
+    bool hasSceneLuma = false;
+    float sceneMaxPq = 0.0f;
+    float sceneAvgPq = 0.0f;
 };
 
 void placeboLog(void *, enum pl_log_level level, const char *message) {
@@ -90,6 +109,7 @@ void placeboLog(void *, enum pl_log_level level, const char *message) {
 }
 
 bool destroyVulkan(Renderer *renderer);
+void resetDoviMetadata(pl_dovi_metadata *metadata);
 
 bool ensureVulkan(Renderer *renderer) {
     if (renderer->swapchain != nullptr && renderer->renderer != nullptr) return true;
@@ -137,6 +157,16 @@ bool ensureVulkan(Renderer *renderer) {
     vulkanParams.instance = renderer->vkInstance->instance;
     vulkanParams.get_proc_addr = vkGetInstanceProcAddr;
     vulkanParams.surface = renderer->outputSurface;
+    // AHardwareBuffer import is used for every decoded DV5 frame. The
+    // capability probe enables these extensions explicitly; the real device
+    // must use the same contract or vkGetAndroidHardwareBufferPropertiesANDROID
+    // is unavailable and rendering fails before image import.
+    const char *deviceExtensions[] = {
+            VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME,
+            VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME,
+    };
+    vulkanParams.extensions = deviceExtensions;
+    vulkanParams.num_extensions = std::size(deviceExtensions);
     vulkanParams.async_transfer = false;
     vulkanParams.async_compute = false;
     vulkanParams.queue_count = 1;
@@ -188,9 +218,17 @@ uint32_t findMemoryType(pl_vulkan vulkan, uint32_t typeBits) {
 }
 
 bool renderImage(Renderer *renderer, AImage *image, int64_t ptsUs) {
-    if (!ensureVulkan(renderer)) return false;
+    if (!ensureVulkan(renderer)) {
+        __android_log_print(ANDROID_LOG_ERROR, "ExoDv5",
+                            "render failed stage=ensure-vulkan ptsUs=%" PRId64,
+                            ptsUs);
+        return false;
+    }
     AHardwareBuffer *buffer = nullptr;
     if (AImage_getHardwareBuffer(image, &buffer) != AMEDIA_OK || buffer == nullptr) {
+        __android_log_print(ANDROID_LOG_ERROR, "ExoDv5",
+                            "render failed stage=get-ahb ptsUs=%" PRId64,
+                            ptsUs);
         return false;
     }
     AHardwareBuffer_Desc desc{};
@@ -203,9 +241,21 @@ bool renderImage(Renderer *renderer, AImage *image, int64_t ptsUs) {
     auto getProperties = reinterpret_cast<PFN_vkGetAndroidHardwareBufferPropertiesANDROID>(
             vkGetDeviceProcAddr(renderer->vulkan->device,
                                 "vkGetAndroidHardwareBufferPropertiesANDROID"));
-    if (getProperties == nullptr || getProperties(renderer->vulkan->device, buffer,
-                                                   &bufferProps) != VK_SUCCESS) return false;
+    VkResult vkResult = getProperties == nullptr
+            ? VK_ERROR_EXTENSION_NOT_PRESENT
+            : getProperties(renderer->vulkan->device, buffer, &bufferProps);
+    if (vkResult != VK_SUCCESS) {
+        __android_log_print(ANDROID_LOG_ERROR, "ExoDv5",
+                            "render failed stage=get-ahb-properties result=%d "
+                            "ptsUs=%" PRId64 " ahbFormat=%u usage=0x%" PRIx64,
+                            vkResult, ptsUs, desc.format, desc.usage);
+        return false;
+    }
     if (formatProps.format == VK_FORMAT_UNDEFINED && formatProps.externalFormat == 0) {
+        __android_log_print(ANDROID_LOG_ERROR, "ExoDv5",
+                            "render failed stage=missing-vulkan-format ptsUs=%" PRId64
+                            " ahbFormat=%u usage=0x%" PRIx64,
+                            ptsUs, desc.format, desc.usage);
         return false;
     }
     VkExternalFormatANDROID externalFormat{
@@ -222,7 +272,8 @@ bool renderImage(Renderer *renderer, AImage *image, int64_t ptsUs) {
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imageInfo.pNext = &externalMemory;
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.format = formatProps.format;
+    imageInfo.format = formatProps.externalFormat != 0
+            ? VK_FORMAT_UNDEFINED : formatProps.format;
     imageInfo.extent = {desc.width, desc.height, 1};
     imageInfo.mipLevels = 1;
     imageInfo.arrayLayers = 1;
@@ -253,9 +304,11 @@ bool renderImage(Renderer *renderer, AImage *image, int64_t ptsUs) {
     bool rendered = false;
     bool imageReleased = false;
     bool imageHeld = false;
-    if (vkCreateImage(renderer->vulkan->device, &imageInfo, nullptr, &vkImage) != VK_SUCCESS) {
-        return false;
-    }
+    size_t pendingRpuCount = 0;
+    const char *failureStage = "vk-create-image";
+    vkResult = vkCreateImage(renderer->vulkan->device, &imageInfo, nullptr, &vkImage);
+    if (vkResult != VK_SUCCESS) goto cleanup;
+    failureStage = "find-memory-type";
     memoryType = findMemoryType(renderer->vulkan, bufferProps.memoryTypeBits);
     if (memoryType == UINT32_MAX) goto cleanup;
     importInfo.sType = VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID;
@@ -267,13 +320,17 @@ bool renderImage(Renderer *renderer, AImage *image, int64_t ptsUs) {
     allocInfo.pNext = &dedicatedInfo;
     allocInfo.allocationSize = bufferProps.allocationSize;
     allocInfo.memoryTypeIndex = memoryType;
-    if (vkAllocateMemory(renderer->vulkan->device, &allocInfo, nullptr, &memory) != VK_SUCCESS
-            || vkBindImageMemory(renderer->vulkan->device, vkImage, memory, 0) != VK_SUCCESS) {
-        goto cleanup;
-    }
+    failureStage = "vk-allocate-memory";
+    vkResult = vkAllocateMemory(renderer->vulkan->device, &allocInfo, nullptr, &memory);
+    if (vkResult != VK_SUCCESS) goto cleanup;
+    failureStage = "vk-bind-image-memory";
+    vkResult = vkBindImageMemory(renderer->vulkan->device, vkImage, memory, 0);
+    if (vkResult != VK_SUCCESS) goto cleanup;
+    failureStage = "sampled-format-feature";
     if ((formatProps.formatFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) == 0) {
         goto cleanup;
     }
+    failureStage = "create-release-semaphore";
     semaphoreParams.type = VK_SEMAPHORE_TYPE_BINARY;
     releaseSemaphore = pl_vulkan_sem_create(
             renderer->vulkan->gpu, &semaphoreParams);
@@ -297,9 +354,11 @@ bool renderImage(Renderer *renderer, AImage *image, int64_t ptsUs) {
     wrapParams.image = vkImage;
     wrapParams.width = static_cast<int>(desc.width);
     wrapParams.height = static_cast<int>(desc.height);
-    wrapParams.format = formatProps.format;
+    wrapParams.format = formatProps.externalFormat != 0
+            ? VK_FORMAT_UNDEFINED : formatProps.format;
     wrapParams.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
     wrapParams.ycbcr = &ycbcr;
+    failureStage = "pl-vulkan-wrap";
     texture = pl_vulkan_wrap(renderer->vulkan->gpu, &wrapParams);
     if (texture == nullptr) goto cleanup;
     releaseParams.tex = texture;
@@ -311,11 +370,70 @@ bool renderImage(Renderer *renderer, AImage *image, int64_t ptsUs) {
         std::lock_guard<std::mutex> rpuLock(renderer->rpuMutex);
         while (!renderer->pendingRpus.empty()
                 && renderer->pendingRpus.front().presentationTimeUs <= ptsUs) {
-            renderer->lastDovi = renderer->pendingRpus.front().dovi;
-            renderer->hasLastDovi = true;
+            const RpuMetadata &metadata = renderer->pendingRpus.front();
+            if (!renderer->hasLastDovi && !metadata.hasMapping) {
+                renderer->pendingRpus.pop_front();
+                continue;
+            }
+            if (!renderer->hasLastDovi) {
+                resetDoviMetadata(&renderer->lastDovi);
+                // Profile 5 uses the fixed IPT-PQ conversion below when an
+                // RPU carries no explicit (or carries compressed) DM block.
+                renderer->lastDovi.nonlinear.m[0][0] = 8192.0f / 8192.0f;
+                renderer->lastDovi.nonlinear.m[0][1] = 799.0f / 8192.0f;
+                renderer->lastDovi.nonlinear.m[0][2] = 1681.0f / 8192.0f;
+                renderer->lastDovi.nonlinear.m[1][0] = 8192.0f / 8192.0f;
+                renderer->lastDovi.nonlinear.m[1][1] = -933.0f / 8192.0f;
+                renderer->lastDovi.nonlinear.m[1][2] = 1091.0f / 8192.0f;
+                renderer->lastDovi.nonlinear.m[2][0] = 8192.0f / 8192.0f;
+                renderer->lastDovi.nonlinear.m[2][1] = 267.0f / 8192.0f;
+                renderer->lastDovi.nonlinear.m[2][2] = -5545.0f / 8192.0f;
+                renderer->lastDovi.linear.m[0][0] = 17081.0f / 16384.0f;
+                renderer->lastDovi.linear.m[0][1] = -349.0f / 16384.0f;
+                renderer->lastDovi.linear.m[0][2] = -349.0f / 16384.0f;
+                renderer->lastDovi.linear.m[1][0] = -349.0f / 16384.0f;
+                renderer->lastDovi.linear.m[1][1] = 17081.0f / 16384.0f;
+                renderer->lastDovi.linear.m[1][2] = -349.0f / 16384.0f;
+                renderer->lastDovi.linear.m[2][0] = -349.0f / 16384.0f;
+                renderer->lastDovi.linear.m[2][1] = -349.0f / 16384.0f;
+                renderer->lastDovi.linear.m[2][2] = 17081.0f / 16384.0f;
+                renderer->lastDovi.nonlinear_offset[0] = 0.0f;
+                renderer->lastDovi.nonlinear_offset[1] = 0.5f;
+                renderer->lastDovi.nonlinear_offset[2] = 0.5f;
+                renderer->hasLastDovi = true;
+                renderer->hasSourceLuma = true;
+                renderer->sourceMinPq = 62.0f / 4095.0f;
+                renderer->sourceMaxPq = 3696.0f / 4095.0f;
+            }
+            if (metadata.hasMapping) {
+                for (int c = 0; c < 3; c++) {
+                    renderer->lastDovi.comp[c] = metadata.dovi.comp[c];
+                }
+            }
+            if (metadata.hasColor) {
+                memcpy(renderer->lastDovi.nonlinear_offset,
+                       metadata.dovi.nonlinear_offset,
+                       sizeof(renderer->lastDovi.nonlinear_offset));
+                renderer->lastDovi.nonlinear = metadata.dovi.nonlinear;
+                renderer->lastDovi.linear = metadata.dovi.linear;
+            }
+            renderer->lastFullRange = metadata.fullRange;
+            if (metadata.hasSourceLuma) {
+                renderer->hasSourceLuma = true;
+                renderer->sourceMinPq = metadata.sourceMinPq;
+                renderer->sourceMaxPq = metadata.sourceMaxPq;
+            }
+            if (metadata.updatesSceneLuma) {
+                renderer->hasSceneLuma = metadata.hasSceneLuma;
+                renderer->sceneMaxPq = metadata.sceneMaxPq;
+                renderer->sceneAvgPq = metadata.sceneAvgPq;
+            }
             renderer->pendingRpus.pop_front();
         }
+        pendingRpuCount = renderer->pendingRpus.size();
     }
+    failureStage = "missing-rpu";
+    if (!renderer->hasLastDovi) goto cleanup;
     source.num_planes = 1;
     source.planes[0].texture = texture;
     source.planes[0].components = 3;
@@ -323,26 +441,44 @@ bool renderImage(Renderer *renderer, AImage *image, int64_t ptsUs) {
     source.planes[0].component_mapping[1] = PL_CHANNEL_Y;
     source.planes[0].component_mapping[2] = PL_CHANNEL_CB;
     source.repr.sys = PL_COLOR_SYSTEM_DOLBYVISION;
-    source.repr.levels = PL_COLOR_LEVELS_FULL;
+    source.repr.levels = renderer->lastFullRange
+            ? PL_COLOR_LEVELS_FULL : PL_COLOR_LEVELS_LIMITED;
     source.repr.bits.sample_depth = 10;
     source.repr.bits.color_depth = 10;
-    source.repr.dovi = renderer->hasLastDovi ? &renderer->lastDovi : nullptr;
+    source.repr.dovi = &renderer->lastDovi;
     source.color.primaries = PL_COLOR_PRIM_BT_2020;
     source.color.transfer = PL_COLOR_TRC_PQ;
+    if (renderer->hasSourceLuma) {
+        source.color.hdr.min_luma = pl_hdr_rescale(
+                PL_HDR_PQ, PL_HDR_NITS, renderer->sourceMinPq);
+        source.color.hdr.max_luma = pl_hdr_rescale(
+                PL_HDR_PQ, PL_HDR_NITS, renderer->sourceMaxPq);
+    }
+    if (renderer->hasSceneLuma) {
+        source.color.hdr.max_pq_y = renderer->sceneMaxPq;
+        source.color.hdr.avg_pq_y = renderer->sceneAvgPq;
+    }
     source.crop = {0, 0, static_cast<float>(desc.width), static_cast<float>(desc.height)};
+    failureStage = "swapchain-resize";
     if (!pl_swapchain_resize(renderer->swapchain, &width, &height)) goto cleanup;
+    failureStage = "swapchain-start-frame";
     if (!pl_swapchain_start_frame(renderer->swapchain, &swapFrame)) goto cleanup;
     frameStarted = true;
     pl_frame_from_swapchain(&target, &swapFrame);
+    failureStage = "pl-render-image";
     rendered = pl_render_image(renderer->renderer, &source, &target, nullptr);
-    submitted = rendered && pl_swapchain_submit_frame(renderer->swapchain);
+    if (!rendered) goto cleanup;
+    failureStage = "swapchain-submit-frame";
+    submitted = pl_swapchain_submit_frame(renderer->swapchain);
     frameStarted = false;
+    if (!submitted) goto cleanup;
     if (submitted) pl_swapchain_swap_buffers(renderer->swapchain);
     pl_gpu_finish(renderer->vulkan->gpu);
     holdParams.tex = texture;
     holdParams.layout = VK_IMAGE_LAYOUT_GENERAL;
     holdParams.qf = VK_QUEUE_FAMILY_FOREIGN_EXT;
     holdParams.semaphore = pl_vulkan_sem{.sem = releaseSemaphore, .value = 0};
+    failureStage = "pl-vulkan-hold";
     if (!pl_vulkan_hold_ex(renderer->vulkan->gpu, &holdParams)) goto cleanup;
     imageHeld = true;
     // The semaphore is consumed by the hold operation. Wait for the queue
@@ -355,6 +491,22 @@ bool renderImage(Renderer *renderer, AImage *image, int64_t ptsUs) {
     return submitted;
 
 cleanup:
+    __android_log_print(
+            ANDROID_LOG_ERROR, "ExoDv5",
+            "render failed stage=%s result=%d ptsUs=%" PRId64
+            " ahb=%ux%u format=%u usage=0x%" PRIx64
+            " vkFormat=%d externalFormat=%" PRIu64
+            " formatFeatures=0x%" PRIx64
+            " hasRpu=%d parsedRpu=%" PRId64
+            " malformedRpu=%" PRId64 " pendingRpu=%zu",
+            failureStage, vkResult, ptsUs, desc.width, desc.height,
+            desc.format, desc.usage, formatProps.format,
+            formatProps.externalFormat,
+            static_cast<uint64_t>(formatProps.formatFeatures),
+            renderer->hasLastDovi ? 1 : 0,
+            renderer->parsedRpus.load(std::memory_order_relaxed),
+            renderer->malformedRpus.load(std::memory_order_relaxed),
+            pendingRpuCount);
     if (frameStarted) {
         pl_swapchain_submit_frame(renderer->swapchain);
         pl_gpu_finish(renderer->vulkan->gpu);
@@ -491,13 +643,17 @@ bool mapRpuMetadata(const DoviRpuDataHeader *header,
                     const DoviRpuDataMapping *mapping,
                     const DoviVdrDmData *dm,
                     pl_dovi_metadata *out) {
-    if (header == nullptr || mapping == nullptr || out == nullptr
+    if (header == nullptr || out == nullptr
             || header->rpu_type != 2) return false;
     resetDoviMetadata(out);
-    for (int c = 0; c < 3; c++) {
-        mapRpuCurve(&out->comp[c], mapping->curves[c], *header);
+    if (mapping != nullptr) {
+        for (int c = 0; c < 3; c++) {
+            mapRpuCurve(&out->comp[c], mapping->curves[c], *header);
+        }
     }
-    if (dm != nullptr) {
+    // Compressed DM carries only dynamic extension blocks. Its static color
+    // fields are intentionally zero and must inherit the previous DM state.
+    if (dm != nullptr && !dm->compressed) {
         const float yccScale = 1.0f / 8192.0f;
         const float lmsScale = 1.0f / 16384.0f;
         const int16_t ycc[] = {
@@ -516,11 +672,11 @@ bool mapRpuMetadata(const DoviRpuDataHeader *header,
         out->nonlinear_offset[1] = dm->ycc_to_rgb_offset1 / 268435456.0f;
         out->nonlinear_offset[2] = dm->ycc_to_rgb_offset2 / 268435456.0f;
     }
-    if (mapping->nlq != nullptr && !header->disable_residual_flag
+    if (mapping != nullptr && mapping->nlq != nullptr && !header->disable_residual_flag
             && mapping->nlq_method_idc == 0) {
         out->nlq_active = false; // Profile 5 is single-layer; never compose FEL.
     }
-    return true;
+    return mapping != nullptr || dm != nullptr || header->use_prev_vdr_rpu_flag;
 }
 
 bool hasExtension(const std::vector<VkExtensionProperties> &extensions,
@@ -695,22 +851,19 @@ bool probeImageReader(JNIEnv *env) {
 
 int64_t matchTimestamp(Renderer *renderer, int64_t timestampNs) {
     std::lock_guard<std::mutex> lock(renderer->expectedMutex);
-    while (!renderer->expectedFrames.empty()
-            && renderer->expectedFrames.front().imageTimestampNs < timestampNs) {
-        renderer->expectedFrames.pop_front();
-        renderer->unmatchedFrames.fetch_add(1, std::memory_order_relaxed);
-    }
-    if (!renderer->expectedFrames.empty()
-            && renderer->expectedFrames.front().imageTimestampNs == timestampNs) {
+    // AImageReader reports the producer's monotonic timestamp on affected
+    // MediaCodec implementations, not the media presentation timestamp passed
+    // to VideoFrameHandler. Decoded images and queued release instructions are
+    // ordered, so associate them FIFO and retain AImage time for diagnostics.
+    if (!renderer->expectedFrames.empty()) {
         ExpectedFrame frame = renderer->expectedFrames.front();
         renderer->expectedFrames.pop_front();
         renderer->lastPresentationTimeUs.store(
                 frame.presentationTimeUs, std::memory_order_relaxed);
         renderer->matchedFrames.fetch_add(1, std::memory_order_relaxed);
         return frame.presentationTimeUs;
-    } else {
-        renderer->unmatchedFrames.fetch_add(1, std::memory_order_relaxed);
     }
+    renderer->unmatchedFrames.fetch_add(1, std::memory_order_relaxed);
     return timestampNs / 1000;
 }
 
@@ -854,6 +1007,13 @@ Java_com_fongmi_android_tv_player_exo_ExoDv5Native_nativeClearFrames(
         renderer->pendingRpus.clear();
         renderer->hasLastDovi = false;
         resetDoviMetadata(&renderer->lastDovi);
+        renderer->lastFullRange = true;
+        renderer->hasSourceLuma = false;
+        renderer->sourceMinPq = 0.0f;
+        renderer->sourceMaxPq = 0.0f;
+        renderer->hasSceneLuma = false;
+        renderer->sceneMaxPq = 0.0f;
+        renderer->sceneAvgPq = 0.0f;
     }
 }
 
@@ -879,6 +1039,40 @@ Java_com_fongmi_android_tv_player_exo_ExoDv5Native_nativeQueueRpu(
     const DoviVdrDmData *dm = dovi_rpu_get_vdr_dm_data(rpu);
     RpuMetadata metadata{};
     metadata.presentationTimeUs = presentationTimeUs;
+    metadata.hasMapping = mapping != nullptr;
+    metadata.hasColor = dm != nullptr && !dm->compressed;
+    metadata.fullRange = header != nullptr && header->bl_video_full_range_flag;
+    if (metadata.hasColor) {
+        metadata.hasSourceLuma = dm->source_max_pq > dm->source_min_pq;
+        metadata.sourceMinPq = dm->source_min_pq / 4095.0f;
+        metadata.sourceMaxPq = dm->source_max_pq / 4095.0f;
+    }
+    if (dm != nullptr) {
+        metadata.updatesSceneLuma = true;
+        const DoviExtMetadataBlockLevel1 *level1 = dm->dm_data.level1;
+        metadata.hasSceneLuma = level1 != nullptr && level1->max_pq > 0;
+        if (metadata.hasSceneLuma) {
+            metadata.sceneMaxPq = level1->max_pq / 4095.0f;
+            metadata.sceneAvgPq = level1->avg_pq / 4095.0f;
+        }
+    }
+    const int64_t metadataLog = renderer->metadataLogs.fetch_add(
+            1, std::memory_order_relaxed);
+    if (metadataLog < 4) {
+        __android_log_print(
+                ANDROID_LOG_INFO, "ExoDv5",
+                "rpu metadata ptsUs=%" PRId64
+                " profile=%u usePrev=%d mapping=%d dm=%d compressed=%d"
+                " fullRange=%d sourcePq=%.4f/%.4f scenePq=%.4f/%.4f",
+                static_cast<int64_t>(presentationTimeUs),
+                header == nullptr ? 0 : header->guessed_profile,
+                header != nullptr && header->use_prev_vdr_rpu_flag ? 1 : 0,
+                metadata.hasMapping ? 1 : 0, dm != nullptr ? 1 : 0,
+                dm != nullptr && dm->compressed ? 1 : 0,
+                metadata.fullRange ? 1 : 0,
+                metadata.sourceMinPq, metadata.sourceMaxPq,
+                metadata.sceneMaxPq, metadata.sceneAvgPq);
+    }
     const bool valid = mapRpuMetadata(header, mapping, dm, &metadata.dovi);
     if (dm != nullptr) dovi_rpu_free_vdr_dm_data(dm);
     if (mapping != nullptr) dovi_rpu_free_data_mapping(mapping);
@@ -895,7 +1089,16 @@ Java_com_fongmi_android_tv_player_exo_ExoDv5Native_nativeQueueRpu(
         renderer->pendingRpus.pop_front();
         renderer->rpuQueueDrops.fetch_add(1, std::memory_order_relaxed);
     }
-    renderer->pendingRpus.push_back(metadata);
+    // Matroska BlockAdditional delivery can batch RPU NALs out of decode order.
+    // Keep the bounded queue ordered by media PTS so renderImage can apply the
+    // metadata for the current frame instead of being blocked by a future RPU.
+    auto insertAt = std::upper_bound(
+            renderer->pendingRpus.begin(), renderer->pendingRpus.end(),
+            metadata.presentationTimeUs,
+            [](int64_t pts, const RpuMetadata &item) {
+                return pts < item.presentationTimeUs;
+            });
+    renderer->pendingRpus.insert(insertAt, metadata);
     renderer->parsedRpus.fetch_add(1, std::memory_order_relaxed);
     return JNI_TRUE;
 }
