@@ -3,7 +3,7 @@
 ## Recovery anchor
 
 - 目标：为 Exo 字幕增加 `collisionAvoidance`、`textRegionHeight` 和 `LetterSpacingSpan` 的完整数据契约，但不启用新的碰撞、viewport 或字号行为。
-- 状态：实现与风险相称的验证均已完成；基线 tag `recovery/E4-J1/baseline-20260827102011-a20a31a7c6`；当前仅待原子提交和最终 recovery tag。
+- 状态：已实施并完成验证；实现提交 `af78e3b7656d6a0f210d7344b3852f301690c417`；恢复 tag `recovery/E4-J1/20260827133106-af78e3b7656d`。
 - 分支/HEAD：`fongmi-sync` / `a20a31a7c6be2454459db68ec41b7cebf824d1a6`。
 - 上游来源：`FongMi/media@6794d75b7a39db42dcfcab18c915f0da165515b5`（ASS collision 数据契约）；`FongMi/media@3c2cbe8ac742c2fe15eff52f03eeb3b1b648848d`（TTML region/spacing 数据契约）。
 - 当前 fork：`e3e922d5c01bc0b564849940fe589daf37360d15`；已有基础 `4db2ca63351a4abaf0daf3c1a65913b846215ab9`、`55fe0481b9429d3a12f6b42ed1945cd12cc88c9c`、`56fd27d919504bfebd78172acb99cf7e3bc8f490`、`9d7ea02aae18e03db0407e2146b50908acece81c`。
@@ -50,7 +50,7 @@
 - 首先运行 common 的 Cue/Bundle/custom-span 定向测试和 common 编译，再编译 extractor、ui 及 Mobile/Leanback arm64 App Java 接线。
 - 核对 AAR、sources、module、sidecar、锁文件和补丁 SHA-256；确认非 class 内容及既有 `zIndex`/`bitmapHeight` 行为不变。
 - 回滚锚点：`recovery/E4-J1/baseline-20260827102011-a20a31a7c6`；失败时只移除本任务补丁与 common artifact override，不触碰 E4-1 及其它阶段。
-- 当前下一步：通过 task guard 原子提交任务范围，并立即创建最终 recovery tag。
+- 当前下一步：开始下一项 Exo 候选的只读评估；不得把 E4-J2/E4-2/E4-4 行为并入本任务。
 
 ## Checkpoint 1：2026-08-27 补丁链恢复
 
@@ -110,4 +110,5 @@
 - 最终产物：补丁 SHA-256 `a6389e0c34a9a3e895072f84c9ffd13d0c883c5909d8887873717c337066eb61`；AAR `5a4815ab415c0650bc8adaa60e518f32df548ddcfafb43e02381281a96dac6e5`；sources `31c38835a729f422ba25835733aa94ac23d8fe6445df2d725a71e46a11d86bfc`；module `e1bc887749ab6b69b1f8d5b56a129f5e2d6618f31ebe3db2a841b352b9f24c87`；POM `c5aff59e17d032f665ff55d26540fee65b8b0e843b834cea4d371c3cc7163f44`。
 - 实施结论：E4-J1 数据契约已实现并验证；新字段保持默认无行为，因此现有字幕位置、字号、SSA stacking、Canvas/WebView 渲染和 extraction 开关不变。ASS/TTML 可见行为仍属于后续独立任务。
 - 剩余风险：本阶段没有启用新 parser 或 renderer 行为，未做字幕截图/实机视觉验收；该验证应在后续 E4-J2/E4-2/E4-4 行为阶段按样片执行，不阻塞本数据契约阶段。
-- 下一动作：原子提交本任务文件，并立即创建 recovery tag；随后回填实现 commit/tag。
+- 实现提交：`af78e3b7656d6a0f210d7344b3852f301690c417`；恢复 tag：`recovery/E4-J1/20260827133106-af78e3b7656d`。
+- 下一动作：开始下一项 Exo 候选的只读评估；E4-J2/E4-2/E4-4 仍需单独决策和批准。
