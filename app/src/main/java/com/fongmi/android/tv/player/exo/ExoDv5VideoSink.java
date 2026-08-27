@@ -1,7 +1,9 @@
 package com.fongmi.android.tv.player.exo;
 
+import android.content.Context;
 import android.graphics.Bitmap;
 import android.media.MediaFormat;
+import android.os.SystemClock;
 import android.view.Surface;
 
 import androidx.annotation.Nullable;
@@ -15,6 +17,8 @@ import androidx.media3.common.util.TimestampIterator;
 import androidx.media3.exoplayer.video.VideoFrameMetadataListener;
 import androidx.media3.exoplayer.video.VideoSink;
 
+import java.io.FileOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Queue;
@@ -25,6 +29,7 @@ import java.util.concurrent.Executor;
  */
 final class ExoDv5VideoSink implements VideoSink {
 
+    private static final String DIAGNOSTIC_FILE = "exo-dv5-debug.log";
     static final int MAX_PENDING_FRAMES = 8;
     static final long EARLY_RELEASE_THRESHOLD_US = 50_000L;
     static final long DROP_THRESHOLD_US = -30_000L;
@@ -47,6 +52,11 @@ final class ExoDv5VideoSink implements VideoSink {
     private long observedRenderedFrames;
     private long observedRenderFailures;
     private int consecutiveRenderFailures;
+    private int timestampLogs;
+    private int rpuLogs;
+    private int queueFailureLogs;
+    private int renderLogs;
+    @Nullable private Context diagnosticContext;
 
     ExoDv5VideoSink() {
         pendingFrames = new ArrayDeque<>();
@@ -56,14 +66,42 @@ final class ExoDv5VideoSink implements VideoSink {
         inputFormat = new Format.Builder().build();
     }
 
+    void setDiagnosticContext(Context context) {
+        diagnosticContext = context.getApplicationContext();
+        try (FileOutputStream output = diagnosticContext.openFileOutput(
+                DIAGNOSTIC_FILE, Context.MODE_PRIVATE)) {
+            output.write((diagnosticLine("session start")).getBytes(StandardCharsets.UTF_8));
+        } catch (Throwable ignored) {
+            // Diagnostic logging must never affect playback.
+        }
+    }
+
+    synchronized void diagnosticLog(String message) {
+        Context context = diagnosticContext;
+        if (context == null) return;
+        try (FileOutputStream output = context.openFileOutput(
+                DIAGNOSTIC_FILE, Context.MODE_APPEND)) {
+            output.write(diagnosticLine(message).getBytes(StandardCharsets.UTF_8));
+        } catch (Throwable ignored) {
+            // Diagnostic logging must never affect playback.
+        }
+    }
+
+    private static String diagnosticLine(String message) {
+        return SystemClock.elapsedRealtime() + " "
+                + Thread.currentThread().getName() + " " + message + "\n";
+    }
+
     @Override
     public void startRendering() {
         started = true;
+        diagnosticLog("sink startRendering");
     }
 
     @Override
     public void stopRendering() {
         started = false;
+        diagnosticLog("sink stopRendering");
     }
 
     @Override
@@ -75,6 +113,7 @@ final class ExoDv5VideoSink implements VideoSink {
     @Override
     public boolean initialize(Format sourceFormat) throws VideoSinkException {
         if (initialized) return true;
+        diagnosticLog("sink initialize format=" + sourceFormat);
         if (released || sourceFormat == null || sourceFormat.width <= 0
                 || sourceFormat.height <= 0
                 || !ExoDv5GpuMappingPolicy.isProfile5(
@@ -93,8 +132,10 @@ final class ExoDv5VideoSink implements VideoSink {
             inputFormat = sourceFormat;
             initialized = true;
             inputEnded = false;
+            diagnosticLog("sink initialized stats=" + nativeRenderer.stats());
             return true;
         } catch (Throwable error) {
+            diagnosticLog("sink initialize failed=" + error);
             throw new VideoSinkException(error, sourceFormat);
         }
     }
@@ -173,11 +214,14 @@ final class ExoDv5VideoSink implements VideoSink {
     @Override
     public void setBufferTimestampAdjustmentUs(long bufferTimestampAdjustmentUs) {
         this.bufferTimestampAdjustmentUs = bufferTimestampAdjustmentUs;
+        diagnosticLog("sink timestamp adjustmentUs=" + bufferTimestampAdjustmentUs);
     }
 
     @Override
     public void setOutputSurfaceInfo(Surface outputSurface, Size outputResolution) {
         this.outputSurface = outputSurface;
+        diagnosticLog("sink setOutputSurface valid=" + outputSurface.isValid()
+                + " resolution=" + outputResolution);
         resetRenderObservation();
         ExoDv5Native.NativeRenderer renderer = nativeRenderer;
         if (renderer != null) renderer.setOutputSurface(outputSurface);
@@ -185,6 +229,7 @@ final class ExoDv5VideoSink implements VideoSink {
 
     @Override
     public void clearOutputSurfaceInfo() {
+        diagnosticLog("sink clearOutputSurface");
         outputSurface = null;
         resetRenderObservation();
         ExoDv5Native.NativeRenderer renderer = nativeRenderer;
@@ -225,8 +270,17 @@ final class ExoDv5VideoSink implements VideoSink {
                 || pendingFrames.size() >= MAX_PENDING_FRAMES) {
             return false;
         }
+        long framePresentationTimeUs = bufferPresentationTimeUs
+                + bufferTimestampAdjustmentUs;
         pendingFrames.add(new PendingFrame(
-                bufferPresentationTimeUs, videoFrameHandler));
+                bufferPresentationTimeUs,
+                framePresentationTimeUs,
+                videoFrameHandler));
+        if (timestampLogs++ < 4) {
+            diagnosticLog("sink frame bufferPtsUs=" + bufferPresentationTimeUs
+                    + " framePtsUs=" + framePresentationTimeUs
+                    + " adjustmentUs=" + bufferTimestampAdjustmentUs);
+        }
         listenerExecutor.execute(listener::onFrameAvailableForRendering);
         return true;
     }
@@ -243,8 +297,17 @@ final class ExoDv5VideoSink implements VideoSink {
         updateRenderObservation();
         PendingFrame frame = pendingFrames.peek();
         if (frame == null) return;
-        long earlyUs = frame.presentationTimeUs() - positionUs;
+        long framePositionUs = positionUs + bufferTimestampAdjustmentUs;
+        long earlyUs = frame.framePresentationTimeUs() - framePositionUs;
         FrameAction action = frameAction(started, allowBeforeStarted, earlyUs);
+        if (renderLogs++ < 4) {
+            diagnosticLog("sink render positionUs=" + positionUs
+                    + " framePositionUs=" + framePositionUs
+                    + " bufferPtsUs=" + frame.bufferPresentationTimeUs()
+                    + " framePtsUs=" + frame.framePresentationTimeUs()
+                    + " earlyUs=" + earlyUs
+                    + " action=" + action);
+        }
         if (action == FrameAction.WAIT) return;
         pendingFrames.remove();
         if (action == FrameAction.DROP) {
@@ -255,18 +318,21 @@ final class ExoDv5VideoSink implements VideoSink {
 
         long releaseTimeNs = System.nanoTime() + Math.max(0, earlyUs) * 1_000L;
         ExoDv5Native.NativeRenderer renderer = nativeRenderer;
-        long imageTimestampNs = imageTimestampNsFor(
-                frame.presentationTimeUs() + bufferTimestampAdjustmentUs);
+        long imageTimestampNs = releaseTimeNs;
         if (renderer == null || !renderer.queueFrame(
-                imageTimestampNs, frame.presentationTimeUs())) {
+                imageTimestampNs, frame.bufferPresentationTimeUs())) {
+            if (queueFailureLogs++ < 4) {
+                diagnosticLog("sink queueFrame rejected imageNs=" + imageTimestampNs
+                        + " bufferPtsUs=" + frame.bufferPresentationTimeUs()
+                        + " framePtsUs=" + frame.framePresentationTimeUs()
+                        + " stats=" + stats());
+            }
             frame.handler().skip();
             listenerExecutor.execute(listener::onFrameDropped);
             return;
         }
-        long presentationTimeUs = frame.presentationTimeUs()
-                + bufferTimestampAdjustmentUs;
         metadataListener.onVideoFrameAboutToBeRendered(
-                presentationTimeUs,
+                frame.framePresentationTimeUs(),
                 releaseTimeNs,
                 inputFormat.buildUpon()
                         .setSampleMimeType(MimeTypes.VIDEO_RAW)
@@ -283,6 +349,8 @@ final class ExoDv5VideoSink implements VideoSink {
     @Override
     public void release() {
         if (released) return;
+        diagnosticLog("sink release stats=" + stats()
+                + " pendingJava=" + pendingFrames.size());
         released = true;
         skipPendingFrames(false);
         ExoDv5Native.NativeRenderer renderer = nativeRenderer;
@@ -299,6 +367,11 @@ final class ExoDv5VideoSink implements VideoSink {
 
     void queueRpu(long presentationTimeUs, byte[] rpu) {
         ExoDv5Native.NativeRenderer renderer = nativeRenderer;
+        if (rpuLogs++ < 4) {
+            diagnosticLog("sink rpu ptsUs=" + presentationTimeUs
+                    + " bytes=" + (rpu == null ? 0 : rpu.length)
+                    + " renderer=" + (renderer != null));
+        }
         if (renderer != null) renderer.queueRpu(presentationTimeUs, rpu);
     }
 
@@ -336,8 +409,12 @@ final class ExoDv5VideoSink implements VideoSink {
             consecutiveRenderFailures = (int) Math.min(
                     MAX_CONSECUTIVE_RENDER_FAILURES,
                     consecutiveRenderFailures + failureDelta);
+            diagnosticLog("sink render failure delta=" + failureDelta
+                    + " consecutive=" + consecutiveRenderFailures
+                    + " stats=" + stats);
         }
         if (consecutiveRenderFailures >= MAX_CONSECUTIVE_RENDER_FAILURES) {
+            diagnosticLog("sink throwing render failure stats=" + stats);
             throw new VideoSinkException(
                     new IllegalStateException("DV5 Vulkan rendering failed"),
                     inputFormat);
@@ -364,6 +441,8 @@ final class ExoDv5VideoSink implements VideoSink {
     enum FrameAction { WAIT, RENDER, DROP }
 
     private record PendingFrame(
-            long presentationTimeUs, VideoFrameHandler handler) {
+            long bufferPresentationTimeUs,
+            long framePresentationTimeUs,
+            VideoFrameHandler handler) {
     }
 }

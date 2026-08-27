@@ -486,3 +486,75 @@ PlayerView output Surface
 - 系统输出结果：SurfaceFlinger 将视频层标记为 `BT2020_PQ`，已从修复前的
   `V0_SRGB` 切换为 HDR 输出。日志层面的错误色彩空间根因已修复；不以截图或
   主观画面对比替代用户的最终视觉验收。
+
+### E9-3f RPU 时间戳域修复
+
+- 复测日志发现恢复播放时首个渲染 PTS 为 `1000000000000`，而 pending RPU
+  从 `1000055767000` 开始，差值约 55.8 秒，连续三帧因此命中 `missing-rpu`。
+- Media3 会通过 `VideoSink.setBufferTimestampAdjustmentUs()` 对输出帧做起始位置
+  修正；旧实现只修正 AImage timestamp，RPU 和 native FIFO 的媒体 PTS 仍使用原值。
+- 修复：RPU 入队、`nativeQueueFrame` 的 presentation PTS、AImage timestamp
+  统一使用同一调整后的时间戳，覆盖 seek/恢复播放场景，不改变播放器路由。
+- 下一动作：编译安装并从历史入口再次播放 `P5_Dolby_Amaze.mkv`，确认不再出现
+  `missing-rpu`，且 Exo 仍持续出帧。
+
+### E9-3f 当前复测检查点
+
+- 时间戳修复候选已通过 `:app:assembleMobileArm64_v8aDebug`，APK SHA-256：
+  `cd115cefb8acc2890488dc5de039d4fefd12cc2666520fb48a0c84147fde9c99`。
+- 已覆盖安装并启动到目标设备 `10CF6H1D2L0009S`；尚未播放样片。
+- 由于 guard 要求更换诊断路线，下一步只做一次精确历史条目播放并抓取
+  `ExoDv5`/`VideoSink` 日志，判断时间戳修复是否消除 `missing-rpu`。
+
+### E9-3f 失败复测结论
+
+- 当前候选无效：首批 RPU 被调整为 `-432999` 至 `-299999` 微秒，自定义
+  DV5 decoder 约 300 ms 后释放，随后普通 Exo renderer 才尝试连接仍由 Vulkan
+  持有的 Surface 并报 `Failed to connect to surface`。没有发生 MPV 切换。
+- 已否定的假设：不能对 `DecoderInputBuffer.timeUs` 和 VideoSink 输出帧 PTS
+  同时直接叠加 `bufferTimestampAdjustmentUs`；Media3 的输入时间戳已经包含 stream
+  offset，这种处理会制造负 RPU PTS，且未证明两个回调属于同一原始时间域。
+- 当前未提交候选不得完成或打标签。下一动作是读取首次 decoder 释放前后的完整
+  播放异常，确定 sink 退出原因，再用单一明确映射修正 RPU/帧配对。
+- Guard checkpoint message: 当前候选无效。
+- Guard next action: 读取首次 decoder 释放前后的完整播放异常，确定 sink 退出原因，再用单一明确映射修正 RPU/帧配对。
+- Checkpoint: 已撤销重复叠加 `bufferTimestampAdjustmentUs` 的无效候选；当前仅增加
+  renderer stream/disable、sink adjustment 和首四帧 PTS 的有界日志，以确定首帧前
+  custom renderer 被释放的直接原因。
+- Next action: 构建安装一次 arm64 debug APK，精确复现并读取 `ExoDv5` 定向日志。
+
+- Compaction recovery: branch/HEAD and three task-owned dirty files match E9-3f checkpoint; generated app/.cxx is the only guard violation.
+- Next action: Preserve app/.cxx outside worktree, capture one PID-bound all-buffer logcat reproduction, and fix only the first confirmed failure.
+
+- Replan: vivo shell `logcat` and application-UID `run-as logcat` both omit the App's Java/native playback logs even though the installed APK hash matches the local candidate; repeated logcat capture cannot identify the disable cause.
+- Next action: replace the existing bounded `Log.i` probes with an App-private diagnostic file, reinstall once, and read that file after one P5 reproduction.
+
+- Checkpoint: App-private diagnostics prove the custom renderer parses 26 RPU units and receives one codec frame, but is stopped before AImage acquisition. Locked Media3 `VideoSink` sources require adding `bufferTimestampAdjustmentUs` inside `handleInputFrame` and using the resulting frame PTS for scheduling and the input Surface timestamp; the raw buffer PTS remains the RPU/native match key.
+- Next action: store raw and adjusted PTS in `PendingFrame`, use adjusted PTS for scheduling/AImage timestamp, rebuild, install, and replay P5 once.
+
+- Checkpoint: a direct P5 episode click starts at zero and proves adjusted frame/position scheduling is correct. Three frames reach AImageReader and match RPU, but all native renders fail only after the candidate passed media PTS `0/17/33 ms` as `MediaCodec.releaseOutputBuffer` timestamps instead of absolute monotonic release times.
+- Next action: keep adjusted frame/position scheduling and raw RPU matching, but restore monotonic `releaseTimeNs` for codec/AImage release, then rebuild and replay P5 from zero once.
+
+- Checkpoint: monotonic codec release timestamps now let three AImages reach native matching, but all three fail at `missing-rpu`. The decisive evidence is `parsedRpu=47`, `pendingRpu=16`, `rpuQueueDrops=17`: `pendingRpus` incorrectly shares the 16-entry output-frame bound, so decoder input pre-roll discards the earliest RPU metadata before the first output frame arrives.
+- Next action: separate the RPU metadata queue bound from `expectedFrames`, preserve enough decoder reorder/pre-roll metadata, then rebuild and replay P5 from zero once.
+
+### E9-3f RPU 预滚队列修复与设备验收
+
+- 根因：`pendingRpus` 错误复用了 `expectedFrames` 的 16 帧上限；MediaCodec
+  输入预滚在首个 AImage 输出前已解析 47 至 49 个 RPU，旧策略持续丢弃队首，
+  导致首帧对应的最早元数据被删除并命中 `missing-rpu`。
+- 修复：为 RPU 元数据使用独立的 256 项有界队列；队列极端溢出时保留最早、
+  即将被输出帧消费的元数据并丢弃最远未来项。`expectedFrames` 的 16 帧输出
+  匹配边界保持不变，flush/seek 仍同时清空两类队列。
+- 构建：`bash gradlew :app:assembleMobileArm64_v8aDebug` 成功；生成的未跟踪
+  `app/.cxx` 已整体保留到 `/tmp/e9-cxx-20260828-2BckBs/app-cxx`。
+- 真机验收：候选 APK 已覆盖安装到 V2453A（`10CF6H1D2L0009S`），从选集入口
+  将 `P5_Dolby_Amaze.mkv` 从 0 秒播放约 42 秒。最终 stats 为
+  `renderedFrames=2450`、`renderFailures=0`、`matchedFrames=2451`、
+  `unmatchedFrames=0`、`rpuQueueDrops=0`、`malformedRpus=0`；日志无
+  `missing-rpu`、`VideoSinkException` 或 `AndroidRuntime` 崩溃。
+- 色彩输出日志：source/target 均为 BT.2020/PQ，0.005 至 3999.7 nit、10 bit。
+  路径仍为 `MediaCodecVideoRenderer-DV5-Vulkan`，没有自动切换 MPV。
+- 原始证据：`/tmp/e9-dv5-rpu-queue-final-private.log` 与
+  `/tmp/e9-dv5-rpu-queue-final-logcat.log`。
+- Next action: create the atomic E9-3f commit and annotated recovery tag.

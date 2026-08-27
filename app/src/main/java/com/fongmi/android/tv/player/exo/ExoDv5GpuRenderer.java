@@ -14,6 +14,7 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecSelector;
 import androidx.media3.decoder.DecoderInputBuffer;
 import androidx.media3.exoplayer.ExoPlaybackException;
 import androidx.media3.exoplayer.RendererCapabilities;
+import androidx.media3.exoplayer.source.MediaSource;
 import androidx.media3.exoplayer.video.MediaCodecVideoRenderer;
 import androidx.media3.exoplayer.video.VideoRendererEventListener;
 
@@ -48,6 +49,7 @@ final class ExoDv5GpuRenderer extends MediaCodecVideoRenderer {
                         .setVideoSink(sink)));
         this.context = context;
         this.sink = sink;
+        sink.setDiagnosticContext(context);
     }
 
     @Override
@@ -95,6 +97,72 @@ final class ExoDv5GpuRenderer extends MediaCodecVideoRenderer {
     protected MediaCodecAdapter.Configuration getMediaCodecConfiguration(
             MediaCodecInfo info, Format format, MediaCrypto crypto, float rate) {
         return super.getMediaCodecConfiguration(info, asHevc(format), crypto, rate);
+    }
+
+    @Override
+    public void render(long positionUs, long elapsedRealtimeUs)
+            throws ExoPlaybackException {
+        try {
+            super.render(positionUs, elapsedRealtimeUs);
+        } catch (ExoPlaybackException error) {
+            sink.diagnosticLog("renderer render failed code=" + error.errorCode
+                    + " message=" + error.getMessage()
+                    + " cause=" + error.getCause());
+            throw error;
+        } catch (RuntimeException error) {
+            sink.diagnosticLog("renderer render runtime failure=" + error);
+            throw error;
+        }
+    }
+
+    @Override
+    protected void onCodecInitialized(
+            String name,
+            MediaCodecAdapter.Configuration configuration,
+            long initializedTimestampMs,
+            long initializationDurationMs) {
+        sink.diagnosticLog("renderer codec initialized name=" + name
+                + " durationMs=" + initializationDurationMs);
+        super.onCodecInitialized(
+                name, configuration, initializedTimestampMs, initializationDurationMs);
+    }
+
+    @Override
+    protected void onCodecReleased(String name) {
+        sink.diagnosticLog("renderer codec released name=" + name);
+        super.onCodecReleased(name);
+    }
+
+    @Override
+    protected void onCodecError(Exception codecError) {
+        sink.diagnosticLog("renderer codec error=" + codecError);
+        super.onCodecError(codecError);
+    }
+
+    @Override
+    protected void onStreamChanged(
+            Format[] formats,
+            long startPositionUs,
+            long offsetUs,
+            MediaSource.MediaPeriodId mediaPeriodId) throws ExoPlaybackException {
+        super.onStreamChanged(formats, startPositionUs, offsetUs, mediaPeriodId);
+        Format format = formats == null || formats.length == 0 ? null : formats[0];
+        sink.diagnosticLog("renderer stream startUs=" + startPositionUs
+                + " offsetUs=" + offsetUs
+                + " mime=" + (format == null ? null : format.sampleMimeType)
+                + " codecs=" + (format == null ? null : format.codecs));
+    }
+
+    @Override
+    protected void onDisabled() {
+        sink.diagnosticLog("renderer disabled stats=" + sink.stats());
+        super.onDisabled();
+    }
+
+    @Override
+    protected void onStopped() {
+        sink.diagnosticLog("renderer stopped stats=" + sink.stats());
+        super.onStopped();
     }
 
     @Override

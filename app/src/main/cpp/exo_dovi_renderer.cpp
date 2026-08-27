@@ -28,6 +28,7 @@ namespace {
 
 constexpr int kMaxImages = 4;
 constexpr size_t kMaxExpectedFrames = 16;
+constexpr size_t kMaxPendingRpus = 256;
 
 constexpr jint kCapabilityImageReader = 1 << 0;
 constexpr jint kCapabilityVulkan12 = 1 << 1;
@@ -1103,13 +1104,9 @@ Java_com_fongmi_android_tv_player_exo_ExoDv5Native_nativeQueueRpu(
     }
     dovi_rpu_free(rpu);
     std::lock_guard<std::mutex> lock(renderer->rpuMutex);
-    if (renderer->pendingRpus.size() >= kMaxExpectedFrames) {
-        renderer->pendingRpus.pop_front();
-        renderer->rpuQueueDrops.fetch_add(1, std::memory_order_relaxed);
-    }
     // Matroska BlockAdditional delivery can batch RPU NALs out of decode order.
-    // Keep the bounded queue ordered by media PTS so renderImage can apply the
-    // metadata for the current frame instead of being blocked by a future RPU.
+    // Keep enough ordered metadata for codec pre-roll. If the producer ever
+    // exceeds the bound, preserve the earliest entries needed by output next.
     auto insertAt = std::upper_bound(
             renderer->pendingRpus.begin(), renderer->pendingRpus.end(),
             metadata.presentationTimeUs,
@@ -1117,6 +1114,10 @@ Java_com_fongmi_android_tv_player_exo_ExoDv5Native_nativeQueueRpu(
                 return pts < item.presentationTimeUs;
             });
     renderer->pendingRpus.insert(insertAt, metadata);
+    if (renderer->pendingRpus.size() > kMaxPendingRpus) {
+        renderer->pendingRpus.pop_back();
+        renderer->rpuQueueDrops.fetch_add(1, std::memory_order_relaxed);
+    }
     renderer->parsedRpus.fetch_add(1, std::memory_order_relaxed);
     return JNI_TRUE;
 }
