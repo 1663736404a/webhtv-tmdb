@@ -285,3 +285,13 @@ PlayerView output Surface
 - 下一动作：本地化完整 libplacebo API 375 公共头，然后实现 Vulkan context、
   Android swapchain、AHB external-format import、raw DV component mapping 和
   同步 `pl_render_image` 输出。
+
+## 18. E9-3d libplacebo 公共头本地化
+
+- 第一批公共头来自已锁定并已链接的 libplacebo 7.375.0 commit
+  `b694a21bf2dc176c1e98b8a13c6421a0de5f3da5` 同一源码树，包含 Vulkan、
+  GPU、swapchain、renderer、colorspace、log/cache/common 和核心 shader API。
+- 这些头只复制到当前仓库 `third_party/exo-dv5-native/include/libplacebo`；
+  App CMake 和 native 源码不引用 `main-2`，另一工作区仅作为本地复制来源。
+- 第一批是资产恢复点，不改变运行时或生产 renderer 选择；第二批将补齐
+  renderer include 闭包后，由实际双 ABI 编译验证头与静态库 API 375 匹配。
