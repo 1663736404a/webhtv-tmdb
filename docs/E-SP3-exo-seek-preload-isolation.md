@@ -265,3 +265,41 @@ TV-exo-preload: ... mime=application/x-mpegURL
 - `UnrecognizedInputFormatException`、MIME 从自动探测切为 HLS、decoder 创建发生在媒体首次打开或重新打开阶段，不等同于普通 seek 停顿。
 - 当前最小可证伪假设：seek 到未缓存位置后进入 `BUFFERING`，现有 Exo `3000 ms` rebuffer 门槛造成约 1 秒恢复等待；需要补充 seek 起点/目标、`BUFFERING -> READY` 时长和 READY 时缓冲量日志后再决定行为修复，避免降低正常网络断流的抗抖动能力。
 - 下一动作：增加不改变播放行为的 seek 恢复定向日志，构建安装后用同一视频复现一次。
+
+## Checkpoint 8：2026-08-27 seek 诊断入口纠正
+
+- 第一版埋点已编译安装，但用户复现时没有输出 `TV-exo-seek`；调试日志开关已开启。
+- 根因是拖动进度条经 `MediaController` 直接发送 seek，未进入 `PlayerManager.seekTo()` 的请求埋点；Analytics discontinuity 已在正确的公共路径上。
+- 纠正方案：保留调试开关，在 `DISCONTINUITY_REASON_SEEK/SEEK_ADJUSTMENT` 到达且没有请求序号时建立诊断序号，继续量化 `BUFFERING -> READY -> first-frame/playing`；不改变播放行为。
+- 下一动作：增量构建安装纠正后的诊断 APK，清空 logcat 后复现一次并据时序实施最小修复。
+
+## Checkpoint 9：2026-08-27 画面恢复后停顿的诊断边界
+
+- 用户进一步明确：问题不是 seek 后等待缓冲期间黑屏或静止，而是缓冲结束、画面已经恢复并开始播放后，又额外停顿一下再正常播放。
+- 现有多次设备日志已排除每次 seek 的 MIME 重新探测、MediaSource/decoder 重建；seek 邻近只看到 codec flush/config 更新。
+- 因此不调整 seek 精度或 rebuffer 阈值；下一轮只观察恢复首帧后的连续视频帧间隔、`isPlaying`/playback state、音频推进、underrun/sink error 和预载状态。
+- 完成说明：seek 后停顿发生在画面恢复之后；现有日志排除每次 seek 的 MIME 探测和 decoder 重建，下一轮只补首帧后视频帧间隔与音频推进时序。
+- 下一动作：增加 seek 后首帧/视频帧间隔/音频推进诊断，构建安装并复现一次。
+
+## Checkpoint 10：2026-08-27 最新诊断 APK 重新打包安装
+
+- 目标/车道/范围：`quick-fix`；仅重新构建并安装当前 E-SP3-DIAG 诊断代码，范围仍为 `PlayerManager.java`、`PlaybackAnalyticsListener.java` 与本文档，不扩展播放行为。
+- 基线：分支 `fongmi-sync-bugfix`，HEAD `0250fd01295fad8c499c699da45e07eb3834256d`。
+- 受保护的既有改动：上述三个路径均为当前任务已有未提交改动；重新打包不得清理、覆盖或混入其他路径。
+- 已完成证据/文件变化：首帧后视频间隔、音频推进、underrun/sink error 与 isPlaying 恢复诊断代码已经存在；本检查点只追加任务状态，不新增播放行为。
+- 验证状态：此前同一变体构建成功；本轮按用户要求重新执行 `:app:assembleMobileArm64_v8aDebug`，随后覆盖安装并核对设备端包与启动状态。
+- 未决风险：必须以本轮新产物成功安装为准；上一次安装曾被 OEM 权限确认中止。
+- 回滚锚点：HEAD `0250fd01295fad8c499c699da45e07eb3834256d`；诊断改动尚未提交，不执行清理或回退。
+- 下一动作：立即重新构建 mobile arm64 debug APK，并用 OEM 安装器辅助流程覆盖安装到已连接 vivo 手机。
+
+## Checkpoint 11：2026-08-27 三次 seek 停顿根因定位
+
+- 现场证据：设备应用内日志保存为 `/tmp/e-sp3-3seek-app-debug.log`，系统日志保存为 `/tmp/e-sp3-3seek-current.log`。用户连续三次 seek 后都复现“目标画面先出现，再冻结一下才连续播放”。
+- 第一次：目标首帧在 seek 后 `485 ms` 出现；下一帧相隔 `1734 ms`；播放器在累计约 `9054 ms` 前向缓冲后进入 `READY`。
+- 第二次：目标位置首帧出现后，下一帧相隔 `1003 ms`；播放器在约 `8466 ms` 前向缓冲后进入 `READY`。
+- 第三次：目标位置首帧出现后，下一帧相隔 `642 ms`；播放器在约 `9088 ms` 前向缓冲后进入 `READY`。
+- 一致原因：三次都在 `BUFFERING` 阶段允许渲染一张 seek 目标帧，但 `AutoLoadControl` 随后锁定 `episode=startup startMs=8000`，原因均为 `throughput-deficit`；播放时钟必须等约 8 秒媒体缓冲后才启动，所以用户看到目标画面冻结约 0.6--1.7 秒。
+- 排除项：三次窗口内没有 decoder `Created component`/release-recreate，没有 audio underrun、audio sink error 或崩溃；因此不是 decoder 重建，也不是音频 sink 故障或预载取消。
+- 诊断日志限制：三次 seek 在 30 秒追踪窗口内复用了 `seq=2`，因此 `elapsed`/`bufferingDuration` 为该窗口累计值；每次 `discontinuity`、`playback-buffer event=start/end` 和视频帧 gap 仍能独立确定上述时序，不影响根因结论。
+- 最小修复边界：不得降低正常首次启动或普通网络断流的全局阈值；应把用户 seek 恢复识别为独立 episode，仅调整 seek 后启动门槛，并阻止主动 seek 被计入网络 rebuffer 风险历史。
+- 下一动作：补充 E-SP3 seek-specific threshold 的决策设计与验收/回滚条件，取得该播放行为阶段批准后实施、构建并在同一视频复测三次。

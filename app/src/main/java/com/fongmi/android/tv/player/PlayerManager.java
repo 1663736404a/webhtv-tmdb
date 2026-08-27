@@ -1214,6 +1214,16 @@ public class PlayerManager implements ParseCallback {
         ijkRealtimeRecoveryController.onUserSeek(playbackAutoSession, now);
         ijkDecodePressureController.onUserSeek(playbackAutoSession, now);
         resetNetworkProtectionSession("user-seek");
+        if (isExo()) {
+            PlaybackAnalyticsListener.onUserSeekRequested(
+                    player.getCurrentPosition(),
+                    time,
+                    player.getPlaybackState(),
+                    player.getBufferedPosition(),
+                    player.getTotalBufferedDuration(),
+                    player.isLoading(),
+                    player.isPlaying());
+        }
         player.seekTo(time);
     }
 
