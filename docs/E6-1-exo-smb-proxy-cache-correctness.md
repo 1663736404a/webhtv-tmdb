@@ -3,7 +3,7 @@
 ## Recovery anchor
 
 - 目标：让 Exo 预缓存严格遵守 `DataSpec.length`，避免 Range 被服务器/代理忽略时继续下载整个文件。
-- 状态：实现与定向验证完成；基线 tag `recovery/E6-1/baseline-202608271355-c67b1498a2d5`；下一步原子提交并创建恢复 tag。
+- 状态：已实施、验证并提交；实现 commit `0a8ed3b910679a08a7e41c735338c3804a2eb938`，恢复 tag `recovery/E6-1/20260827145043-0a8ed3b91067`。
 - 分支/HEAD：`fongmi-sync` / `c67b1498a2d5fcbb3152d7199e2af19a9f3544a0`。
 - 来源：`FongMi/media@dd00f94b58b7324ab29febb0b50f3a190d544a3b`；父提交 `FongMi/media@32c20a091ba6e5fd09e13e67df3149326232eda5` 的 SMB/proxy 主体已由当前 fork 覆盖，不重复移植。
 - 保护：`AGENTS.md`、`.codex/scripts/task_guard.sh`、`docs/agents-md-effective-constraints-review-2026-08-21.md`、`third_party/sources/media` 既有脏改动不修改、不提交。
@@ -63,4 +63,6 @@
 - 验收结论：补丁重放、精确失败模式单测、datasource 编译/发布、Exoplayer 编译、产物/lock 哈希以及 Mobile/Leanback arm64 App 编译全部通过；未改变 MPV、FFmpeg、nextlib、native、公共 API 或现有预缓存策略。
 - 剩余风险：未做实机网络流量抓包；定向测试已经精确模拟 Range 长度被忽略、数据源返回完整资源的故障，并确认缓存严格停止在请求的 20 字节处，因此不把实机抓包作为本窄修复的提交门槛。
 - 回滚：回退本任务原子提交，或恢复基线 tag `recovery/E6-1/baseline-202608271355-c67b1498a2d5`；datasource publication、patch、lock、构建顺序和文档必须作为一个兼容集合回退。
-- 下一动作：通过 task guard 创建原子提交与恢复 tag，并把实际 commit/tag 回填到本文件及总索引。
+- 原子提交：`0a8ed3b910679a08a7e41c735338c3804a2eb938`（`Exo: bound cache writer requests`）。
+- 恢复 tag：`recovery/E6-1/20260827145043-0a8ed3b91067`；tag 创建耗时 0 秒。
+- 当前结论：E6-1 完成。下一动作：按主评估索引评估下一项尚未实施的 Exo 任务，不自动扩大到 E6-2 或并行预加载。
