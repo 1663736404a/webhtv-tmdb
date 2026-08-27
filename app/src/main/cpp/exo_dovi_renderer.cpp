@@ -89,6 +89,7 @@ struct Renderer {
     std::atomic<int64_t> metadataLogs{0};
     std::atomic<int64_t> renderedFrames{0};
     std::atomic<int64_t> renderFailures{0};
+    std::atomic<int> colorPipelineLogs{0};
     std::deque<RpuMetadata> pendingRpus;
     bool hasLastDovi = false;
     pl_dovi_metadata lastDovi{};
@@ -304,6 +305,7 @@ bool renderImage(Renderer *renderer, AImage *image, int64_t ptsUs) {
     bool rendered = false;
     bool imageReleased = false;
     bool imageHeld = false;
+    int colorLog = 0;
     size_t pendingRpuCount = 0;
     const char *failureStage = "vk-create-image";
     vkResult = vkCreateImage(renderer->vulkan->device, &imageInfo, nullptr, &vkImage);
@@ -459,12 +461,28 @@ bool renderImage(Renderer *renderer, AImage *image, int64_t ptsUs) {
         source.color.hdr.avg_pq_y = renderer->sceneAvgPq;
     }
     source.crop = {0, 0, static_cast<float>(desc.width), static_cast<float>(desc.height)};
+    // The Vulkan swapchain defaults to sRGB. Profile 5 has already been
+    // reshaped to BT.2020/PQ here, so advertise that output contract before
+    // acquiring the target frame and let Android compose it as HDR10.
+    pl_swapchain_colorspace_hint(renderer->swapchain, &source.color);
     failureStage = "swapchain-resize";
     if (!pl_swapchain_resize(renderer->swapchain, &width, &height)) goto cleanup;
     failureStage = "swapchain-start-frame";
     if (!pl_swapchain_start_frame(renderer->swapchain, &swapFrame)) goto cleanup;
     frameStarted = true;
     pl_frame_from_swapchain(&target, &swapFrame);
+    colorLog = renderer->colorPipelineLogs.fetch_add(
+            1, std::memory_order_relaxed);
+    if (colorLog < 4) {
+        __android_log_print(
+                ANDROID_LOG_INFO, "ExoDv5",
+                "color pipeline source=%d/%d %.3f/%.1f target=%d/%d %.3f/%.1f bits=%d",
+                source.color.primaries, source.color.transfer,
+                source.color.hdr.min_luma, source.color.hdr.max_luma,
+                target.color.primaries, target.color.transfer,
+                target.color.hdr.min_luma, target.color.hdr.max_luma,
+                target.repr.bits.color_depth);
+    }
     failureStage = "pl-render-image";
     rendered = pl_render_image(renderer->renderer, &source, &target, nullptr);
     if (!rendered) goto cleanup;

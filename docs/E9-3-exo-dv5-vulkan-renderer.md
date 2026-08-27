@@ -465,3 +465,24 @@ PlayerView output Surface
 - 下一动作：设备上线后覆盖安装该 APK，播放 `P5_Dolby_Amaze.mkv` 并只读取 `ExoDv5`/renderer 定向日志。
 - Checkpoint: arm64 DV5 DM/RPU color candidate built successfully; device offline; app/.cxx preserved under /tmp
 - Next action: install candidate on 10CF6H1D2L0009S and capture focused ExoDv5 playback logs
+
+### E9-3e HDR swapchain 日志根因与修复
+
+- SurfaceFlinger 的目标设备现场状态确认 Exo DV5 Surface 使用
+  `RGBA_1010102`，但 dataspace 仍为 `V0_SRGB`；同一设备声明支持 HDR10/PQ，
+  最大亮度 800 nit。`color_bits=10` 只选择位深，不能替代 HDR 色彩空间声明。
+- 根因是 Exo Vulkan 路径没有像 mpv gpu-next 一样调用
+  `pl_swapchain_colorspace_hint`，libplacebo 因而按默认 sRGB 创建 swapchain。
+- 最小修复是在已完成 DV reshape 的 BT.2020/PQ source 上调用 colorspace hint，
+  再 resize/acquire swapchain；同时有界打印前四帧 source/target primaries、transfer、
+  luminance 与输出位深，供设备日志和 SurfaceFlinger dataspace 双重确认。
+- 回滚锚点：`recovery/E9-3d-render-fix/20260828004539-eb1f827bfc7b`。
+- 设备验证：arm64 native 构建与 APK 打包成功，APK SHA-256 为
+  `75d7cee2f3da73133ed8be65ab7ba184a4e4518ac9cecfd0ede17acab51b238b`；
+  已覆盖安装到 V2453A 并精确播放 `P5_Dolby_Amaze.mkv`。
+- 日志结果：Exo 仍使用 `c2.qti.hevc.decoder`，RPU 为 Profile 5 且 mapping/DM
+  均有效；前四帧 source/target 均为 BT.2020/PQ、10 bit、0.005-3999.7 nit，
+  无 `render failed` 或 `VideoSinkException`。
+- 系统输出结果：SurfaceFlinger 将视频层标记为 `BT2020_PQ`，已从修复前的
+  `V0_SRGB` 切换为 HDR 输出。日志层面的错误色彩空间根因已修复；不以截图或
+  主观画面对比替代用户的最终视觉验收。
