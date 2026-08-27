@@ -311,6 +311,11 @@ PlayerView output Surface
   名称/要求仍是 Vulkan 1.1，而 libplacebo 7 的实际最低版本是 Vulkan 1.2。
   必须在下一独立单元修正 gate、增加 render 成败统计并以显式实验开关接线，
   再进行目标设备 DV5 播放、截图、logcat、seek/lifecycle 验收。
+- E9-3d-wiring 准备：native capability bit 已按 libplacebo 7 的最低 Vulkan
+  1.2 要求校正，renderer 名称由 diagnostic 改为 experimental，统计新增
+  `renderedFrames` 与 `renderFailures`。注册前审查发现 PlayerView Surface 可能
+  先于 native renderer 设置，现有 sink 初始化不会补传已保存 Surface；因此本
+  单元不提前注册黑屏路径，下一小单元先修复该生命周期契约再完成 opt-in 接线。
 - 回滚：回退本单元提交/恢复标签即可恢复到仅有 RPU 输送和本地头文件的状态；
   vendored native 依赖与现有 Exo/MPV 默认路径不受影响。
 

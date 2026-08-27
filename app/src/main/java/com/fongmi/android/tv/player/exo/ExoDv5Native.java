@@ -9,14 +9,14 @@ import androidx.annotation.Nullable;
 final class ExoDv5Native {
 
     static final int CAPABILITY_IMAGE_READER = 1 << 0;
-    static final int CAPABILITY_VULKAN_11 = 1 << 1;
+    static final int CAPABILITY_VULKAN_12 = 1 << 1;
     static final int CAPABILITY_AHB_IMPORT = 1 << 2;
     static final int CAPABILITY_YCBCR_CONVERSION = 1 << 3;
     static final int CAPABILITY_FOREIGN_QUEUE = 1 << 4;
     static final int CAPABILITY_LIBPLACEBO_375 = 1 << 5;
     static final int CAPABILITY_LIBDOVI = 1 << 6;
     static final int REQUIRED_CAPABILITIES = CAPABILITY_IMAGE_READER
-            | CAPABILITY_VULKAN_11
+            | CAPABILITY_VULKAN_12
             | CAPABILITY_AHB_IMPORT
             | CAPABILITY_YCBCR_CONVERSION
             | CAPABILITY_FOREIGN_QUEUE
@@ -98,11 +98,13 @@ final class ExoDv5Native {
             long parsedRpus,
             long malformedRpus,
             long rpuQueueDrops,
-            long pendingRpus) {
+            long pendingRpus,
+            long renderedFrames,
+            long renderFailures) {
 
         static Stats empty() {
             return new Stats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                    0, 0, 0, 0);
+                    0, 0, 0, 0, 0, 0);
         }
     }
 
@@ -143,12 +145,12 @@ final class ExoDv5Native {
         synchronized Stats stats() {
             if (handle == 0) return Stats.empty();
             long[] values = nativeGetStats(handle);
-            if (values == null || values.length < 15) return Stats.empty();
+            if (values == null || values.length < 17) return Stats.empty();
             return new Stats(
                     values[0], values[1], values[2], values[3], values[4],
                     values[5], values[6], values[7], values[8], values[9],
                     values[10], values[11], values[12], values[13],
-                    values[14]);
+                    values[14], values[15], values[16]);
         }
 
         @Override

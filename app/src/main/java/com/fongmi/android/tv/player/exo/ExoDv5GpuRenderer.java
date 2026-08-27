@@ -20,7 +20,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Diagnostic-only MediaCodec renderer targeting {@link ExoDv5VideoSink}. */
+/** Experimental MediaCodec renderer targeting {@link ExoDv5VideoSink}. */
 final class ExoDv5GpuRenderer extends MediaCodecVideoRenderer {
 
     private final ExoDv5VideoSink sink;
@@ -49,7 +49,7 @@ final class ExoDv5GpuRenderer extends MediaCodecVideoRenderer {
 
     @Override
     public String getName() {
-        return "MediaCodecVideoRenderer-DV5-AImageReader-Diagnostic";
+        return "MediaCodecVideoRenderer-DV5-Vulkan";
     }
 
     @Override

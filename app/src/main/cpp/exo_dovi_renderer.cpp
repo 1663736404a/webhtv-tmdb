@@ -29,7 +29,7 @@ constexpr int kMaxImages = 4;
 constexpr size_t kMaxExpectedFrames = 16;
 
 constexpr jint kCapabilityImageReader = 1 << 0;
-constexpr jint kCapabilityVulkan11 = 1 << 1;
+constexpr jint kCapabilityVulkan12 = 1 << 1;
 constexpr jint kCapabilityAhbImport = 1 << 2;
 constexpr jint kCapabilityYcbcrConversion = 1 << 3;
 constexpr jint kCapabilityForeignQueue = 1 << 4;
@@ -75,6 +75,8 @@ struct Renderer {
     std::atomic<int64_t> parsedRpus{0};
     std::atomic<int64_t> malformedRpus{0};
     std::atomic<int64_t> rpuQueueDrops{0};
+    std::atomic<int64_t> renderedFrames{0};
+    std::atomic<int64_t> renderFailures{0};
     std::deque<RpuMetadata> pendingRpus;
     bool hasLastDovi = false;
     pl_dovi_metadata lastDovi{};
@@ -550,7 +552,7 @@ jint probeVulkanDevice(VkInstance instance, VkPhysicalDevice device) {
     vkGetPhysicalDeviceProperties(device, &properties);
     if (VK_VERSION_MAJOR(properties.apiVersion) < 1
             || (VK_VERSION_MAJOR(properties.apiVersion) == 1
-            && VK_VERSION_MINOR(properties.apiVersion) < 1)) {
+            && VK_VERSION_MINOR(properties.apiVersion) < 2)) {
         return 0;
     }
 
@@ -568,12 +570,12 @@ jint probeVulkanDevice(VkInstance instance, VkPhysicalDevice device) {
             VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME)
             || !hasExtension(extensions,
             VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME)) {
-        return kCapabilityVulkan11;
+        return kCapabilityVulkan12;
     }
 
     auto getFeatures2 = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(
             vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceFeatures2"));
-    if (getFeatures2 == nullptr) return kCapabilityVulkan11;
+    if (getFeatures2 == nullptr) return kCapabilityVulkan12;
     VkPhysicalDeviceVulkan11Features features11{};
     features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
     VkPhysicalDeviceFeatures2 features2{};
@@ -581,7 +583,7 @@ jint probeVulkanDevice(VkInstance instance, VkPhysicalDevice device) {
     features2.pNext = &features11;
     getFeatures2(device, &features2);
     if (features11.samplerYcbcrConversion != VK_TRUE) {
-        return kCapabilityVulkan11 | kCapabilityAhbImport
+        return kCapabilityVulkan12 | kCapabilityAhbImport
                 | kCapabilityForeignQueue;
     }
 
@@ -598,7 +600,7 @@ jint probeVulkanDevice(VkInstance instance, VkPhysicalDevice device) {
             break;
         }
     }
-    if (queueFamily == UINT32_MAX) return kCapabilityVulkan11;
+    if (queueFamily == UINT32_MAX) return kCapabilityVulkan12;
 
     float priority = 1.0f;
     VkDeviceQueueCreateInfo queueInfo{};
@@ -622,7 +624,7 @@ jint probeVulkanDevice(VkInstance instance, VkPhysicalDevice device) {
     deviceInfo.ppEnabledExtensionNames = enabledExtensions;
     VkDevice logicalDevice = VK_NULL_HANDLE;
     if (vkCreateDevice(device, &deviceInfo, nullptr, &logicalDevice) != VK_SUCCESS) {
-        return kCapabilityVulkan11;
+        return kCapabilityVulkan12;
     }
     auto getAhbProperties = reinterpret_cast<
             PFN_vkGetAndroidHardwareBufferPropertiesANDROID>(
@@ -630,8 +632,8 @@ jint probeVulkanDevice(VkInstance instance, VkPhysicalDevice device) {
                     logicalDevice,
                     "vkGetAndroidHardwareBufferPropertiesANDROID"));
     vkDestroyDevice(logicalDevice, nullptr);
-    return getAhbProperties == nullptr ? kCapabilityVulkan11
-            : kCapabilityVulkan11 | kCapabilityAhbImport
+    return getAhbProperties == nullptr ? kCapabilityVulkan12
+            : kCapabilityVulkan12 | kCapabilityAhbImport
             | kCapabilityYcbcrConversion | kCapabilityForeignQueue;
 }
 
@@ -642,7 +644,7 @@ jint probeVulkan() {
     appInfo.applicationVersion = 1;
     appInfo.pEngineName = "WebHTV";
     appInfo.engineVersion = 1;
-    appInfo.apiVersion = VK_API_VERSION_1_1;
+    appInfo.apiVersion = VK_API_VERSION_1_2;
     VkInstanceCreateInfo instanceInfo{};
     instanceInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     instanceInfo.pApplicationInfo = &appInfo;
@@ -657,7 +659,7 @@ jint probeVulkan() {
         if (vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data()) == VK_SUCCESS) {
             for (VkPhysicalDevice device : devices) {
                 jint deviceResult = probeVulkanDevice(instance, device);
-                if (deviceResult == (kCapabilityVulkan11
+                if (deviceResult == (kCapabilityVulkan12
                         | kCapabilityAhbImport
                         | kCapabilityYcbcrConversion
                         | kCapabilityForeignQueue)) {
@@ -744,7 +746,11 @@ void onImageAvailable(void *context, AImageReader *reader) {
                 renderer->highDepthFrames.fetch_add(1, std::memory_order_relaxed);
             }
         }
-        renderImage(renderer, image, presentationTimeUs);
+        if (renderImage(renderer, image, presentationTimeUs)) {
+            renderer->renderedFrames.fetch_add(1, std::memory_order_relaxed);
+        } else {
+            renderer->renderFailures.fetch_add(1, std::memory_order_relaxed);
+        }
         AImage_delete(image);
     }
 }
@@ -942,6 +948,8 @@ Java_com_fongmi_android_tv_player_exo_ExoDv5Native_nativeGetStats(
             renderer->malformedRpus.load(std::memory_order_relaxed),
             renderer->rpuQueueDrops.load(std::memory_order_relaxed),
             pendingRpus,
+            renderer->renderedFrames.load(std::memory_order_relaxed),
+            renderer->renderFailures.load(std::memory_order_relaxed),
     };
     jlongArray result = env->NewLongArray(std::size(values));
     if (result != nullptr) {

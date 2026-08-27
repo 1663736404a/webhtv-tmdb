@@ -70,6 +70,15 @@ public class ExoDv5GpuRendererTest {
         assertTrue(probe.has(ExoDv5Native.CAPABILITY_IMAGE_READER));
         assertTrue(probe.has(ExoDv5Native.CAPABILITY_AHB_IMPORT));
         assertFalse(probe.has(ExoDv5Native.CAPABILITY_YCBCR_CONVERSION));
+        assertFalse(probe.has(ExoDv5Native.CAPABILITY_VULKAN_12));
+    }
+
+    @Test
+    public void emptyStatsExposeRenderOutcomeCounters() {
+        ExoDv5Native.Stats stats = ExoDv5Native.Stats.empty();
+
+        assertEquals(0, stats.renderedFrames());
+        assertEquals(0, stats.renderFailures());
     }
 
     @Test

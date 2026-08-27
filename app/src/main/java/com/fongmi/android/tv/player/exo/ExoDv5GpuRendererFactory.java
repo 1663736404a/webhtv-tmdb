@@ -8,20 +8,20 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecAdapter;
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector;
 import androidx.media3.exoplayer.video.VideoRendererEventListener;
 
-/** Creates the E9-3b diagnostic renderer only after an explicit opt-in. */
+/** Creates the E9-3 experimental renderer only after an explicit opt-in. */
 final class ExoDv5GpuRendererFactory {
 
     private ExoDv5GpuRendererFactory() {
     }
 
     static boolean shouldCreate(
-            boolean diagnosticEnabled, ExoDv5Native.Probe probe) {
-        return diagnosticEnabled && probe != null && probe.available();
+            boolean experimentEnabled, ExoDv5Native.Probe probe) {
+        return experimentEnabled && probe != null && probe.available();
     }
 
     @Nullable
     static ExoDv5GpuRenderer create(
-            boolean diagnosticEnabled,
+            boolean experimentEnabled,
             Context context,
             MediaCodecAdapter.Factory codecAdapterFactory,
             MediaCodecSelector mediaCodecSelector,
@@ -31,7 +31,7 @@ final class ExoDv5GpuRendererFactory {
             @Nullable VideoRendererEventListener eventListener,
             ExoFrameSchedulingExperimentPolicy.Decision frameSchedulingDecision) {
         ExoDv5Native.Probe probe = ExoDv5Native.probe();
-        if (!shouldCreate(diagnosticEnabled, probe)) return null;
+        if (!shouldCreate(experimentEnabled, probe)) return null;
         return new ExoDv5GpuRenderer(
                 context,
                 codecAdapterFactory,
