@@ -4,7 +4,7 @@
 - 类别：Exo 性能/生命周期
 - 唯一文档：`docs/E-SP3-exo-seek-preload-isolation.md`
 - 评估日期：2026-08-27（Asia/Shanghai）
-- 当前状态：`E-SP3-A + E-SP3-B` 已实施并形成独立 recovery tag；Media3 产物和 App Java 编译已验证，候选 APK 因仓库现有 Material 资源链接缺失而未生成，实机 seek/HLS 回归仍待该构建阻塞解除后完成。
+- 当前状态：`E-SP3-A + E-SP3-B` 已实施并形成独立 recovery tag；Media3 产物、App 构建和 vivo 安装已完成，HLS 预缓存崩溃暂未复现，但用户确认普通 seek 后仍有约 1 秒可感知停顿，因此设备验收未通过，任务继续定位。
 - 实施边界：只修改 Exo App 预载策略、Media3 `PreCacheHelper` 补丁、锁文件和 `media3-exoplayer` 产物；未修改前台 HLS、解码器、MIME、MPV、FFmpeg、nextlib native 或共享 `.so`。
 - 现场设备：vivo V2453A，Android 15 / SDK 35，`com.fongmi.android.tv`，序列号 `10CF6H1D2L0009S`。
 - 原始证据：[`/tmp/webhtv-repro-logcat.txt`](/tmp/webhtv-repro-logcat.txt)、用户截图 `/var/folders/ty/xxvjkz4s4pb9mndtj0hys0w40000gn/T/IMAGE 2026-08-27 10:13:59.jpg`。
@@ -256,3 +256,12 @@ TV-exo-preload: ... mime=application/x-mpegURL
 - 结论：没有候选 APK，故未安装到设备；不得宣称两次 seek suppression 或原 HLS 崩溃场景已通过实机验证。
 - 当前风险：代码与依赖产物已完成并可编译，但 Go/No-Go 的设备运行项仍未关闭。
 - 下一动作：单独解决或取得已知可构建基线中的 Material 资源链接问题后，重新构建 arm64 APK，安装到同一 vivo，清空 logcat，并按 6.2 的 seek/HLS 场景完成验收。
+
+## Checkpoint 7：2026-08-27 候选实机复现纠正
+
+- 候选 APK 已通过隔离 Gradle 缓存构建并安装到 vivo V2453A；原 Material 资源链接失败确认是共享 Gradle transform 缓存污染，不是仓库源码缺失。
+- 用户在同一视频多次复现：普通 seek 后仍有约 1 秒明显停顿，并非此前日志推断的约 8.5 秒。
+- 设备日志显示 seek 时正在运行的自动预载任务立即以 `reason=seek` 取消；seek 前后只有 codec flush/config 更新，没有新的 `Created component`，因此“每次 seek 都重新探测并重建 decoder”不成立。
+- `UnrecognizedInputFormatException`、MIME 从自动探测切为 HLS、decoder 创建发生在媒体首次打开或重新打开阶段，不等同于普通 seek 停顿。
+- 当前最小可证伪假设：seek 到未缓存位置后进入 `BUFFERING`，现有 Exo `3000 ms` rebuffer 门槛造成约 1 秒恢复等待；需要补充 seek 起点/目标、`BUFFERING -> READY` 时长和 READY 时缓冲量日志后再决定行为修复，避免降低正常网络断流的抗抖动能力。
+- 下一动作：增加不改变播放行为的 seek 恢复定向日志，构建安装后用同一视频复现一次。
