@@ -48,6 +48,10 @@
       {
         "path": "third_party/patches/media3-exo-iso-reader-safety.patch",
         "sha256": "d042b6c177910604f7f251571909d018d0227abc4af7846b15a0b5d499be5893"
+      },
+      {
+        "path": "third_party/patches/media3-exo-iso-multi-extent.patch",
+        "sha256": "b4954d32f5c98dc5caf2a3cbc8cd72f72d24f4fdeec9425e5061a252d1ccaf68"
       }
     ],
     "artifact_overrides": [
@@ -65,21 +69,21 @@
       },
       {
         "coordinate": "androidx.media3:media3-extractor:1.11.0-alpha01-fongmi",
-        "aar_sha256": "14811712a342517841cf2087d8316f4458f15df2ab1688fb795570a33351f47d",
-        "sources_sha256": "818c7917af9cb3b4e090f14d085e91482d2b8cfef9a1d592a781d106c9e0af64",
-        "reason": "E-SP2/E2-1/E3-1b baseline plus E4-1 whole-file subtitle byte and charset safety"
+        "aar_sha256": "12e03f413c9251109515011249c7151e1f33b55715d7bfad3b8687adcf876c58",
+        "sources_sha256": "c80e000e7960fca4f256ead3ed830aa1661bdb23d06b1c6ecfae6ac7e3ba73b0",
+        "reason": "E-SP2/E2-1/E3-1b/E4-1 baseline plus E7-2 ISO/UDF multi-extent entries and DVD/BDMV extent consumers"
       },
       {
         "coordinate": "androidx.media3:media3-exoplayer:1.11.0-alpha01-fongmi",
-        "aar_sha256": "8f34ea1a6c2951c4ed4f033144e38e9e0616443a7a05fa488e5525ca47084c3f",
-        "sources_sha256": "71f9bee851acf22e7a63b91347b03a4966c1b9cc23958672b3da091cab3f32c6",
-        "reason": "E3-1a baseline plus E4-1 render-time subtitle byte and charset safety"
+        "aar_sha256": "11d572f59f0404878353d9c85e022e153e114ecbb4d43cf61c910cd9e8c2536d",
+        "sources_sha256": "c2a74d177abff6e91de2b26d0680920a966672796a080572d6477a2e3c9aa6db",
+        "reason": "E3-1a/E4-1 baseline plus E7-2 Blu-ray/DVD logical multi-extent routing"
       },
       {
         "coordinate": "androidx.media3:media3-datasource:1.11.0-alpha01-fongmi",
-        "aar_sha256": "1f0927aa4ab78e17163efb83b03119f385eb2cc803ad46dbead0399c0d8897eb",
-        "sources_sha256": "fde247c59fca0325b8a346495f91af32eb6c544b08a1dac4119d66ed8b245daa",
-        "reason": "E6-1 bounds CacheWriter requests; E7-1 hardens ISO reader range, allocation, EOF, and data source lifecycle boundaries"
+        "aar_sha256": "1b6b51e921577cb955db2ce05106a44001ad126b8f4cc67f997d1f3404ec3598",
+        "sources_sha256": "26306314752ff1b4297aea2f25e6ff0213497404564f23af95ec4bb5c25ada62",
+        "reason": "E6-1/E7-1 baseline plus E7-2 multi-extent ISO/UDF virtual data source"
       }
     ],
     "upstream_repo": "https://github.com/FongMi/media.git",
