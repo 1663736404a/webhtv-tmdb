@@ -183,3 +183,24 @@ PlayerView output Surface
 - 已知验证阻断：`:app:testMobileArm64_v8aDebugUnitTest` 在执行测试前的 `processMobileArm64_v8aDebugResources` 失败，缺少既有 Material/Media3 style/attr/color 资源。本单元未修改资源或依赖，故没有扩大范围处理该基线问题，也不把新增 JUnit 结果表述为 Android Gradle 测试任务通过。
 - 回滚：回退 E9-3a commit/tag 即恢复原 Profile 5 fallback 判断；没有 native 资产、Media3 AAR、设置或数据库变更。
 - 下一动作：启动 E9-3b 独立实现单元，先完成 AImageReader/`AHardwareBuffer` capability bridge、`VideoSink` Surface 生命周期和有界 PTS 配对；DV 映射仍保持关闭。
+
+## 12. E9-3b 实施记录
+
+- 代码：新增独立 `libexo_dovi_renderer.so` CMake target（使用锁定 NDK r29，arm64-v8a 与 armeabi-v7a），并通过 `ExoDv5Native` 暴露能力探测、AImageReader Surface、有限 expected-frame 队列、AHardwareBuffer 使用/高位深统计和释放接口。
+- Media3：新增 `ExoDv5VideoSink` 与 `ExoDv5GpuRenderer`，使用锁定 Media3 `VideoSink`/`MediaCodecVideoRenderer.Builder.setVideoSink()` 契约；视频帧 handler 的释放时间仍由 Media3 控制，AImage 时间戳按 presentation PTS（微秒转纳秒）配对，避免把渲染 deadline 错当 codec PTS。Renderer factory 仅支持显式诊断创建，当前未注册到生产 renderer 列表。
+- 能力门控：native probe 要求同一 Vulkan 物理设备同时具备 Vulkan 1.1、`VK_ANDROID_external_memory_android_hardware_buffer`、`VK_EXT_queue_family_foreign`、sampler YCbCr conversion，并成功创建逻辑设备取得 AHB 导入函数；AImageReader 必须是 `AIMAGE_FORMAT_PRIVATE + AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE`。不满足时不会声明可用。
+- 测试/构建：`:app:compileMobileArm64_v8aDebugJavaWithJavac` 成功；`:app:externalNativeBuildMobileArm64_v8aDebug` 与 `:app:externalNativeBuildMobileArmeabi_v7aDebug` 成功，产物分别确认 ELF 64-bit AArch64 与 ELF 32-bit ARM。新增纯逻辑测试覆盖显式 opt-in、完整 probe、队列时序和 PTS 纳秒换算；Android Gradle 单测仍受既有资源链接错误阻断。
+- 当前限制：此单元只验证 codec→AImageReader/AHardwareBuffer 通路并统计 buffer，不导入 Vulkan 图像、不调用 libplacebo、不输出 PlayerView，也不提取/解析 RPU。因此不能宣称 DV5 色彩已恢复；这些属于 E9-3c/3d。
+- 回滚：回退 E9-3b commit/tag 可移除 CMake/native 目标与诊断 sink，既有 Exo/MPV 二进制和默认路径不变。
+- 下一动作：启动 E9-3c，接入独立 libdovi/RPU parser 与 libplacebo mapping API；先定义逐帧 metadata 所有权和 malformed-RPU 回退，再实现 Vulkan external image 到输出 Surface 的最小帧路径。
+
+### E9-3b 检查点
+
+- 完成：E9-3b diagnostic Media3 VideoSink and independent AImageReader/Vulkan capability bridge compile for arm64-v8a and armeabi-v7a; ELF SONAME, JNI exports and DT_NEEDED verified; production renderer remains unregistered.
+- 分支/基线：`exo-dv5` / `7f665b7d858454fa19919b1e0b69b0f239ac9587`。
+- 已改路径：`app/build.gradle`、`app/src/main/cpp/**`、四个 `ExoDv5*` Java 文件、新增测试和本任务文档；无起始脏文件。
+- 验证：App Java、两 ABI CMake build 成功；ELF64 AArch64/ELF32 ARM、`libexo_dovi_renderer.so` SONAME、七个 JNI 导出和 `libandroid/libmediandk/libvulkan` 依赖已确认。
+- 验证补充：使用 JDK 21 执行 `bash gradlew :app:testMobileArm64_v8aDebugUnitTest --tests com.fongmi.android.tv.player.exo.ExoDv5GpuRendererTest --no-daemon`；任务在既有 `processMobileArm64_v8aDebugResources` 资源链接错误处终止，未进入测试执行。该错误涉及缺失的 Material/Media3 资源，本阶段未改动资源或依赖。
+- 未解决风险：目标设备尚未运行 capability probe/codec Surface 出帧；AImageReader 回调销毁只完成静态审计，尚无设备压力验证；本阶段不具备显示输出和 DV mapping。
+- 回滚锚点：`7f665b7d858454fa19919b1e0b69b0f239ac9587`。
+- 下一动作：Run ExoDv5GpuRendererTest with Gradle JDK 21, finish release-lifecycle review, then commit and tag E9-3b.
