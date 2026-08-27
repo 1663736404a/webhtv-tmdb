@@ -43,6 +43,7 @@
 | 19 | `C0-M` | 通用/MPV 搭载 | MPV 使用 FFmpeg 9.0.1 同源 revision 独立重建 | E1 验证后随 MPV 候选处理 | `docs/C0-M-mpv-ffmpeg-9.0.1.md` |
 | 20 | `C2` | 通用 | FFmpeg DV7→P8.1 BSF | 暂缓；不自动启用 | `docs/C2-dv7-p81-bsf.md` |
 | 21 | `C3` | 通用 | ISO multi-extent App resolver | 随 `E7-2` 联合评估/实施 | `docs/C3-iso-multi-extent-resolver.md` |
+| 22 | `E2-3` | Exo | DV5 偏色与 P5->P8.1 实时转换可行性 | 评估完成：拒绝仅改 RPU 的直转方案；建议先移除 P5 伪 HDR10 fallback，待用户批准 | [E2-3-exo-dv5-p81-realtime-conversion.md](E2-3-exo-dv5-p81-realtime-conversion.md) |
 
 `C1` 是跨播放器真实输入验收维度，不单独形成代码任务或文档；它写入对应的 E/P 任务文档。当前下一项是 `E4-1`，开始前先读取其唯一文档并给出功能目标、收益、代价和是否建议合并的决策包。
 
