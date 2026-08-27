@@ -295,3 +295,8 @@ PlayerView output Surface
   App CMake 和 native 源码不引用 `main-2`，另一工作区仅作为本地复制来源。
 - 第一批是资产恢复点，不改变运行时或生产 renderer 选择；第二批将补齐
   renderer include 闭包后，由实际双 ABI 编译验证头与静态库 API 375 匹配。
+- 第二批补齐 `renderer.h` 的实际传递闭包：dispatch、dither、gamut/tone
+  mapping 以及 custom/ICC/LUT shader API。未复制 D3D、OpenGL、FFmpeg、
+  dav1d 等本实现不使用的公共头，保持 Exo Vulkan 资产范围最小。
+- 下一动作：在 native renderer 同时 include `vulkan.h` 与 `renderer.h`，以
+  双 ABI 编译确认头/归档契约，再实现 context、swapchain 与 AHB import。
