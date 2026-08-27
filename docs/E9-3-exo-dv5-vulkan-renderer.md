@@ -360,3 +360,27 @@ PlayerView output Surface
   dav1d 等本实现不使用的公共头，保持 Exo Vulkan 资产范围最小。
 - 下一动作：在 native renderer 同时 include `vulkan.h` 与 `renderer.h`，以
   双 ABI 编译确认头/归档契约，再实现 context、swapchain 与 AHB import。
+
+## 19. E9-3d-device 目标设备验证
+
+- 设备与产物：V2453A（Android API 35，序列号 `10CF6H1D2L0009S`）安装
+  `app-mobile-arm64_v8a-debug.apk`；验证基线为
+  `c943d7659bf9f03d2cf3cdaa670d5b82231168ca`。
+- 路由证据：开启内部播放实验与 Exo 域开关后，目标 DV5 样片实际选中
+  `MediaCodecVideoRenderer-DV5-Vulkan`；native capability probe、Adreno
+  Vulkan 初始化和普通 HEVC `c2.qti.hevc.decoder` 创建均成功。
+- 失败分类：本次不是音频输出失败。`AudioTrack` 已完成初始化，Media3 最终
+  上报的是 `ERROR_CODE_VIDEO_FRAME_PROCESSING_FAILED`，异常链为
+  `MediaCodecVideoRenderer-DV5-Vulkan -> VideoSinkException ->
+  DV5 Vulkan rendering failed`。应用当前把 output stage 显示成泛化的音视频
+  输出提示，容易让设备侧反馈误判为音频故障。
+- 真正阻断：native `renderImage()` 连续三帧返回 `false`，但当前失败出口没有
+  阶段日志，尚不能区分 AHB properties、external image 创建/绑定、
+  `pl_vulkan_wrap`、swapchain、`pl_render_image`、submit 或 foreign queue hold。
+- 原始证据：设备完整 logcat 保存于 `/tmp/e9-dv5-full-logcat.txt`；关键错误位于
+  2026-08-27 20:07:31，renderer format 为 `dvhe.05.09`、3840x2160。
+- 验证结论：构建与 renderer 选择成立，但设备出帧和色彩验收失败；不得将本
+  candidate 宣称为 DV5 正常播放。
+- 回滚锚点：`c943d7659bf9f03d2cf3cdaa670d5b82231168ca`。
+- 下一动作：为 `renderImage()` 增加有界的首个失败阶段与 AHB/Vulkan 格式日志，
+  在同一设备复现后只修复首个确定失败的 native 契约。
