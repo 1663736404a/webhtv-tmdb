@@ -327,3 +327,21 @@ TV-exo-preload: ... mime=application/x-mpegURL
 - 未决风险：`PlayerManager` 的公共 `PlaybackBufferingTracker` 仍可能把 seek 后 BUFFERING 记入通用网络重缓冲 telemetry；该统计排除应作为独立窄单元完成，不与 LoadControl 行为提交混合。
 - 回滚锚点：回滚 E-SP3-C App commit 即恢复旧阈值分类，不影响 E-SP3-A/B 和诊断单元。
 - 下一动作：提交并标记 E-SP3-C 行为单元；随后单独排除公共 buffering tracker 的用户 seek 事件，再打包安装实机验收。
+
+## Checkpoint 13：2026-08-27 seek 公共统计隔离
+
+- 实现边界：`PlayerManager.recordBufferingState()` 只在 Exo、刚进入 BUFFERING、当前没有 tracker episode 且 Analytics 确认是有效用户 seek recovery 时跳过公共 rebuffer 计数，并记录 `phase=seek outcome=user-action`。
+- 保持契约：首次启动、真实网络 rebuffer、MPV/IJK managed reload、播放阈值和 telemetry 字段格式不变；READY 无需伪造结束事件，因为 seek BUFFERING 从未打开 tracker episode。
+- 验证结果：`bash gradlew --offline --no-daemon :app:clean :app:compileMobileArm64_v8aDebugJavaWithJavac` 通过；用户已在 vivo 实机使用同一视频重复 seek，确认修复后播放表现正常。
+- 回滚：单独回滚该统计隔离 commit 即恢复旧公共计数，不影响 seek 专用播放门槛。
+- 下一动作：通过 task guard 原子提交该统计隔离单元并创建 recovery tag。
+
+## Checkpoint 14：2026-08-27 实机验收与收尾
+
+- 完成：用户已在 vivo 实机重复 seek，确认修复后播放正常，本轮补充的公共 buffering 统计隔离代码已通过干净 arm64 Java 编译。
+- 工作区：分支 `fongmi-sync-bugfix`；基线 `038b6c58b265a7fbd5c6a173068d7fe1f4d868d3`；受保护的其他脏文件未改。
+- 变更文件：`PlayerManager.java`、`PlaybackAnalyticsListener.java`、本任务文档。
+- 验证：`bash gradlew --offline --no-daemon :app:clean :app:compileMobileArm64_v8aDebugJavaWithJavac` 通过；用户实机验收通过。
+- 回滚锨点：`038b6c58b265a7fbd5c6a173068d7fe1f4d868d3`；本单元提交后使用 task guard recovery tag 回滚。
+- 未决：无。
+- 下一动作：执行 task guard finish 并创建唯一 annotated recovery tag。

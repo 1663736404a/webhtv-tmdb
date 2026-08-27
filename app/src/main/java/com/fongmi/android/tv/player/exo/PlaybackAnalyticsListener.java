@@ -168,6 +168,12 @@ public class PlaybackAnalyticsListener implements AnalyticsListener, VideoFrameM
         return BUFFER_TREND.snapshot();
     }
 
+    public static boolean isSeekRecoveryActive() {
+        return ExoPlaybackThresholdCoordinator.process().isSeekPending(
+                ExoPlaybackThresholdCoordinator.currentSession(),
+                SystemClock.elapsedRealtime());
+    }
+
     public static void onUserSeekRequested(
             long originPositionMs,
             long targetPositionMs,
