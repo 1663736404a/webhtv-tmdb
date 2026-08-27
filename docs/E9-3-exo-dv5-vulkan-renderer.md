@@ -238,3 +238,27 @@ PlayerView output Surface
 - 当前限制：尚未把资产复制到 `third_party/exo-dv5-native`，尚未接入当前仓库 CMake，也尚未完成双 ABI 链接验证；不能据此声称 DV5 色彩映射已经可用。
 - 回滚锚点：`c94ba7c9464f4cb43df351e471e8aa2df7132178`；删除本单元新增的本地依赖目录并回退 CMake/本文档即可。
 - 下一动作：复制双 ABI libplacebo/shaderc、公共头和许可证，写入来源/哈希清单并完成当前项目双 ABI native 链接。
+
+## 16. E9-3c-libdovi 实施记录
+
+- 来源与构建：本地化 `libdovi` 3.3.2，源码 commit
+  `4fd2b2235c9f93582dd4a00e65ee34a07800afd7`；`dolby_vision` crate 使用
+  `features=capi`、`crate-type=staticlib`、NDK `29.0.14206865`、Android API
+  26 分别生成 `aarch64-linux-android` 与 `armv7-linux-androideabi` 归档。
+  C API 头由相同源码和 cbindgen 0.29.4 生成，归档、头和 MIT 许可证均由
+  `third_party/exo-dv5-native/MANIFEST.sha256` 锁定。
+- 本地闭包：CMake 仅从仓库相对路径按 `${ANDROID_ABI}` 导入
+  `libdovi.a`，不读取或复用其他工作区。native capability probe 实际调用
+  `dovi_parse_unspec62_nalu` 的错误输入路径并释放 opaque 对象，因此双 ABI
+  链接必须解析真实 parser/free symbols，而不是只检查文件存在。
+- 语义校正：libdovi 3.3.2 的 conversion mode 2 才是 P8.1 no-op mapping，
+  mode 4 是保留 mapping 的 P8.1；mode 3 是静态 P8.4。E9-3 不依赖任何
+  P5→P8.1 伪 base-layer 转换，而是保留原始 Profile 5 IPT base layer，供
+  Vulkan/libplacebo 结合逐帧 RPU 做 reshape。
+- 限制：本单元只建立可重现的 parser ABI 依赖。尚未把 RPU 从 Media3
+  access unit 传入 native，也尚未创建 Vulkan swapchain/AHB external image
+  和显示输出，因此不能宣称设备色彩已经恢复。
+- 回滚：回退本单元提交和恢复标签即可删除 libdovi 资产、头、许可证、
+  CMake 导入和 capability parser probe；上一阶段 libplacebo 诊断底座不变。
+- 下一动作：覆盖 `MediaCodecRenderer.onQueueInputBuffer` 提取 NAL type 62，
+  以 PTS 有界排队到 native 并完成 metadata 生命周期，然后接入 Vulkan 输出。

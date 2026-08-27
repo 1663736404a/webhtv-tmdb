@@ -17,6 +17,10 @@ add_library(exo_dv5_shaderc STATIC IMPORTED)
 set_target_properties(exo_dv5_shaderc PROPERTIES
         IMPORTED_LOCATION "${EXO_DV5_NATIVE_LIB_DIR}/libshaderc.a")
 
+add_library(exo_dv5_dovi STATIC IMPORTED)
+set_target_properties(exo_dv5_dovi PROPERTIES
+        IMPORTED_LOCATION "${EXO_DV5_NATIVE_LIB_DIR}/libdovi.a")
+
 target_compile_features(exo_dovi_renderer PRIVATE cxx_std_20)
 target_compile_options(exo_dovi_renderer PRIVATE
         -fvisibility=hidden
@@ -39,6 +43,7 @@ find_library(m-lib m REQUIRED)
 target_link_libraries(exo_dovi_renderer PRIVATE
         exo_dv5_placebo
         exo_dv5_shaderc
+        exo_dv5_dovi
         ${android-lib}
         ${log-lib}
         ${media-ndk-lib}

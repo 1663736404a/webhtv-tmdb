@@ -8,6 +8,7 @@
 #include <vulkan/vulkan_android.h>
 
 #include <libplacebo/config.h>
+#include <libdovi/rpu_parser.h>
 
 #include <algorithm>
 #include <atomic>
@@ -29,6 +30,7 @@ constexpr jint kCapabilityAhbImport = 1 << 2;
 constexpr jint kCapabilityYcbcrConversion = 1 << 3;
 constexpr jint kCapabilityForeignQueue = 1 << 4;
 constexpr jint kCapabilityLibplacebo375 = 1 << 5;
+constexpr jint kCapabilityLibdovi = 1 << 6;
 
 struct ExpectedFrame {
     int64_t imageTimestampNs;
@@ -291,6 +293,14 @@ Java_com_fongmi_android_tv_player_exo_ExoDv5Native_nativeProbeCapabilities(
     if (PL_API_VER == 375 && placeboVersion != nullptr
             && placeboVersion[0] != '\0') {
         result |= kCapabilityLibplacebo375;
+    }
+    // Parse a deliberately invalid byte so every ABI verifies both the
+    // vendored parser link and its failure-containment contract.
+    const uint8_t invalidRpu = 0;
+    DoviRpuOpaque *rpu = dovi_parse_unspec62_nalu(&invalidRpu, 1);
+    if (rpu != nullptr) {
+        if (dovi_rpu_get_error(rpu) != nullptr) result |= kCapabilityLibdovi;
+        dovi_rpu_free(rpu);
     }
     return result;
 }
