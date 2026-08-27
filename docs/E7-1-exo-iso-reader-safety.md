@@ -3,7 +3,7 @@
 ## Recovery anchor
 
 - 目标：只修复 `IsoDataReader` 的零长度、非法/超大预取以及 open/close/EOF 边界，不改变正常 ISO 读取、sector cache、预取批次或播放器策略。
-- 状态：实现和全部定向验证完成，待原子提交；基线 `fa9e8da83154a8814b48bb9fb022cca110e3a438`，恢复 tag `recovery/E7-1/baseline-202608271500-fa9e8da83154`。
+- 状态：已实施、验证并提交；实现 commit `491a7def30484b0936426bbc57b09f5b6435ae80`，恢复 tag `recovery/E7-1/20260827160011-491a7def3048`。
 - 来源：`FongMi/media@990abc2368fd74779f525ee345734470659f3d53`，父提交 `c85d124102c5b25a1bcd270d78f78603e87a6214`；当前 fork 初版 `39585f19e01324308213e2bdc9aa84dcfa4d5ebc`，Media3 基线 `e3e922d5c01bc0b564849940fe589daf37360d15`。
 - 范围：本文件、主评估索引、Media3 构建顺序、E7-1 patch、datasource publication 和 media lock；排除 E7-2 multi-extent、App resolver、MPV、FFmpeg、nextlib/native。
 - 时间约束：15:22 起算，计划 25 分钟、最晚 15:57；不重复成功检查，不扩展研究或验证范围。
@@ -36,4 +36,6 @@
 - 验收结论：正常跨 sector 读取字节保持一致；异常范围不分配/读取；open/EOF 生命周期受测；datasource publication 和两条产品编译路径通过。未改变 cache 容量、64-sector 预取、正常读取循环、E7-2 API、App resolver、MPV/native 或公共 API。
 - 剩余风险：未做损坏 ISO 实机播放，但定向测试覆盖本任务全部新增分支；实机多 extent/光盘矩阵属于 E7-2，不作为 E7-1 门槛。
 - 回滚：整体回退本任务提交或恢复 `recovery/E7-1/baseline-202608271500-fa9e8da83154`。
-- 下一动作：执行一次最终 lock/diff/guard 校验，原子提交并创建恢复 tag。
+- 原子提交：`491a7def30484b0936426bbc57b09f5b6435ae80`（`Exo: harden ISO reader boundaries`）。
+- 恢复 tag：`recovery/E7-1/20260827160011-491a7def3048`，创建耗时 0 秒。
+- 当前结论：E7-1 完成。下一动作：单独评估 E7-2 multi-extent + C3，不自动实施。
