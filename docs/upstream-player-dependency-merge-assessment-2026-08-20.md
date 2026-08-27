@@ -43,6 +43,7 @@
 | 19 | `C0-M` | 通用/MPV 搭载 | MPV 使用 FFmpeg 9.0.1 同源 revision 独立重建 | E1 验证后随 MPV 候选处理 | `docs/C0-M-mpv-ffmpeg-9.0.1.md` |
 | 20 | `C2` | 通用 | FFmpeg DV7→P8.1 BSF | 暂缓；不自动启用 | `docs/C2-dv7-p81-bsf.md` |
 | 21 | `C3` | 通用 | ISO multi-extent App resolver | 随 `E7-2` 联合评估/实施 | `docs/C3-iso-multi-extent-resolver.md` |
+| 22 | `E9-3` | Exo | DV5 MediaCodec + Vulkan/libplacebo GPU 映射 | 方案已批准；分阶段实施，真机验收前默认关闭 | [E9-3-exo-dv5-vulkan-renderer.md](E9-3-exo-dv5-vulkan-renderer.md) |
 `C1` 是跨播放器真实输入验收维度，不单独形成代码任务或文档；它写入对应的 E/P 任务文档。当前下一项是 `E4-1`，开始前先读取其唯一文档并给出功能目标、收益、代价和是否建议合并的决策包。
 
 ## 目标与决策顺序
