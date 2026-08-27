@@ -242,6 +242,7 @@ apply_media_patches() {
     "$patch_dir/media3-exo-dts-14bit-frame-size.patch"
     "$patch_dir/media3-exo-subtitle-byte-safety.patch"
     "$patch_dir/media3-exo-cue-data-contract.patch"
+    "$patch_dir/media3-exo-bounded-cache-writer.patch"
   )
   for patch_file in "${patches[@]}"; do
     [[ -f "$patch_file" ]] || continue

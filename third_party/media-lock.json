@@ -40,6 +40,10 @@
       {
         "path": "third_party/patches/media3-exo-cue-data-contract.patch",
         "sha256": "a6389e0c34a9a3e895072f84c9ffd13d0c883c5909d8887873717c337066eb61"
+      },
+      {
+        "path": "third_party/patches/media3-exo-bounded-cache-writer.patch",
+        "sha256": "1b591c618fdbba91b0880284126ac8bd5c55f6fe6532187d891b4225a87cc200"
       }
     ],
     "artifact_overrides": [
@@ -66,6 +70,12 @@
         "aar_sha256": "8f34ea1a6c2951c4ed4f033144e38e9e0616443a7a05fa488e5525ca47084c3f",
         "sources_sha256": "71f9bee851acf22e7a63b91347b03a4966c1b9cc23958672b3da091cab3f32c6",
         "reason": "E3-1a baseline plus E4-1 render-time subtitle byte and charset safety"
+      },
+      {
+        "coordinate": "androidx.media3:media3-datasource:1.11.0-alpha01-fongmi",
+        "aar_sha256": "ce5c9919bcfe611ecc9de5c4d40c0baa94f2e5858bebc54431c400a90fc37b18",
+        "sources_sha256": "4ac57076178a78996a4ab9ffe4466d28db71d804f735d179b9d8cbdf3d2325e7",
+        "reason": "E6-1 makes bounded CacheWriter requests stop at DataSpec.length even when a data source ignores the requested range"
       }
     ],
     "upstream_repo": "https://github.com/FongMi/media.git",
@@ -85,6 +95,11 @@
         "commit": "2fcf67cc83b295f389c0c9c4c5b5c40615781dcf",
         "scope": "libraries/common Util.getSystemProperty public API hunk only",
         "reason": "Required by bb3d9921; the unrelated HE-AAC offload behavior is intentionally excluded"
+      },
+      {
+        "commit": "dd00f94b58b7324ab29febb0b50f3a190d544a3b",
+        "scope": "libraries/datasource CacheWriter bounded read/count/end-position hunks and focused test only",
+        "reason": "E6-1 fixes bounded cache writes; progressive parallel download, DiskPreloadManager, priority setter, and factory/cancel changes are intentionally excluded"
       }
     ]
   },

@@ -31,7 +31,7 @@
 | 7 | `E3-1b` | Exo | DTS 14-bit 解析 | 已实施：`27b85eeeed5ceb55e56a67ae3b5cf8ff64b8da40` / `recovery/E3-1b/20260826201735-27b85eeeed5c` | [E3-1b-exo-dts-14bit.md](E3-1b-exo-dts-14bit.md) |
 | 8 | `E4-1` | Exo | 字幕字节与边界安全 | **已完成：A4-1a/A4-1b** | [E4-1-exo-subtitle-byte-safety.md](E4-1-exo-subtitle-byte-safety.md) |
 | 9 | `E4-J1` | Exo | Cue 数据契约 | **已实施并验证**：`af78e3b7656d6a0f210d7344b3852f301690c417` / `recovery/E4-J1/20260827133106-af78e3b7656d`；默认不启用碰撞或新渲染行为 | [E4-J1-exo-cue-data-contract.md](E4-J1-exo-cue-data-contract.md) |
-| 10 | `E6-1` | Exo | SMB/代理/缓存 correctness | 待处理 | `docs/E6-1-exo-smb-proxy-cache-correctness.md` |
+| 10 | `E6-1` | Exo | 有界缓存写入 correctness | **已实施并验证，待原子提交收口**：只移植 CacheWriter 边界修复，不引入并行预加载 | [E6-1-exo-smb-proxy-cache-correctness.md](E6-1-exo-smb-proxy-cache-correctness.md) |
 | 11 | `E7-1` | Exo | ISO reader safety | 待处理 | `docs/E7-1-exo-iso-reader-safety.md` |
 | 12 | `E7-2` | Exo | ISO multi-extent reader/API | 待处理；与 `C3` 联合阶段 | `docs/E7-2-exo-iso-multi-extent-api.md` |
 | 13 | `P0` | MPV | native 基线、等价提交与运行验收 | Exo 阶段后处理 | `docs/P0-mpv-native-baseline.md` |
