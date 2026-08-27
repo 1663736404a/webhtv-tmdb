@@ -345,3 +345,12 @@ TV-exo-preload: ... mime=application/x-mpegURL
 - 回滚锨点：`038b6c58b265a7fbd5c6a173068d7fe1f4d868d3`；本单元提交后使用 task guard recovery tag 回滚。
 - 未决：无。
 - 下一动作：执行 task guard finish 并创建唯一 annotated recovery tag。
+
+## Checkpoint 15：2026-08-27 APK 资源链接恢复
+
+- 现象：执行 `:app:clean` 后，普通 assemble 在 `processMobileArm64_v8aDebugResources` 缺少 AppCompat、Material3 和 Media3 UI 资源。
+- 定性：变体 runtime 依赖图仍完整包含三组依赖，最近 seek 提交未改 Gradle 或 XML；根因是 AGP/Gradle 恢复了不完整的资源构建缓存，不是源码或依赖配置缺失。
+- 恢复：`--no-build-cache --rerun-tasks :app:processMobileArm64_v8aDebugResources` 成功重建资源；随后普通 `:app:assembleMobileArm64_v8aDebug` 通过。
+- 产物：`app/build/outputs/apk/mobileArm64_v8a/debug/app-mobile-arm64_v8a-debug.apk`，SHA-256 `da1514a4e826cd8a363051c615bb89ca44d49d861088dcf9acb3f7987ff0c46d`。
+- 代码处置：无需修改或回滚 seek 代码、Gradle 配置或依赖版本。
+- 下一动作：关闭资源恢复诊断单元并交付 APK。
