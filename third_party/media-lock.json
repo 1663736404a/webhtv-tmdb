@@ -36,6 +36,10 @@
       {
         "path": "third_party/patches/media3-exo-subtitle-byte-safety.patch",
         "sha256": "8ed566a26b70609262d6c49ada2e8912997f36d75a166825e368182b5b7f35bf"
+      },
+      {
+        "path": "third_party/patches/media3-precache-hls-safety.patch",
+        "sha256": "9b48e895bd3923159f880152a54160e7c937b2b0369d717da559a7ad98fd14f7"
       }
     ],
     "artifact_overrides": [
@@ -53,9 +57,9 @@
       },
       {
         "coordinate": "androidx.media3:media3-exoplayer:1.11.0-alpha01-fongmi",
-        "aar_sha256": "8f34ea1a6c2951c4ed4f033144e38e9e0616443a7a05fa488e5525ca47084c3f",
-        "sources_sha256": "71f9bee851acf22e7a63b91347b03a4966c1b9cc23958672b3da091cab3f32c6",
-        "reason": "E3-1a baseline plus E4-1 render-time subtitle byte and charset safety"
+        "aar_sha256": "485805506d44b739f3cd4bf179241f0322a3e52de6b29625c3133832eaa187ea",
+        "sources_sha256": "f378864ac3817fd95132268170e6c0ca6d3dc76f9a7eb09c51d60cb06027d442",
+        "reason": "E3-1a baseline plus E4-1 render-time subtitle byte and charset safety and E-SP3-B HLS pre-cache request safety"
       }
     ],
     "upstream_repo": "https://github.com/FongMi/media.git",
