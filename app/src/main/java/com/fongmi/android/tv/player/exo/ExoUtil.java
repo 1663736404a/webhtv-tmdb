@@ -828,6 +828,21 @@ public class ExoUtil {
         @Override
         protected void buildVideoRenderers(Context context, int extensionRendererMode, MediaCodecSelector mediaCodecSelector, boolean enableDecoderFallback, Handler eventHandler, VideoRendererEventListener eventListener, long allowedVideoJoiningTimeMs, ArrayList<Renderer> out) {
             MediaCodecSelector videoCodecSelector = getVideoCodecSelector(mediaCodecSelector);
+            try {
+                ExoDv5GpuRenderer dv5Renderer = ExoDv5GpuRendererFactory.create(
+                        PlaybackExperimentSetting.isDomainEnabled(
+                                PlaybackExperimentPolicy.Domain.EXO),
+                        context,
+                        getCodecAdapterFactory(),
+                        videoCodecSelector,
+                        allowedVideoJoiningTimeMs,
+                        enableDecoderFallback,
+                        eventHandler,
+                        eventListener,
+                        frameSchedulingDecision);
+                if (dv5Renderer != null) out.add(dv5Renderer);
+            } catch (Throwable ignored) {
+            }
             if (decoderRuntimeSession != null
                     && videoRenderMode == EXTENSION_RENDERER_MODE_OFF) {
                 out.add(new ExoRuntimeAwareVideoRenderer(
@@ -979,9 +994,27 @@ public class ExoUtil {
         if (format == null
                 || !MimeTypes.VIDEO_DOLBY_VISION.equals(format.sampleMimeType)
                 || format.codecs == null) return false;
+        if (ExoDv5GpuMappingPolicy.isProfile5(
+                format.sampleMimeType, format.codecs)) {
+            ExoDv5GpuMappingPolicy.Decision decision =
+                    ExoDv5GpuMappingPolicy.decide(
+                            new ExoDv5GpuMappingPolicy.Input(
+                                    true,
+                                    format.cryptoType != C.CRYPTO_TYPE_NONE,
+                                    false,
+                                    false,
+                                    Build.VERSION.SDK_INT,
+                                    false,
+                                    false,
+                                    false,
+                                    false,
+                                    false,
+                                    false,
+                                    true));
+            return decision.route()
+                    == ExoDv5GpuMappingPolicy.Route.LEGACY_HDR10_FALLBACK;
+        }
         String codecs = format.codecs.toLowerCase(java.util.Locale.US);
-        if (codecs.startsWith("dvhe.05.")
-                || codecs.startsWith("dvh1.05.")) return true;
         return dv7FallbackEnabled && (codecs.startsWith("dvhe.07.")
                 || codecs.startsWith("dvh1.07."));
     }
