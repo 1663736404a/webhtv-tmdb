@@ -19,7 +19,7 @@
       },
       {
         "path": "third_party/patches/media3-deferred-cues.patch",
-        "sha256": "8bfcf98dadfd70e56ebec4c5fd49701ddc8ed66b02707a7f733b3aec1ed4b2c7"
+        "sha256": "ebbfbe0bcd1f002780b2db300bdcf42d9c3309c0738b43212ffa224eedcba8dd"
       },
       {
         "path": "third_party/patches/media3-exo-hdr-parser-safety.patch",
@@ -73,9 +73,9 @@
       },
       {
         "coordinate": "androidx.media3:media3-extractor:1.11.0-alpha01-fongmi",
-        "aar_sha256": "12e03f413c9251109515011249c7151e1f33b55715d7bfad3b8687adcf876c58",
-        "sources_sha256": "c80e000e7960fca4f256ead3ed830aa1661bdb23d06b1c6ecfae6ac7e3ba73b0",
-        "reason": "E-SP2/E2-1/E3-1b/E4-1 baseline plus E7-2 ISO/UDF multi-extent entries and DVD/BDMV extent consumers"
+        "aar_sha256": "59a090bad8efc32552cf5a7ec1d2fb66444168bfbc97bd45e50764527f80c768",
+        "sources_sha256": "9314a303f402e903dd075db5e9babf9be6474da539a4b76bb1ed765b95b6ef4e",
+        "reason": "E-SP2 chained SeekHead/deferred Cues plus E2-1/E3-1b/E4-1/E7-2 extractor behavior"
       },
       {
         "coordinate": "androidx.media3:media3-exoplayer:1.11.0-alpha01-fongmi",
