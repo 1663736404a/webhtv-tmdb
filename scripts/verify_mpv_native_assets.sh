@@ -194,6 +194,7 @@ verify_abi() {
   contains_string "$directory/libmpv.so" "video output has no queue-safe EL decoder"
   contains_string "$directory/libmpv.so" "DV7 HDR10 fallback: using MediaCodec base-layer decoder"
   contains_string "$directory/libmpv.so" "DV7 HDR10 fallback: stripping EL/RPU before decoder."
+  contains_string "$directory/libmpv.so" "DV7 HDR10 fallback: synchronized decoder parameters to the HDR10 base layer."
   contains_string "$directory/libmpv.so" "DV7 HDR10 fallback: failed to produce base-layer packet."
   reject_string "$directory/libmpv.so" "DV7 HDR10 fallback: preserving decoder input and stripping Dolby Vision frame metadata."
   reject_string "$directory/libmpv.so" "Using device native output sample rate for passthrough compatibility"

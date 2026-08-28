@@ -517,6 +517,14 @@ prepare_sources() {
   [ -f "$MPV_DOVI_HDR10_BL_PATCH" ] || die "missing MPV Dolby Vision Profile 7 HDR10 base-layer patch: $MPV_DOVI_HDR10_BL_PATCH"
   git -C "$deps/mpv" apply --check --recount "$MPV_DOVI_HDR10_BL_PATCH"
   git -C "$deps/mpv" apply --recount "$MPV_DOVI_HDR10_BL_PATCH"
+  grep -Fq '(!bl->codec->dv_el_present && !base_only)' "$deps/mpv/demux/dovi_split.c" || \
+    die "MPV Dolby Vision Profile 7 metadata-missing splitter guard is absent"
+  grep -Fq 'MPSWAP(AVCodecParameters, *bl->codec->lav_codecpar, *filtered)' "$deps/mpv/demux/dovi_split.c" || \
+    die "MPV Dolby Vision Profile 7 filtered codec parameters are not synchronized"
+  grep -Fq 'bl->codec->dv_el_present = false' "$deps/mpv/demux/dovi_split.c" || \
+    die "MPV Dolby Vision Profile 7 enhancement-layer metadata is not cleared"
+  grep -Fq 'bl_dp->len > INT_MAX' "$deps/mpv/demux/dovi_split.c" || \
+    die "MPV Dolby Vision Profile 7 packet-size guard is absent"
   [ -f "$MPV_AUDIO_TRUEHD_PATCH" ] || die "missing MPV AudioTrack TrueHD channel-mask patch: $MPV_AUDIO_TRUEHD_PATCH"
   git -C "$deps/mpv" apply --check "$MPV_AUDIO_TRUEHD_PATCH"
   git -C "$deps/mpv" apply "$MPV_AUDIO_TRUEHD_PATCH"
@@ -645,6 +653,7 @@ verify_directory() {
   grep -Fq "video output has no queue-safe EL decoder" <<<"$version_strings" || die "MPV Android Dolby Vision EL capability guard missing from $directory/libmpv.so"
   grep -Fq "DV7 HDR10 fallback: using MediaCodec base-layer decoder" <<<"$version_strings" || die "MPV Dolby Vision Profile 7 HDR10 direct base-layer fallback missing from $directory/libmpv.so"
   grep -Fq "DV7 HDR10 fallback: stripping EL/RPU before decoder." <<<"$version_strings" || die "MPV Dolby Vision Profile 7 demux base-layer filter missing from $directory/libmpv.so"
+  grep -Fq "DV7 HDR10 fallback: synchronized decoder parameters to the HDR10 base layer." <<<"$version_strings" || die "MPV Dolby Vision Profile 7 filtered codec-parameter sync missing from $directory/libmpv.so"
   grep -Fq "DV7 HDR10 fallback: failed to produce base-layer packet." <<<"$version_strings" || die "MPV Dolby Vision Profile 7 filter failure guard missing from $directory/libmpv.so"
   if grep -Fq "Using device native output sample rate for passthrough compatibility" <<<"$version_strings"; then
     die "obsolete MPV AudioTrack passthrough native-rate patch present in $directory/libmpv.so"

@@ -4,7 +4,7 @@
 
 文档状态：进行中。本文按检查点持续落盘；未标记“已完成逐提交审阅”的仓库，不应据此直接升级依赖。
 
-当前恢复入口：以“稳定任务 ID 与唯一文档索引”及各任务文档顶部状态为准。完整逐提交审计已完成至检查点 43；`E1`、`E2-2`、`E-SP1`、`E2-1`、`E3-1a`、`E7-1`、`E7-2 + C3`、`E-SP3`、`E9-3`、`P1`、`P2-1` 和 `P2-5` 已合入 `fongmi-sync`，`E-SP2` 候选已接入但仍待实机性能/seek 验收。`P2-2` 仍为后续上游候选，`C2` 默认暂缓。
+当前恢复入口：以“稳定任务 ID 与唯一文档索引”及各任务文档顶部状态为准。完整逐提交审计已完成至检查点 43；`E1`、`E2-2`、`E-SP1`、`E2-1`、`E3-1a`、`E7-1`、`E7-2 + C3`、`E-SP3`、`E9-3`、`P1`、`P2-1` 和 `P2-5` 已合入 `fongmi-sync`，`E-SP2` 候选已接入但仍待实机性能/seek 验收。`P2-2` 窄适配已完成双 ABI、APK 和 V2453A 实机验证，正在执行最终原子提交与 tag 收尾，`C2` 默认暂缓。
 
 ## 稳定任务 ID 与唯一文档索引
 
@@ -39,7 +39,7 @@
 | 14 | `P1` | MPV | 格式与 shader correctness | **已实施并验证**：`a5971e3814d3b0826a5702d607dd6d1675b2ce53` / `recovery/P1-MPV-FORMAT-SHADER-CORRECTNESS/20260828184107-a5971e3814d3`；用户多原盘回归通过 | [P1-mpv-format-shader-correctness.md](P1-mpv-format-shader-correctness.md) |
 | 15 | `P2-1` | MPV | Vulkan generic UV | **已实施并验证**：`fe4184933fbb3a02bd1ff2ff794a277123c35bdc` / `recovery/P2-1-MPV-VULKAN-GENERIC-UV/20260829003632-fe4184933fbb`；双 ABI、ELF、APK 资产身份及 compute/fragment/legacy/stable/auto 真机路径通过 | [P2-1-mpv-vulkan-generic-uv.md](P2-1-mpv-vulkan-generic-uv.md) |
 | 16 | `P2-5` | MPV | 非原生 DV5 自动选择 Vulkan/gpu-next | **已实施并验证**：V2453A 上自动切换至 `vulkan/gpu-next` + `hevc_mediacodec`，普通 HDR 新媒体项恢复 `opengl/gpu`；用户确认正常 | [P2-5-mpv-dv5-auto-vulkan.md](P2-5-mpv-dv5-auto-vulkan.md) |
-| 17 | `P2-2` | MPV | DV7 metadata/codecpar/error 完整性 | 待处理 | `docs/P2-2-mpv-dv7-metadata-codecpar.md` |
+| 17 | `P2-2` | MPV | DV7 metadata/codecpar/error 完整性 | **代码、双 ABI、APK 与 V2453A 实机验证已完成，待记录最终 commit/tag ID**：仅吸收 metadata-missing、`par_out`、错误传播和 `INT_MAX`，保留本地 packet/Surface/EL 安全契约 | [P2-2-mpv-dv7-metadata-codecpar.md](P2-2-mpv-dv7-metadata-codecpar.md) |
 | 18 | `P3` | MPV | AudioTrack 能力与直通 | 待处理 | `docs/P3-mpv-audiotrack.md` |
 | 19 | `P4-1` | MPV | JNI shutdown/lifecycle | 待处理 | `docs/P4-1-mpv-jni-shutdown.md` |
 | 20 | `C0-M` | 通用/MPV 搭载 | MPV 使用 FFmpeg 9.0.1 同源 revision 独立重建 | E1 验证后随 MPV 候选处理 | `docs/C0-M-mpv-ffmpeg-9.0.1.md` |
@@ -4858,3 +4858,10 @@ C3 的触发来源主要是 media `990abc2368fd74779f525ee345734470659f3d53`（`
 - MPV：需要修正本地输出策略；问题与上游 FFmpeg C2 是否合并无关，先修 App gate，再做 native 回归。
 - Exo：根因已定位为“P8.1 静态能力误判 + 非真正 HDR10 fallback”；在 A/B 前不改网络超时、不擅自回滚 A1-2。
 - 本检查点没有新的代码 commit/tag；后续代码实施必须重新建立阶段基线并按本文件记录原子 commit 与恢复 tag。
+
+## 检查点 47：2026-08-29 P2-2 DV7 metadata/codecpar 实施验收
+
+- P2-2 已按批准的窄适配完成：仅修改现有 DV7 HDR10 base-layer fallback 的 metadata-missing 检测、BSF 错误传播、`par_out`→codecpar 同步、`dv_el_present=false` 和 `INT_MAX` 边界；没有升级 lock、FFmpeg/libplacebo/mpv-android、JNI 或 Android EL 策略。
+- 证据：完整双 ABI native build/install 通过；`scripts/verify_mpv_native_assets.sh --require-elf` 对 `arm64-v8a`/`armeabi-v7a` 通过；Mobile arm64 Debug APK 构建通过且 APK 内 MPV assets 与工作区一致；USB 设备 vivo `V2453A`（`10CF6H1D2L0009S`）安装并启动成功；用户确认 DV7 及邻接播放验证通过。
+- 保护：两份 `libplayer.so` 字节不变；`AGENTS.md` 和构建生成的 `app/.cxx/` 不属于任务提交范围；回滚锚点为 `recovery/P2-2-MPV-DV7-METADATA-CODECPAR/baseline-20260829-0342`。
+- 当前状态：待 `task_guard.sh finish` 创建一个原子 P2-2 commit 和恢复 tag；其完整 ID 将在收尾闭环检查点补录。C2 仍暂缓，下一 MPV 阶段按队列评估 P3。
