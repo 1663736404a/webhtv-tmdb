@@ -35,7 +35,7 @@
 | 10 | `E6-1` | Exo | 有界缓存写入 correctness | **已实施并验证**：`0a8ed3b910679a08a7e41c735338c3804a2eb938` / `recovery/E6-1/20260827145043-0a8ed3b91067`；不引入并行预加载 | [E6-1-exo-smb-proxy-cache-correctness.md](E6-1-exo-smb-proxy-cache-correctness.md) |
 | 11 | `E7-1` | Exo | ISO reader safety | **已实施并验证**：`491a7def30484b0936426bbc57b09f5b6435ae80` / `recovery/E7-1/20260827160011-491a7def3048`；仅移植 IsoDataReader 安全修复 | [E7-1-exo-iso-reader-safety.md](E7-1-exo-iso-reader-safety.md) |
 | 12 | `E7-2` | Exo | ISO multi-extent reader/API | **已实施并编译验证**：`5f7d834bfdd00f215609df7b41c2ea7cadc2cd4f` / `recovery/E7-2-C3/20260827193629-5f7d834bfdd0`；按用户要求未跑测试/真实 split ISO | [E7-2-exo-iso-multi-extent-api.md](E7-2-exo-iso-multi-extent-api.md) |
-| 13 | `P0` | MPV | native 基线、等价提交与运行验收 | Exo 阶段后处理 | `docs/P0-mpv-native-baseline.md` |
+| 13 | `P0` | MPV | native 基线、等价提交与运行验收 | **评估已完成：基线/ELF/资产校验通过；无代码，待 P1/P2 明确批准** | [P0-mpv-native-baseline.md](P0-mpv-native-baseline.md) |
 | 14 | `P1` | MPV | 格式与 shader correctness | 待处理 | `docs/P1-mpv-format-shader-correctness.md` |
 | 15 | `P2-1` | MPV | Vulkan generic UV | 待处理 | `docs/P2-1-mpv-vulkan-generic-uv.md` |
 | 16 | `P2-2` | MPV | DV7 metadata/codecpar/error 完整性 | 待处理 | `docs/P2-2-mpv-dv7-metadata-codecpar.md` |
