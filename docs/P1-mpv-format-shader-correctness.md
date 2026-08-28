@@ -4,13 +4,13 @@
 
 - Objective: implement the approved first MPV native rebuild with four narrow correctness fixes while preserving current playback, ABI, and performance contracts.
 - Acceptance: the four source patches apply after all existing WebHTV patches; both ARM ABIs rebuild from the locked graph; native ELF/package checks and focused playback/rendering checks pass; exact source, artifact, commit, tag, and rollback records are written here.
-- Status: native candidate, affected APK packaging, and one arm64 device MPV smoke pass are complete; P1-specific RGB10/EBML/HLS/alpha fixtures remain unexercised.
+- Status: implementation committed and tagged; build/package/device smoke and user multi-disc regression checks passed, while four P1-specific fixtures remain optional follow-up evidence.
 - Task ID/lane: `P1-MPV-FORMAT-SHADER-CORRECTNESS` / `upstream`.
 - Workspace: branch `fongmi-sync`, HEAD `42f7f54cd0da748b0f2fbad5faab3869fe19f50a`.
 - Baseline recovery tag: `recovery/P1-MPV-FORMAT-SHADER-CORRECTNESS/baseline-20260828-1246`.
 - Implementation guard: active `upstream` session with declared build script, lock, four patch, two ABI asset, and this document paths.
 - Protected pre-existing dirty paths: `.codex/scripts/task_guard.sh`, `AGENTS.md`, `docs/agents-md-effective-constraints-review-2026-08-21.md`.
-- Next action: run the final scoped diff/checkpoint checks, then create the atomic implementation commit and recovery tag without another build.
+- Next action: treat P1 as complete; exercise the four dedicated RGB10/EBML/HLS/alpha fixtures only when matching samples are available, or continue with the next approved upstream task.
 
 ## 1. Decision packet
 
@@ -181,3 +181,13 @@ Validated on 2026-08-28 at HEAD `98f872eed700213ce03345d7d20d794c8ec4123a`:
 - Interpretation limit: this is a compatibility/load/playback smoke, not a controlled performance comparison. It does not prove packed RGB10 channel order/gradient quality, zero-length EBML defaults, program-level HLS bitrate edition selection, or libplacebo alpha preservation. Those require the dedicated fixtures and rendering comparisons listed in section 7; no performance improvement or full behavioral acceptance is claimed from this smoke.
 - Rollback: repository rollback is the baseline tag `recovery/P1-MPV-FORMAT-SHADER-CORRECTNESS/baseline-20260828-1246` or a revert of the eventual P1 commit. The device can be restored with the saved baseline APK if needed; no device data was cleared.
 - Next action: run one final scoped diff/checkpoint validation, then finish the active task guard unit and create its annotated recovery tag.
+
+### 2026-08-28 implementation closure
+
+- Implementation commit: `a5971e3814d3b0826a5702d607dd6d1675b2ce53` (`mpv: add P1 format and shader correctness fixes`).
+- Recovery tag: `recovery/P1-MPV-FORMAT-SHADER-CORRECTNESS/20260828184107-a5971e3814d3`.
+- Commit contents: four provenance-preserving P1 patches, deterministic build-script application, rebuilt two-ABI MPV/FFmpeg assets, and the complete implementation/validation record. The existing lock and both `libplayer.so` files remained unchanged.
+- User acceptance evidence: after candidate installation, the user played several original-disc videos and observed no playback problem. This supplements the automated/device smoke for disc/container parsing, track selection, subtitles, hardware decode, Vulkan output, audio routing, and normal playback continuity without claiming a controlled performance comparison.
+- Final decision: P1 is accepted as a successfully implemented candidate. No additional broad regression suite is required. Packed RGB10 colour/gradient output, crafted zero-length EBML defaults, multi-variant HLS `variant_bitrate` selection, and transparent libplacebo alpha composition remain useful targeted tests when suitable samples exist, but they do not block this completed stage.
+- Rollback: revert `a5971e3814d3b0826a5702d607dd6d1675b2ce53` or return to `recovery/P1-MPV-FORMAT-SHADER-CORRECTNESS/baseline-20260828-1246`; the committed candidate itself is recoverable at `recovery/P1-MPV-FORMAT-SHADER-CORRECTNESS/20260828184107-a5971e3814d3`.
+- Next action: continue the master assessment ordering from the next incomplete MPV task; do not reopen P1 unless a dedicated fixture reveals a concrete regression.
