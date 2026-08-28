@@ -4,13 +4,13 @@
 
 - Objective: move frame-invariant crop/normalization division out of MPV's generic Android Vulkan compute/fragment shaders while preserving every current WebHTV backend, AImage, fence, Dolby Vision, ABI, packaging, and performance contract.
 - Acceptance: only the generic converter shader contract changes; both ARM ABIs rebuild from the unchanged lock; shader/SPIR-V, ELF/package, focused rendering/fallback, and no-regression checks pass; the implementation commit and recovery tag are recorded here.
-- Status: implementation and required verification complete; atomic commit/recovery tag pending.
+- Status: complete; implementation commit `fe4184933fbb3a02bd1ff2ff794a277123c35bdc` and recovery tag recorded below.
 - Task/lane: `P2-1-MPV-VULKAN-GENERIC-UV` / `upstream`.
 - Workspace baseline: branch `fongmi-sync`, HEAD `9fcab83f9084446566240a8e8f5233d87d0274cc`, clean worktree.
 - Baseline recovery tag: `recovery/P2-1/baseline-20260828-2219`.
 - Protected pre-existing dirty paths: none.
 - Excluded: FFmpeg/C0-M, libplacebo upgrades, P2-2 DV7 changes, App/JNI APIs, backend selection, stable conversion, AImage acquire/release flow, release-fence policy, and unrelated native dependencies.
-- Next action: run the final checkpoint/diff/task-guard pass, then create the atomic implementation commit and recovery tag.
+- Next action: wait for explicit user direction before assessing or implementing another upstream task.
 
 ## 1. Decision and source identity
 
@@ -146,4 +146,15 @@ The user explicitly approved implementation after reviewing the P2-1 assessment,
 - Acceptance: static shader/SPIR-V, two-ABI native build, ELF/package checks, APK identity, and focused device behavior all pass. P2-1 does not change App/JNI, versions, dependencies, backend policy, stable/direct code, AImage/fence ownership, DV policy, or `libplayer.so`.
 - Rollback: revert the pending atomic P2-1 commit or restore `recovery/P2-1/baseline-20260828-2219`; both ABI asset sets, the source patch, build/verification scripts, and documentation move together.
 - Unresolved risk: measured improvement magnitude and odd-crop/rotation behavior are not quantified on this device; no observed failure requires broadening the approved task.
-- Next action: run the final checkpoint verifier, `git diff --check`, and task-guard finish once, then record the generated implementation commit and recovery tag.
+- Next action: close the task record with the generated implementation commit and recovery tag; do not start P2-2 or C0-M without separate approval.
+
+## Closure: 2026-08-29 00:36 CST
+
+- Implementation commit: `fe4184933fbb3a02bd1ff2ff794a277123c35bdc` (`mpv: precompute generic Vulkan UV transforms`).
+- Recovery tag: `recovery/P2-1-MPV-VULKAN-GENERIC-UV/20260829003632-fe4184933fbb`, annotated locally at the implementation commit; tag creation completed in 0 seconds.
+- Committed unit: the narrow generic UV patch and shader-generation/verification support, both rebuilt ARM ABI asset sets, native build documentation, this task record, and the master task index. No App/JNI, lock revision, FFmpeg version, libplacebo version, backend policy, or unrelated file entered the commit.
+- Verification attached to the commit: shader/SPIR-V contract, two-ABI native build, `verify_mpv_native_assets.sh --require-elf`, mobile arm64 debug APK asset identity, V2453A HDR10 hardware-decoded compute/fragment/legacy/stable/auto playback, and byte-identical user-config restoration.
+- Completion decision: P2-1 is accepted. The remaining limits are one-device runtime coverage and the absence of an odd-crop/rotation fixture; neither provides evidence of a regression or justifies expanding this task.
+- Rollback: revert `fe4184933fbb3a02bd1ff2ff794a277123c35bdc` or restore `recovery/P2-1/baseline-20260828-2219`. The candidate recovery tag above identifies the verified post-change state.
+- Authorization boundary: P2-2, C0-M, FFmpeg/libplacebo upgrades, and all App/JNI work remain unapproved and unimplemented by this task.
+- Next action: wait for explicit user direction before opening another upstream stage.
