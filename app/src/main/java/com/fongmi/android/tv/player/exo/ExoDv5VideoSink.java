@@ -352,12 +352,22 @@ final class ExoDv5VideoSink implements VideoSink {
         diagnosticLog("sink release stats=" + stats()
                 + " pendingJava=" + pendingFrames.size());
         released = true;
+        disable();
+        outputSurface = null;
+    }
+
+    void disable() {
+        diagnosticLog("sink disable stats=" + stats()
+                + " pendingJava=" + pendingFrames.size());
         skipPendingFrames(false);
         ExoDv5Native.NativeRenderer renderer = nativeRenderer;
         nativeRenderer = null;
         if (renderer != null) renderer.close();
-        outputSurface = null;
         initialized = false;
+        started = false;
+        allowBeforeStarted = false;
+        inputEnded = false;
+        resetRenderObservation();
     }
 
     ExoDv5Native.Stats stats() {

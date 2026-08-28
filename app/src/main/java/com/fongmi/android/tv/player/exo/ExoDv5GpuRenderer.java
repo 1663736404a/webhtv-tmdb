@@ -156,7 +156,12 @@ final class ExoDv5GpuRenderer extends MediaCodecVideoRenderer {
     @Override
     protected void onDisabled() {
         sink.diagnosticLog("renderer disabled stats=" + sink.stats());
-        super.onDisabled();
+        try {
+            super.onDisabled();
+        } finally {
+            // Release the codec input Surface before disconnecting the output swapchain.
+            sink.disable();
+        }
     }
 
     @Override

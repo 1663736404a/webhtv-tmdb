@@ -683,3 +683,26 @@ PlayerView output Surface
   `renderFailures=0`、`malformedRpus=0`。
 - 真机日志证明 RPU/帧配对和 Vulkan 渲染链稳定；最终视觉色彩仍以用户观察为准。
 - 证据：`/tmp/e9-pivot-private.log`、`/tmp/e9-pivot-logcat.log`。
+
+### E9-3 DV5 切换 DV7 的 Surface 生命周期修复
+
+- 复现：DV5 使用自定义 Vulkan renderer 播放后直接切到 DV7；DV7 已正确选择
+  HDR10 fallback，但普通 HEVC decoder 配置时报
+  `nativeWindowConnect ... Invalid argument (-22)` 和
+  `ERROR_CODE_DECODER_INIT_FAILED`。刷新或重进播放后恢复。
+- 根因：track replacement 只调用 `ExoDv5GpuRenderer.onDisabled()` 并释放 DV5
+  codec，没有调用 sink 的永久 `release()`；native Vulkan swapchain 因而继续连接
+  外层输出 Surface，阻止后续普通 `MediaCodecVideoRenderer` 连接。
+- 修复：codec 的 `super.onDisabled()` 完成后调用可复用的 `sink.disable()`，关闭
+  native renderer、Vulkan swapchain 和 AImageReader，清空 pending frame 并重置渲染状态；
+  保留 Java `outputSurface` 引用且不设置永久 `released`，使之后切回 DV5 时可重新初始化。
+- 验收：arm64 构建并安装后执行 DV5 -> DV7；日志中 `sink disable` 必须先于 DV7
+  decoder configure，且不得再出现 Surface `-22` 或 decoder init failure。再切回 DV5
+  应重新初始化并出首帧。
+- 结果：`:app:assembleMobileArm64_v8aDebug` 成功并覆盖安装到 V2453A；设备私有日志
+  记录 `sink disable`，切换后的聚焦 logcat 未再出现 `nativeWindowConnect -22`、
+  `Failed to connect to surface` 或 `ERROR_CODE_DECODER_INIT_FAILED`，用户确认复现流程
+  已恢复正常。DV5 停用前统计为 `matchedFrames=855`、`unmatchedFrames=0`、
+  `expectedQueueDrops=0`、`renderFailures=0`。构建生成的未跟踪 `app/.cxx` 已完整保留到
+  `/tmp/e9-dv7-surface-cxx.FeWxKI/app-cxx`，未纳入任务范围。
+- 回滚锚点：`recovery/E9-3-frame-rpu-match/20260828174850-e6a0ee439028`。
