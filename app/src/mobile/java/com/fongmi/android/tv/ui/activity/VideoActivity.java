@@ -1748,6 +1748,7 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
     }
 
     private void onSetting() {
+        setTrackVisible();
         ControlDialog.create().parent(mBinding).history(mHistory).parse(isUseParse()).player(player()).show(this);
     }
 
@@ -3987,6 +3988,7 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
             hideControl();
             return;
         }
+        setTrackVisible();
         hideWidgetOverlay();
         mBinding.control.danmaku.setVisibility(isLock() || !player().haveDanmaku() ? View.GONE : View.VISIBLE);
         mBinding.control.setting.setVisibility(View.GONE);
