@@ -2,13 +2,15 @@
 
 ## Recovery anchor
 
-- Objective: decide whether the first MPV native rebuild should add the four low-risk correctness topics already identified in master assessment checkpoint 42.4.
-- Acceptance: every in-scope upstream commit has a full-identity disposition; current WebHTV native, Vulkan, Matroska, HLS, subtitle/OSD, ELF, and rollback contracts are recorded; alternatives and approval gates are explicit; no production source, lock, patch, JNI, or asset is changed before approval.
-- Status: assessment complete; implementation pending explicit user approval.
-- Task ID/lane: `P1-MPV-FORMAT-SHADER-CORRECTNESS` / `assessment`.
-- Workspace: branch `fongmi-sync`, HEAD `98f872eed700213ce03345d7d20d794c8ec4123a`.
+- Objective: implement the approved first MPV native rebuild with four narrow correctness fixes while preserving current playback, ABI, and performance contracts.
+- Acceptance: the four source patches apply after all existing WebHTV patches; both ARM ABIs rebuild from the locked graph; native ELF/package checks and focused playback/rendering checks pass; exact source, artifact, commit, tag, and rollback records are written here.
+- Status: native candidate, affected APK packaging, and one arm64 device MPV smoke pass are complete; P1-specific RGB10/EBML/HLS/alpha fixtures remain unexercised.
+- Task ID/lane: `P1-MPV-FORMAT-SHADER-CORRECTNESS` / `upstream`.
+- Workspace: branch `fongmi-sync`, HEAD `42f7f54cd0da748b0f2fbad5faab3869fe19f50a`.
+- Baseline recovery tag: `recovery/P1-MPV-FORMAT-SHADER-CORRECTNESS/baseline-20260828-1246`.
+- Implementation guard: active `upstream` session with declared build script, lock, four patch, two ABI asset, and this document paths.
 - Protected pre-existing dirty paths: `.codex/scripts/task_guard.sh`, `AGENTS.md`, `docs/agents-md-effective-constraints-review-2026-08-21.md`.
-- Next action: obtain approval for the proposed P1 source/lock/artifact stage, then start a new `upstream` guard session with the approved scope.
+- Next action: run the final scoped diff/checkpoint checks, then create the atomic implementation commit and recovery tag without another build.
 
 ## 1. Decision packet
 
@@ -122,3 +124,60 @@ Validated on 2026-08-28 at HEAD `98f872eed700213ce03345d7d20d794c8ec4123a`:
 - `bash .codex/scripts/task_guard.sh check` passed for `P1-MPV-FORMAT-SHADER-CORRECTNESS`; only the two declared documentation paths are task-owned, and the three pre-existing dirty paths remain protected.
 - `bash .codex/skills/upstream-integration-governor/scripts/verify_upstream_checkpoint.sh docs/upstream-player-dependency-merge-assessment-2026-08-20.md` passed with zero errors/warnings, including 436 unique full commit IDs and the latest recovery anchor.
 - Static checks confirmed the unique P1 document exists, the master index links it, and all five P1 source commits are recorded with full 40-character identities.
+
+## 10. Implementation progress
+
+### 2026-08-28 source integration checkpoint
+
+- User approval: approved implementation with the explicit condition that current functionality and performance must not regress.
+- Local baseline: `42f7f54cd0da748b0f2fbad5faab3869fe19f50a`; baseline tag `recovery/P1-MPV-FORMAT-SHADER-CORRECTNESS/baseline-20260828-1246`.
+- Source strategy: retain the existing MPV `cca559b41ceb0bb7731cf6ef2e1f33276cd30c42` and libplacebo `b694a21bf2dc176c1e98b8a13c6421a0de5f3da5` locks; apply only the approved upstream deltas as four local patches. No MPV/libplacebo branch-head upgrade, FFmpeg lock change, JNI change, or App API change is included.
+- Patch provenance and SHA-256:
+  - `mpv-p1-packed-rgb10.patch`: `FongMi/mpv@7b8915bc1d04c7e1b61184e00c7fbfaab1911e75`; `47aae2b7dda83a0c9216a528721e3ae85355d4304f27511d0bd738adcb8e8d5d`.
+  - `mpv-p1-ebml-defaults.patch`: inseparable delta from `FongMi/mpv@52bb166f309c8bb55ab34b2b0bc5c8ead05370e4` and `FongMi/mpv@e167836802da6d5a4301bd4c4eeb3c5c3c17ccb8`; `4bbc22014242eb182ba3a479d17250a39a48621ed3345a22531584d84d8301ff`.
+  - `mpv-p1-hls-edition.patch`: `FongMi/mpv@e7191f2a65d64af266c5c80793e79d2f4b92b789`; `a0bfaf35e30ffb9eb187943ba4a73c125cbf9293f596b68f87d5e560ee120425`.
+  - `libplacebo-p1-alpha.patch`: `FongMi/libplacebo@22ee762e8e0890fc54068beb670310f0edce7263`; `1a077fe46235df90347348fabac2e56c81361b2ddecb962135dacbeea8d75ba8`.
+- Build-script compatibility correction: the pre-existing `mpv-mediacodec-embed-timed-release.patch` has stale hunk counts and a clean rebuild failed at line 291 before reaching P1. `scripts/build_mpv_native.sh` now applies that unchanged patch with `git apply --recount`, matching the existing DV7 patch handling. This changes patch parsing only and preserves the timed-release source delta byte-for-byte.
+- Completed evidence: `bash -n scripts/build_mpv_native.sh` passed; all 15 MPV patches passed a strict ordered apply test from the locked MPV tree; `bash scripts/build_mpv_native.sh --abi all --prepare-only` passed from the repository cache and applied the locked sources and all patches in the production build order.
+- Unverified worktree edits: build script, four new patch files, and this document. No lock, App/JNI, or committed native asset has changed yet.
+- Remaining risks: compilation, ELF/package identity, both ABI artifacts, APK packaging, and device-visible RGB10/EBML/HLS/alpha behavior are not yet verified.
+- Next action: run one clean `bash scripts/build_mpv_native.sh --abi all --install`, then run the native asset verifier before any commit.
+
+### 2026-08-28 two-ABI native candidate checkpoint
+
+- Clean rebuild: `bash scripts/build_mpv_native.sh --abi all --install` compiled and linked the locked graph for `arm64-v8a` and `armeabi-v7a`, including the generated EBML descriptors, HLS demux path, packed RGB10 RA mapping, libplacebo shader path, and all retained Android Vulkan/AImageReader/MediaCodec/AudioTrack sources.
+- Install-end anomaly: after both candidate sets had been copied, the command exited `1` because the final duplicate `verify_directory` call reported that armeabi-v7a `libmpv.so` did not depend on `libmvcodec.so`. The staged output and installed assets are byte-identical, current `llvm-readelf -d` shows the required `libmvcodec.so` dependency, and the same exact match could not be reproduced. No verifier relaxation or speculative script change was made.
+- Decisive native verification: one independent `bash scripts/verify_mpv_native_assets.sh --require-elf` pass succeeded for both ABIs. It verified the stable Vulkan shader contract, locked version markers, ELF class/machine, SONAME/`DT_NEEDED` namespace, required local patch markers, and packaged asset rules with NDK r29 `llvm-readelf`.
+- Candidate `libmpv.so` SHA-256: arm64-v8a `69e9a8d10560a41107680ca4de737996885f2f37fa353fd5ede30334866eeb7b`; armeabi-v7a `ec2cbc58616bb383eb2f80d3fde883da02036b00062287a6f956ebda1aeb5ce3`.
+- Preserved contracts: `third_party/mpv-native-lock.json` has no diff; arm64-v8a `libplayer.so` remains `aedfcb5bcce929cd08bdd113e2031945efc514f3ec4e21daaa39c5744d941bff`; armeabi-v7a `libplayer.so` remains `d146b4f7b5aa95f6768c5bae981bd2f01aaa5166e36d28e342b3789e0233b4b4`.
+- Guard state: `bash .codex/scripts/task_guard.sh check` passed after installation; protected pre-existing dirty paths remain outside task scope.
+- Remaining risks: App packaging and device-visible packed RGB10 colour order, EBML defaults, HLS edition selection, and transparent alpha behavior have not yet been exercised. The non-reproduced install-end verifier anomaly is retained as build-script reliability evidence but does not change the verified artifact contract.
+- Next action: build `MobileArm64_v8aDebug`, `LeanbackArm64_v8aDebug`, and `LeanbackArmeabi_v7aDebug` once against these exact assets.
+
+### 2026-08-28 package and device checkpoint
+
+- Targeted App build: one Gradle invocation built `:app:assembleMobileArm64_v8aDebug`, `:app:assembleLeanbackArm64_v8aDebug`, and `:app:assembleLeanbackArmeabi_v7aDebug`; result `BUILD SUCCESSFUL in 3m 52s` with 208 actionable tasks (28 executed, 3 from cache, 177 up-to-date).
+- APK SHA-256: Mobile arm64-v8a `a45e0eab9a419da42eaa6dea9c95e9b4f93190bdca2f70bb14d9ff3c3a5107fb`; Leanback arm64-v8a `eaaeb88effdf4dad21f2998ed929148d10d11d31ad63ede9e0b56b81bce3791b`; Leanback armeabi-v7a `482edbcdf7a98eb5bfd12a945670e0063a5f366d9e84551d6656e746e83bb9c0`.
+- Packaging identity: every `assets/mpv-libs/<abi>/*.so` entry in all three APKs was compared byte-for-byte with the corresponding candidate asset and matched.
+- Final native asset SHA-256 manifest:
+
+| Asset | arm64-v8a | armeabi-v7a |
+| --- | --- | --- |
+| `libc++_shared.so` | `c4c2fe5cbcb1fba0003a31fc7ab29a9bb12df6cc187ec45a806462540e83d93b` | `af383654daf4cf0829615460419a180f84edd9d8bf51aa0f81ed0db811bf8491` |
+| `libmpv.so` | `69e9a8d10560a41107680ca4de737996885f2f37fa353fd5ede30334866eeb7b` | `ec2cbc58616bb383eb2f80d3fde883da02036b00062287a6f956ebda1aeb5ce3` |
+| `libmvcodec.so` | `dd0df8e451f34d1f1f04e829d5e3c54415ecfd100e1da185ba99400672a356ce` | `057737104206f1091f1e498f09112f6fa4786a126b1699d477a2a3f9227c53ef` |
+| `libmvdevice.so` | `6e1eb48c069a2a5a9d2668048a8fcde47d8638d815ed8486d755a9c7ef811c1d` | `67054a2f81bbfce49f2089819224dfcbf1f67dcb1a92581b7b5116efdd651605` |
+| `libmvfilter.so` | `15ecd2e2b6e9856377dfdf788aaffd4e13baf3aacb143fe12a81a7218e35dfeb` | `ee6a911db507f1314d6215582ed2166c86f7c01067d1a8672b0c97d56c5590ed` |
+| `libmvformat.so` | `d452ca2a0ac2d81eb31176b454d0a4c641f4ae776c4b2549dac0f705c0816b77` | `fb64b119a50abdf5d83b7b7c3283b25bcaefa0c86a440eab806a7aba1f06ad1a` |
+| `libmvutil.so` | `36809585992a694ccefe28194f49b9313ce431c5c008dabb15296f2be3d3de2c` | `92c75297d4bb6ab0486ffef09065ed74762eefd41e1a0ba33d0f77484122d821` |
+| `libmwresample.so` | `abd917e5ed21a302fd61957f093c4f289854dc6b33d2849077919ab35bc2b1d9` | `fb96fa91e7fde0a537333ab7061e438dc606e738b4fa2d805feae02ce8686442` |
+| `libmwscale.so` | `4228aacfc2992b9b66943e6050ee59e679ef0e249024f3f2a02478e750e644fa` | `7a88b24141d7117aa06135bea69ba5ffe84f12004f81daaed12cf2b84b2754a3` |
+| unchanged `libplayer.so` | `aedfcb5bcce929cd08bdd113e2031945efc514f3ec4e21daaa39c5744d941bff` | `d146b4f7b5aa95f6768c5bae981bd2f01aaa5166e36d28e342b3789e0233b4b4` |
+
+- Device: vivo V2453A / Android 15 / API 35 / arm64-v8a. The pre-update installed APK was saved locally as `/private/tmp/P1-device-20260828-73CIHY/baseline-installed.apk`, SHA-256 `c3d8e88f226ff1c44577ce969ad0815d98bf7ac18e6ce67877c3638a84887a16`.
+- Install identity: the OEM-assisted update completed without uninstalling or clearing data. Pulling the installed candidate back from the device produced SHA-256 `a45e0eab9a419da42eaa6dea9c95e9b4f93190bdca2f70bb14d9ff3c3a5107fb`, identical to the Mobile arm64-v8a APK.
+- Device smoke: the App launched to `HomeActivity`, then an existing MPV playback flow reached `VideoActivity`. Visible playback and diagnostics exercised Vulkan `gpu-next`/`androidvk`, MediaCodec hardware decode, AudioTrack, 1920x1080 H.264/SDR playback, track parsing including PGS subtitles, and later a 3840x2160 HEVC/HDR10/TrueHD source. The App process log contained no `FATAL EXCEPTION`, fatal signal, `SIGSEGV`, `SIGABRT`, or `dlopen failed`; the App was force-stopped after evidence capture to avoid continued metered-network use.
+- Device evidence: `/private/tmp/P1-device-20260828-73CIHY/home.png`, `home.xml`, `home-scrolled.png`, `home-scrolled.xml`, `playback.png`, `launch-logcat.txt`, and `playback-app-logcat.txt`.
+- Interpretation limit: this is a compatibility/load/playback smoke, not a controlled performance comparison. It does not prove packed RGB10 channel order/gradient quality, zero-length EBML defaults, program-level HLS bitrate edition selection, or libplacebo alpha preservation. Those require the dedicated fixtures and rendering comparisons listed in section 7; no performance improvement or full behavioral acceptance is claimed from this smoke.
+- Rollback: repository rollback is the baseline tag `recovery/P1-MPV-FORMAT-SHADER-CORRECTNESS/baseline-20260828-1246` or a revert of the eventual P1 commit. The device can be restored with the saved baseline APK if needed; no device data was cleared.
+- Next action: run one final scoped diff/checkpoint validation, then finish the active task guard unit and create its annotated recovery tag.

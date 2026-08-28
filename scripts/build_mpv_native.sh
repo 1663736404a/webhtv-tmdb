@@ -18,6 +18,10 @@ MPV_AIMAGEREADER_STABLE_PATCH="$ROOT/third_party/patches/mpv-aimagereader-stable
 MPV_AIMAGEREADER_STABLE_SOURCE="$OVERRIDE_DIR/aimagereader-stable/video/out/hwdec/hwdec_aimagereader_vk_stable.c"
 MPV_AIMAGEREADER_STABLE_SHADER="$OVERRIDE_DIR/aimagereader-stable/video/out/hwdec/hwdec_aimagereader_vk_stable.comp"
 MPV_MATROSKA_PATCH="$ROOT/third_party/patches/mpv-matroska-segment-end.patch"
+MPV_P1_PACKED_RGB10_PATCH="$ROOT/third_party/patches/mpv-p1-packed-rgb10.patch"
+MPV_P1_EBML_DEFAULTS_PATCH="$ROOT/third_party/patches/mpv-p1-ebml-defaults.patch"
+MPV_P1_HLS_EDITION_PATCH="$ROOT/third_party/patches/mpv-p1-hls-edition.patch"
+LIBPLACEBO_P1_ALPHA_PATCH="$ROOT/third_party/patches/libplacebo-p1-alpha.patch"
 FFMPEG_PROXY_RANGE_PATCH="$ROOT/third_party/patches/ffmpeg-webhtv-proxy-range.patch"
 FFMPEG_MEDIACODEC_STARVATION_PATCH="$ROOT/third_party/patches/ffmpeg-mediacodec-port-starvation.patch"
 WORK_DIR="${MPV_NATIVE_WORK_DIR:-$ROOT/build/mpv-native}"
@@ -429,6 +433,9 @@ prepare_sources() {
     printf '%s\n' "$NDK_VERSION" >"$shaderc_marker"
   fi
   checkout_repo libplacebo "$LIBPLACEBO_REPO" "$LIBPLACEBO_COMMIT" "$deps/libplacebo" "$LIBPLACEBO_SUBMODULES"
+  [ -f "$LIBPLACEBO_P1_ALPHA_PATCH" ] || die "missing libplacebo alpha correctness patch: $LIBPLACEBO_P1_ALPHA_PATCH"
+  git -C "$deps/libplacebo" apply --check "$LIBPLACEBO_P1_ALPHA_PATCH"
+  git -C "$deps/libplacebo" apply "$LIBPLACEBO_P1_ALPHA_PATCH"
   if [ "$ENABLE_LIBCURL" -eq 1 ]; then
     extract_archive nghttp2 "$NGHTTP2_URL" "$NGHTTP2_SHA256" "$deps/nghttp2"
     extract_archive curl "$CURL_URL" "$CURL_SHA256" "$deps/curl"
@@ -487,8 +494,8 @@ prepare_sources() {
   git -C "$deps/mpv" apply --check "$MPV_AUDIO_TRUEHD_PATCH"
   git -C "$deps/mpv" apply "$MPV_AUDIO_TRUEHD_PATCH"
   [ -f "$MPV_MEDIACODEC_TIMED_RELEASE_PATCH" ] || die "missing MPV MediaCodec timed-release patch: $MPV_MEDIACODEC_TIMED_RELEASE_PATCH"
-  git -C "$deps/mpv" apply --check "$MPV_MEDIACODEC_TIMED_RELEASE_PATCH"
-  git -C "$deps/mpv" apply "$MPV_MEDIACODEC_TIMED_RELEASE_PATCH"
+  git -C "$deps/mpv" apply --check --recount "$MPV_MEDIACODEC_TIMED_RELEASE_PATCH"
+  git -C "$deps/mpv" apply --recount "$MPV_MEDIACODEC_TIMED_RELEASE_PATCH"
   [ -f "$MPV_OPTIONAL_OSD_PATCH" ] || die "missing MPV optional direct-output OSD patch: $MPV_OPTIONAL_OSD_PATCH"
   git -C "$deps/mpv" apply --check "$MPV_OPTIONAL_OSD_PATCH"
   git -C "$deps/mpv" apply "$MPV_OPTIONAL_OSD_PATCH"
@@ -510,6 +517,15 @@ prepare_sources() {
   [ -f "$MPV_MATROSKA_PATCH" ] || die "missing MPV Matroska segment patch: $MPV_MATROSKA_PATCH"
   git -C "$deps/mpv" apply --check "$MPV_MATROSKA_PATCH"
   git -C "$deps/mpv" apply "$MPV_MATROSKA_PATCH"
+  [ -f "$MPV_P1_PACKED_RGB10_PATCH" ] || die "missing MPV packed RGB10 patch: $MPV_P1_PACKED_RGB10_PATCH"
+  git -C "$deps/mpv" apply --check "$MPV_P1_PACKED_RGB10_PATCH"
+  git -C "$deps/mpv" apply "$MPV_P1_PACKED_RGB10_PATCH"
+  [ -f "$MPV_P1_EBML_DEFAULTS_PATCH" ] || die "missing MPV EBML defaults patch: $MPV_P1_EBML_DEFAULTS_PATCH"
+  git -C "$deps/mpv" apply --check "$MPV_P1_EBML_DEFAULTS_PATCH"
+  git -C "$deps/mpv" apply "$MPV_P1_EBML_DEFAULTS_PATCH"
+  [ -f "$MPV_P1_HLS_EDITION_PATCH" ] || die "missing MPV HLS edition patch: $MPV_P1_HLS_EDITION_PATCH"
+  git -C "$deps/mpv" apply --check "$MPV_P1_HLS_EDITION_PATCH"
+  git -C "$deps/mpv" apply "$MPV_P1_HLS_EDITION_PATCH"
 }
 
 patch_dynamic_names() {
