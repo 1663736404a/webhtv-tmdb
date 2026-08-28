@@ -234,7 +234,7 @@ scripts/build_mpv_player_jni.sh
 
 P2-2 在现有 `mpv-dovi-profile7-hdr10-base-layer.patch` 内完成 Profile 7 HDR10 fallback 的 metadata/codecpar/error 完整性修复：缺少 `dv_el_present` 时仍仅对显式 HDR10 fallback 创建 `dovi_split=mode=bl`，检查 codec parameter 转换、BSF option/init 返回值，将成功过滤后的 `par_out` 原子同步回 decoder 参数并清除 EL 标记，同时在 packet 长度转换前拒绝超过 `INT_MAX` 的输入。现有三态 packet ownership、精确零拷贝、Surface Direct、单 Surface EL gate、DV7 设置和 FFmpeg `libmv*` 命名空间均保留；未升级 lock、FFmpeg、libplacebo、JNI 或启用 Android EL。
 
-本阶段使用 NDK r29 对 `arm64-v8a` 与 `armeabi-v7a` 完整重建并安装 native assets；一次 `scripts/verify_mpv_native_assets.sh --require-elf` 通过，APK `app-mobile-arm64_v8a-debug.apk` 内十个 arm64 MPV 资产与工作区完全一致，两个 `libplayer.so` 保持字节不变。用户在 USB 连接的 vivo V2453A 上确认安装后的 DV7 及邻接播放验证通过。完整来源、哈希、验证和回滚记录见 [P2-2-mpv-dv7-metadata-codecpar.md](../docs/P2-2-mpv-dv7-metadata-codecpar.md)。
+本阶段使用 NDK r29 对 `arm64-v8a` 与 `armeabi-v7a` 完整重建并安装 native assets；一次 `scripts/verify_mpv_native_assets.sh --require-elf` 通过，APK `app-mobile-arm64_v8a-debug.apk` 内十个 arm64 MPV 资产与工作区完全一致，两个 `libplayer.so` 保持字节不变。用户在 USB 连接的 vivo V2453A 上确认安装后的 DV7 及邻接播放验证通过。实现提交为 `ba47756d7e463abeb9377088b819a2520e150935`，恢复 tag 为 `recovery/P2-2-MPV-DV7-METADATA-CODECPAR/20260829065811-ba47756d7e46`。完整来源、哈希、验证和回滚记录见 [P2-2-mpv-dv7-metadata-codecpar.md](../docs/P2-2-mpv-dv7-metadata-codecpar.md)。
 
 ## 提交前验证
 

@@ -4,7 +4,7 @@
 
 - Objective: complete the existing MPV Dolby Vision Profile 7 HDR10 base-layer fallback when container metadata is incomplete, while preserving WebHTV packet ownership, Surface Direct, single-Surface EL, performance, ABI, and packaging contracts.
 - Acceptance: Profile 7 HDR10 fallback creates the splitter without relying on `dv_el_present`, initializes the BSF with checked errors, copies filtered `par_out` back to decoder codec parameters, clears `dv_el_present`, rejects packet sizes above `INT_MAX`, and keeps all current WebHTV safety paths; both ARM ABIs, ELF/package checks, and focused device playback pass without a performance or neighboring-format regression.
-- Status: source adaptation, strict patch preparation, complete two-ABI native build/install, ELF/asset verification, arm64 APK packaging, installation, and focused device playback verification passed; ready for atomic commit and recovery tag.
+- Status: complete and committed. Source adaptation, strict patch preparation, complete two-ABI native build/install, ELF/asset verification, arm64 APK packaging, installation, and focused device playback verification all passed.
 - Task/lane: `P2-2-MPV-DV7-METADATA-CODECPAR` / `upstream`.
 - Workspace baseline: branch `fongmi-sync`, HEAD `14931888cf5c6e47902323c06180969cd4b9c32d`.
 - Baseline recovery tag: `recovery/P2-2-MPV-DV7-METADATA-CODECPAR/baseline-20260829-0342`.
@@ -12,7 +12,7 @@
 - Scope: the existing DV7 local patch, deterministic native verification if required, both ARM MPV asset sets, native build documentation, this task record, and the master assessment index.
 - Excluded: MPV/FFmpeg/libplacebo/mpv-android lock updates, C0-M, C2, Exo, App/JNI APIs, DV5 auto routing, Vulkan backend selection, Android BL+EL software decoding, AudioTrack, and unrelated native dependencies.
 - Rollback: restore the baseline tag or revert the eventual single atomic implementation commit; both ABI asset sets and the source patch move together.
-- Next action: run `task_guard.sh finish` for the verified P2-2 unit, then create the permitted docs-only closure record with the resulting commit and tag IDs.
+- Next action: continue with the queued P3 assessment only as a separately approved task; P2-2 itself is closed.
 
 ## 1. Approved user capability
 
@@ -140,7 +140,7 @@ This narrow adaptation is the best-practice design for WebHTV. The one deliberat
 - Package identity: all ten `assets/mpv-libs/arm64-v8a/` files were extracted once from the APK. A directory comparison against the verified workspace assets returned no differences; the packaged `libmpv.so`, `libmvcodec.so`, `libmvformat.so`, and unchanged `libplayer.so` hashes exactly match checkpoint 9.
 - Device discovery: `adb devices -l` and `adb mdns services` returned no device. The previously used `192.168.1.9:5555` and the only current LAN neighbor `192.168.76.250:5555` both refused connection. This is an external ADB connectivity state, not a build or candidate failure.
 - Superseded by checkpoint 11: the phone was subsequently connected over USB, the exact APK was installed with installer-assist, and the user confirmed the required focused playback verification passed.
-- Exactly one next action: run `task_guard.sh finish` for the verified P2-2 unit, then create the permitted docs-only closure record with the resulting commit and tag IDs.
+- Exactly one next action: continue with the queued P3 assessment only as a separately approved task; P2-2 itself is closed.
 
 ## 11. Device verification and implementation closure checkpoint: 2026-08-29 06:54 CST
 
@@ -150,4 +150,13 @@ This narrow adaptation is the best-practice design for WebHTV. The one deliberat
 - Evidence boundary: the APK/package identity, native ELF/asset checks, and user-confirmed runtime result together satisfy this stage's acceptance. No new raw log or synthetic metadata-missing fixture was available in this run, so those remain diagnostic follow-up material rather than blockers for the approved device result.
 - Scope/protection: only the declared P2-2 source, native asset, script, and documentation paths are task-owned. `AGENTS.md` remains protected and `app/.cxx/` remains untracked build output outside the task commit.
 - Rollback: revert the resulting atomic P2-2 commit, or restore `recovery/P2-2-MPV-DV7-METADATA-CODECPAR/baseline-20260829-0342`; source patch and both ABI asset sets move together.
-- Exactly one next action: run `task_guard.sh finish` for the verified P2-2 unit, then create the permitted docs-only closure record with the resulting commit and tag IDs.
+- Exactly one next action: continue with the queued P3 assessment only as a separately approved task; P2-2 itself is closed.
+
+## 12. Commit and recovery tag closure: 2026-08-29 06:58 CST
+
+- Atomic implementation commit: `ba47756d7e463abeb9377088b819a2520e150935` (`mpv: complete DV7 HDR10 fallback codec metadata sync`). It contains only the approved P2-2 source adaptation, both ABI MPV assets, deterministic build/verifier updates, and the task/build/assessment records.
+- Recovery tag: `recovery/P2-2-MPV-DV7-METADATA-CODECPAR/20260829065811-ba47756d7e46`, annotated on the implementation commit immediately after commit creation.
+- Verification recorded in the commit: complete two-ABI native build/install, `verify_mpv_native_assets.sh --require-elf`, Mobile arm64 Debug APK/package identity, USB V2453A install/launch, and user-confirmed DV7 plus neighboring playback verification.
+- Rollback: `git revert ba47756d7e463abeb9377088b819a2520e150935` for a shared branch, or restore the baseline tag `recovery/P2-2-MPV-DV7-METADATA-CODECPAR/baseline-20260829-0342` in an isolated worktree. Revert/restore the source patch and both ABI assets together.
+- Final status: P2-2 is complete. No lock, FFmpeg/libplacebo/mpv-android revision, JNI API, `libplayer.so`, or Android EL policy changed.
+- Exactly one next action: continue with the queued P3 assessment only as a separately approved task; P2-2 itself is closed.
