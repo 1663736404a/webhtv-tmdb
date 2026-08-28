@@ -201,6 +201,7 @@ verify_abi() {
   contains_string "$directory/libmpv.so" "WebHTV Vulkan auto backend prefers direct AHardwareBuffer sampling"
   contains_string "$directory/libmpv.so" "WebHTV Vulkan auto uses a queue-safe four-output bounded-fence pool"
   contains_string "$directory/libmpv.so" "CPU-precomputed UV transform"
+  contains_string "$directory/libmpv.so" "Generic Vulkan conversion uses CPU-precomputed UV transform"
   contains_string "$directory/libmpv.so" "Stable Vulkan conversion preserves Dolby Vision raw YUV component mapping"
   contains_string "$directory/libmpv.so" "WebHTV Vulkan keeps AImage until the conversion fence completes"
   contains_string "$directory/libmpv.so" "WebHTV AImageReader uses stable release/acquire flow"

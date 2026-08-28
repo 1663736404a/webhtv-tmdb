@@ -37,7 +37,7 @@
 | 12 | `E7-2` | Exo | ISO multi-extent reader/API | **已实施并编译验证**：`5f7d834bfdd00f215609df7b41c2ea7cadc2cd4f` / `recovery/E7-2-C3/20260827193629-5f7d834bfdd0`；按用户要求未跑测试/真实 split ISO | [E7-2-exo-iso-multi-extent-api.md](E7-2-exo-iso-multi-extent-api.md) |
 | 13 | `P0` | MPV | native 基线、等价提交与运行验收 | **评估已完成：基线/ELF/资产校验通过；无代码，待 P1/P2 明确批准** | [P0-mpv-native-baseline.md](P0-mpv-native-baseline.md) |
 | 14 | `P1` | MPV | 格式与 shader correctness | **已实施并验证**：`a5971e3814d3b0826a5702d607dd6d1675b2ce53` / `recovery/P1-MPV-FORMAT-SHADER-CORRECTNESS/20260828184107-a5971e3814d3`；用户多原盘回归通过 | [P1-mpv-format-shader-correctness.md](P1-mpv-format-shader-correctness.md) |
-| 15 | `P2-1` | MPV | Vulkan generic UV | 待处理 | `docs/P2-1-mpv-vulkan-generic-uv.md` |
+| 15 | `P2-1` | MPV | Vulkan generic UV | **已实施并完成验证，待原子提交/tag**；双 ABI、ELF、APK 资产身份及 compute/fragment/legacy/stable/auto 真机路径通过 | [P2-1-mpv-vulkan-generic-uv.md](P2-1-mpv-vulkan-generic-uv.md) |
 | 16 | `P2-2` | MPV | DV7 metadata/codecpar/error 完整性 | 待处理 | `docs/P2-2-mpv-dv7-metadata-codecpar.md` |
 | 17 | `P3` | MPV | AudioTrack 能力与直通 | 待处理 | `docs/P3-mpv-audiotrack.md` |
 | 18 | `P4-1` | MPV | JNI shutdown/lifecycle | 待处理 | `docs/P4-1-mpv-jni-shutdown.md` |
