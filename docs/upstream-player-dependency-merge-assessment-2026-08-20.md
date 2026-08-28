@@ -4,7 +4,7 @@
 
 文档状态：进行中。本文按检查点持续落盘；未标记“已完成逐提交审阅”的仓库，不应据此直接升级依赖。
 
-当前恢复入口：以“稳定任务 ID 与唯一文档索引”及各任务文档顶部状态为准。完整逐提交审计已完成至检查点 43；`E1`、`E2-2`、`E-SP1`、`E2-1`、`E3-1a`、`E7-1`、`E7-2 + C3` 以及 `E-SP3` 已合入 `fongmi-sync`，`E-SP2` 候选已接入但仍待实机性能/seek 验收。后续仍按 Exo → MPV 顺序处理；`C2` 默认暂缓。
+当前恢复入口：以“稳定任务 ID 与唯一文档索引”及各任务文档顶部状态为准。完整逐提交审计已完成至检查点 43；`E1`、`E2-2`、`E-SP1`、`E2-1`、`E3-1a`、`E7-1`、`E7-2 + C3` 以及 `E-SP3` 已合入 `fongmi-sync`，`E-SP2` 候选已接入但仍待实机性能/seek 验收。`P0` 基线评估已完成，当前下一项是 `P1-MPV-FORMAT-SHADER-CORRECTNESS` 评估包；后续仍按 Exo → MPV 顺序处理，`C2` 默认暂缓。
 
 ## 稳定任务 ID 与唯一文档索引
 
@@ -36,7 +36,7 @@
 | 11 | `E7-1` | Exo | ISO reader safety | **已实施并验证**：`491a7def30484b0936426bbc57b09f5b6435ae80` / `recovery/E7-1/20260827160011-491a7def3048`；仅移植 IsoDataReader 安全修复 | [E7-1-exo-iso-reader-safety.md](E7-1-exo-iso-reader-safety.md) |
 | 12 | `E7-2` | Exo | ISO multi-extent reader/API | **已实施并编译验证**：`5f7d834bfdd00f215609df7b41c2ea7cadc2cd4f` / `recovery/E7-2-C3/20260827193629-5f7d834bfdd0`；按用户要求未跑测试/真实 split ISO | [E7-2-exo-iso-multi-extent-api.md](E7-2-exo-iso-multi-extent-api.md) |
 | 13 | `P0` | MPV | native 基线、等价提交与运行验收 | **评估已完成：基线/ELF/资产校验通过；无代码，待 P1/P2 明确批准** | [P0-mpv-native-baseline.md](P0-mpv-native-baseline.md) |
-| 14 | `P1` | MPV | 格式与 shader correctness | 待处理 | `docs/P1-mpv-format-shader-correctness.md` |
+| 14 | `P1` | MPV | 格式与 shader correctness | **评估完成：建议四个窄子阶段，待用户批准后实施** | [P1-mpv-format-shader-correctness.md](P1-mpv-format-shader-correctness.md) |
 | 15 | `P2-1` | MPV | Vulkan generic UV | 待处理 | `docs/P2-1-mpv-vulkan-generic-uv.md` |
 | 16 | `P2-2` | MPV | DV7 metadata/codecpar/error 完整性 | 待处理 | `docs/P2-2-mpv-dv7-metadata-codecpar.md` |
 | 17 | `P3` | MPV | AudioTrack 能力与直通 | 待处理 | `docs/P3-mpv-audiotrack.md` |
@@ -45,7 +45,7 @@
 | 20 | `C2` | 通用 | FFmpeg DV7→P8.1 BSF | 暂缓；不自动启用 | `docs/C2-dv7-p81-bsf.md` |
 | 21 | `C3` | 通用 | ISO multi-extent App resolver | **已随 `E7-2` 联合实施并通过 App 编译**：`5f7d834bfdd00f215609df7b41c2ea7cadc2cd4f` / `recovery/E7-2-C3/20260827193629-5f7d834bfdd0`；真实 split metadata 未验收 | [C3-iso-multi-extent-resolver.md](C3-iso-multi-extent-resolver.md) |
 
-`C1` 是跨播放器真实输入验收维度，不单独形成代码任务或文档；它写入对应的 E/P 任务文档。`E-SP3` 已在 `fongmi-sync` 完成 App/Media3 合并，保留既有 `E4-J1`/`E6-1`/`E7-1`/`E7-2 + C3` 能力；下一项仍按既定顺序进入 `P0` MPV native 基线、等价提交与运行验收评估。
+`C1` 是跨播放器真实输入验收维度，不单独形成代码任务或文档；它写入对应的 E/P 任务文档。`E-SP3` 已在 `fongmi-sync` 完成 App/Media3 合并，保留既有 `E4-J1`/`E6-1`/`E7-1`/`E7-2 + C3` 能力；`P0` 已完成 MPV native 基线、等价提交与运行验收评估，当前进入 `P1` 格式与 shader correctness 决策包。
 
 ## 目标与决策顺序
 
