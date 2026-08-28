@@ -54,6 +54,7 @@ public class MpvPlayerEngine implements PlayerEngine {
     private boolean retriedFormat;
     private boolean surfaceDirect;
     private Boolean surfaceDirectOverride;
+    private Boolean vulkanRenderOverride;
     private String vulkanBackendOverride;
     private String vulkanBackend = MpvVulkanBackendPolicy.AUTO;
     private boolean vulkanRenderer;
@@ -266,6 +267,14 @@ public class MpvPlayerEngine implements PlayerEngine {
 
     public void setVulkanBackendOverride(@Nullable String value) {
         vulkanBackendOverride = value;
+    }
+
+    public void setVulkanRenderOverride(@Nullable Boolean value) {
+        vulkanRenderOverride = value;
+    }
+
+    public boolean isVulkanRenderer() {
+        return vulkanRenderer;
     }
 
     public boolean shouldFallbackVulkanToStable() {
@@ -703,7 +712,9 @@ public class MpvPlayerEngine implements PlayerEngine {
         surfaceDirect = surfaceDirectOverride == null
                 ? MpvPerformanceSetting.shouldUseSurfaceDirect(autoDirectEligible, Util.isLeanback(), decode == HARD)
                 : surfaceDirectOverride && decode == HARD;
-        boolean requestVulkan = PlayerSetting.getMpvRender() == PlayerSetting.MPV_RENDER_VULKAN;
+        boolean requestVulkan = vulkanRenderOverride != null
+                ? vulkanRenderOverride
+                : PlayerSetting.getMpvRender() == PlayerSetting.MPV_RENDER_VULKAN;
         boolean nativeVulkan = MPVLib.isBundledVulkanEnabled(App.get());
         boolean deviceVulkan = MPVLib.isDeviceVulkan13Capable(App.get());
         boolean useVulkan = !surfaceDirect && requestVulkan && nativeVulkan && deviceVulkan;

@@ -81,6 +81,7 @@ import com.fongmi.android.tv.player.lut.MpvLutShaderFactory;
 import com.fongmi.android.tv.player.mpv.MpvAutoController;
 import com.fongmi.android.tv.player.mpv.MpvAutoControlPolicy;
 import com.fongmi.android.tv.player.mpv.MpvAutoOutputPolicy;
+import com.fongmi.android.tv.player.mpv.MpvAutoRenderPolicy;
 import com.fongmi.android.tv.player.mpv.MpvBackCacheController;
 import com.fongmi.android.tv.player.mpv.MpvBackCachePolicy;
 import com.fongmi.android.tv.player.mpv.MpvCacheTargetCoordinator;
@@ -112,6 +113,8 @@ import com.fongmi.android.tv.utils.Util;
 import com.github.catvod.crawler.SpiderDebug;
 import com.github.catvod.net.OkHttp;
 import com.google.common.net.HttpHeaders;
+
+import is.xyz.mpv.MPVLib;
 
 import java.io.IOException;
 import java.text.DecimalFormat;
@@ -242,6 +245,8 @@ public class PlayerManager implements ParseCallback {
     private boolean mpvAutoOutputEvaluationScheduled;
     private boolean mpvExplicitSubtitlePreference;
     private boolean mpvAutoGpuPinnedForSession;
+    private boolean mpvAutoVulkanPinnedForItem;
+    private boolean mpvAutoVulkanDisabledForItem;
     private boolean mpvSurfaceFallbackTried;
     private boolean mpvVulkanFallbackTried;
     private boolean mpvHlsManagedReload;
@@ -357,6 +362,8 @@ public class PlayerManager implements ParseCallback {
         ijkRuntimeManualOverride = false;
         pendingIjkRuntimeFallbackReparse = false;
         mpvAutoGpuPinnedForSession = false;
+        mpvAutoVulkanPinnedForItem = false;
+        mpvAutoVulkanDisabledForItem = false;
         if (engine == null) return;
         engine.release();
         engine = null;
@@ -406,6 +413,7 @@ public class PlayerManager implements ParseCallback {
                 false, "timeout", SystemClock.elapsedRealtime(), true);
         if (retryLutWarmupByRefresh("timeout")) return;
         if (retryMpvVulkanBackendTimeout()) return;
+        if (retryMpvAutoVulkanToOpenGl("auto-vulkan-first-frame-timeout")) return;
         if (retryExoDv7FirstFrameTimeout()) return;
         callback.onError(ResUtil.getString(R.string.error_play_timeout));
     }
@@ -4563,7 +4571,10 @@ public class PlayerManager implements ParseCallback {
         }
         if (!isMpv() || spec == null || TextUtils.isEmpty(spec.getUrl()) || !(engine instanceof MpvPlayerEngine mpv)) return;
         resetMpvOutputEvaluationState();
+        mpvAutoVulkanPinnedForItem = false;
+        mpvAutoVulkanDisabledForItem = false;
         mpv.setSurfaceDirectOverride(null);
+        mpv.setVulkanRenderOverride(null);
         rebuildAndRestartMpv(null, "performance-settings-changed");
     }
 
@@ -4630,6 +4641,10 @@ public class PlayerManager implements ParseCallback {
         resetMpvOutputEvaluationState();
         mpvExplicitSubtitlePreference = hasRequestedSubtitle(Track.find(getKey()));
         if (!(engine instanceof MpvPlayerEngine mpv)) return;
+        boolean clearAutoVulkanRenderer = mpvAutoVulkanPinnedForItem;
+        mpvAutoVulkanPinnedForItem = false;
+        mpvAutoVulkanDisabledForItem = false;
+        mpv.setVulkanRenderOverride(null);
         if (MpvPerformanceSetting.getOutputMode()
                 == MpvPerformanceSetting.OUTPUT_AUTO) {
             callback.onPlayerOutputPending();
@@ -4647,8 +4662,8 @@ public class PlayerManager implements ParseCallback {
         }
         boolean shouldStartDirect = MpvPerformanceSetting.shouldUseSurfaceDirect(
                 autoDirectEligible, Util.isLeanback(), engine.isHard());
-        if (mpv.isSurfaceDirect() == shouldStartDirect) return;
-        if (SpiderDebug.isEnabled()) SpiderDebug.log("mpv-output", "prepare new item rebuild currentDirect=%s desiredDirect=%s mode=%s", mpv.isSurfaceDirect(), shouldStartDirect, MpvPerformanceSetting.getOutputModeText());
+        if (mpv.isSurfaceDirect() == shouldStartDirect && !clearAutoVulkanRenderer) return;
+        if (SpiderDebug.isEnabled()) SpiderDebug.log("mpv-output", "prepare new item rebuild currentDirect=%s desiredDirect=%s clearAutoVulkan=%s mode=%s", mpv.isSurfaceDirect(), shouldStartDirect, clearAutoVulkanRenderer, MpvPerformanceSetting.getOutputModeText());
         mpv.setSurfaceDirectOverride(shouldStartDirect);
         rebuildPlayer();
     }
@@ -4656,8 +4671,13 @@ public class PlayerManager implements ParseCallback {
     private void resetMpvOutputRuntime() {
         resetMpvOutputEvaluationState();
         mpvAutoGpuPinnedForSession = false;
+        mpvAutoVulkanPinnedForItem = false;
+        mpvAutoVulkanDisabledForItem = false;
         lastMpvFrameTimingLogMs = 0;
-        if (engine instanceof MpvPlayerEngine mpv) mpv.setSurfaceDirectOverride(null);
+        if (engine instanceof MpvPlayerEngine mpv) {
+            mpv.setSurfaceDirectOverride(null);
+            mpv.setVulkanRenderOverride(null);
+        }
     }
 
     private void resetMpvOutputEvaluationState() {
@@ -4694,7 +4714,8 @@ public class PlayerManager implements ParseCallback {
     }
 
     private boolean evaluateMpvAutoOutput() {
-        if (!isMpv() || mpvAutoOutputEvaluated || engine == null) return true;
+        if (!isMpv() || mpvAutoOutputEvaluated
+                || !(engine instanceof MpvPlayerEngine mpv)) return true;
         if (mpvHlsManagedReload) return false;
         Tracks tracks = engine.getCurrentTracks();
         boolean tracksReady = tracks != null && !tracks.isEmpty();
@@ -4706,7 +4727,7 @@ public class PlayerManager implements ParseCallback {
         if (!dolbyVision && (format == null || !tracks.containsType(C.TRACK_TYPE_VIDEO))) {
             return false;
         }
-        VideoSize probedSize = engine instanceof MpvPlayerEngine mpv ? mpv.getVideoSizeSnapshot() : VideoSize.UNKNOWN;
+        VideoSize probedSize = mpv.getVideoSizeSnapshot();
         int width = format != null && format.width > 0 ? format.width : probedSize.width > 0 ? probedSize.width : getVideoWidth();
         int height = format != null && format.height > 0 ? format.height : probedSize.height > 0 ? probedSize.height : getVideoHeight();
         if (width <= 0 || height <= 0) return false;
@@ -4731,23 +4752,45 @@ public class PlayerManager implements ParseCallback {
                 dolbyVisionSupport,
                 dolbyVision ? videoDetails.dolbyVisionProfile() : C.INDEX_UNSET,
                 dv7Hdr10FallbackEnabled);
+        int dolbyVisionProfile = dolbyVision
+                ? videoDetails.dolbyVisionProfile() : C.INDEX_UNSET;
+        boolean currentlyVulkan = mpv.isVulkanRenderer();
+        MpvAutoRenderPolicy.Decision renderDecision = MpvAutoRenderPolicy.evaluate(
+                PlaybackPerformanceSetting.isAuto(
+                        PlayerSetting.MPV, PlaybackPerformanceCatalog.MPV_RENDER),
+                engine.isHard(), dolbyVisionProfile, dolbyVisionSupport,
+                MPVLib.isBundledVulkanEnabled(App.get()),
+                MPVLib.isDeviceVulkan13Capable(App.get()),
+                currentlyVulkan, mpvAutoVulkanDisabledForItem);
+        boolean enableAutoVulkan = renderDecision.action()
+                == MpvAutoRenderPolicy.Action.ENABLE_VULKAN;
+        if (enableAutoVulkan) {
+            mpvAutoVulkanPinnedForItem = true;
+            mpv.setVulkanRenderOverride(true);
+        }
         if (dolbyVision && decision.reason().startsWith("dolby-vision-hw-")) {
             mpvAutoGpuPinnedForSession = true;
         }
         mpvAutoOutputEvaluated = true;
         boolean currentlyDirect = isMpvSurfaceDirect();
         MpvAutoOutputPolicy.Transition transition = MpvAutoOutputPolicy.transition(decision.eligible(), currentlyDirect);
-        if (SpiderDebug.isEnabled()) SpiderDebug.log("mpv-output", "auto decision eligible=%s transition=%s reason=%s size=%dx%d tracksReady=%s early=%s subtitle=%s lutOrFilter=%s customGpu=%s dvProfile=%d dvSupport=%s direct=%s gpuPinned=%s attempts=%d", decision.eligible(), transition, decision.reason(), width, height, tracksReady, earlyEvaluation, subtitleActive, lutOrFilterActive, customGpuProcessing, dolbyVision ? videoDetails.dolbyVisionProfile() : C.INDEX_UNSET, dolbyVisionSupport, currentlyDirect, mpvAutoGpuPinnedForSession, mpvAutoOutputProbeAttempts);
-        boolean transitionRequested = transition == MpvAutoOutputPolicy.Transition.ENTER_SURFACE_DIRECT
+        if (SpiderDebug.isEnabled()) SpiderDebug.log("mpv-output", "auto decision eligible=%s transition=%s reason=%s renderAction=%s renderReason=%s size=%dx%d tracksReady=%s early=%s subtitle=%s lutOrFilter=%s customGpu=%s dvProfile=%d dvSupport=%s direct=%s gpuPinned=%s autoVulkan=%s attempts=%d", decision.eligible(), transition, decision.reason(), renderDecision.action(), renderDecision.reason(), width, height, tracksReady, earlyEvaluation, subtitleActive, lutOrFilterActive, customGpuProcessing, dolbyVisionProfile, dolbyVisionSupport, currentlyDirect, mpvAutoGpuPinnedForSession, mpvAutoVulkanPinnedForItem, mpvAutoOutputProbeAttempts);
+        boolean transitionRequested = enableAutoVulkan
+                || transition == MpvAutoOutputPolicy.Transition.ENTER_SURFACE_DIRECT
                 || transition == MpvAutoOutputPolicy.Transition.LEAVE_SURFACE_DIRECT;
         boolean requestAccepted = true;
-        if (transition == MpvAutoOutputPolicy.Transition.ENTER_SURFACE_DIRECT) {
+        if (enableAutoVulkan) {
+            requestAccepted = rebuildAndRestartMpv(false,
+                    "auto-" + renderDecision.reason());
+        } else if (transition == MpvAutoOutputPolicy.Transition.ENTER_SURFACE_DIRECT) {
             requestAccepted = rebuildAndRestartMpv(true, "auto-" + decision.reason());
         } else if (transition == MpvAutoOutputPolicy.Transition.LEAVE_SURFACE_DIRECT) {
             requestAccepted = rebuildAndRestartMpv(false, "auto-" + decision.reason());
         }
-        String oldOutput = currentlyDirect ? "surface-direct" : "gpu";
-        String targetOutput = decision.eligible() ? "surface-direct" : "gpu";
+        String oldOutput = currentlyDirect ? "surface-direct"
+                : currentlyVulkan ? "gpu-vulkan" : "gpu-opengl";
+        String targetOutput = enableAutoVulkan ? "gpu-vulkan"
+                : decision.eligible() ? "surface-direct" : "gpu";
         PlaybackTelemetry.DecisionOutcome telemetryOutcome = transitionRequested
                 ? requestAccepted ? PlaybackTelemetry.DecisionOutcome.REQUESTED : PlaybackTelemetry.DecisionOutcome.FAILED
                 : PlaybackTelemetry.DecisionOutcome.HELD;
@@ -4758,7 +4801,7 @@ public class PlayerManager implements ParseCallback {
                         oldOutput,
                         targetOutput,
                         transitionRequested && requestAccepted ? targetOutput : oldOutput,
-                        decision.reason(),
+                        enableAutoVulkan ? renderDecision.reason() : decision.reason(),
                         transitionRequested ? requestAccepted ? "none" : "rebuild-rejected" : "no-transition",
                         List.of(
                                 PlaybackTelemetry.DecisionInput.number("width", width, PlaybackAutoContext.ValueSource.PLAYER_CALLBACK, PlaybackAutoContext.Confidence.HIGH),
@@ -4849,6 +4892,33 @@ public class PlayerManager implements ParseCallback {
         mpv.setVulkanBackendOverride(MpvVulkanBackendPolicy.STABLE);
         PlaybackTrace.log("mpv-vulkan", playbackTrace.current(),
                 "backend direct failed; fallback stable once reason=%s", reason);
+        return rebuildAndRestartMpv(false, reason);
+    }
+
+    private boolean retryMpvAutoVulkanFailure(PlaybackException error) {
+        if (error == null || !mpvAutoVulkanPinnedForItem
+                || !(engine instanceof MpvPlayerEngine mpv)
+                || !mpv.isVulkanRenderer()) return false;
+        String message = error.getMessage();
+        boolean outputFailure = error.errorCode
+                == PlaybackException.ERROR_CODE_VIDEO_FRAME_PROCESSING_FAILED
+                || message != null
+                && message.startsWith(MpvPlayer.ERROR_VIDEO_OUTPUT_FAILED);
+        return outputFailure
+                && retryMpvAutoVulkanToOpenGl("auto-vulkan-output-failure");
+    }
+
+    private boolean retryMpvAutoVulkanToOpenGl(String reason) {
+        if (!mpvAutoVulkanPinnedForItem
+                || !(engine instanceof MpvPlayerEngine mpv)
+                || !mpv.isVulkanRenderer()) return false;
+        mpvAutoVulkanPinnedForItem = false;
+        mpvAutoVulkanDisabledForItem = true;
+        mpv.setVulkanRenderOverride(false);
+        mpv.setVulkanBackendOverride(null);
+        PlaybackTrace.log("mpv-vulkan", playbackTrace.current(),
+                "automatic DV5 Vulkan failed; fallback OpenGL once reason=%s",
+                reason);
         return rebuildAndRestartMpv(false, reason);
     }
 
@@ -7344,6 +7414,7 @@ public class PlayerManager implements ParseCallback {
             if (recoverMpvHlsVariantError()) return;
             if (retryMpvSurfaceDirectFailure(e)) return;
             if (retryMpvVulkanBackendFailure(e)) return;
+            if (retryMpvAutoVulkanFailure(e)) return;
             PlaybackErrorClassifier.Failure failure = PlaybackErrorClassifier.classify(e, getEffectivePlaybackRoute());
             PlayerEngine.ErrorAction action = engine.handleError(e);
             PlaybackTrace.log("playback-error", playbackTrace.current(), "%s action=%s player=%d decode=%d", failure.logSummary(), action, playerType, engine.getDecode());
