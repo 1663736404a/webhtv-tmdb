@@ -591,3 +591,95 @@ PlayerView output Surface
 - 原始证据：`/tmp/e9-dv5-rpu-queue-final-private.log` 与
   `/tmp/e9-dv5-rpu-queue-final-logcat.log`。
 - Next action: create the atomic E9-3f commit and annotated recovery tag.
+
+### Checkpoint 2026-08-28: external research batch, mpv backends all pass
+
+- 用户补充的设备事实：同一目标设备、同一 DV5 样片，MPV `gpu-next` 的
+  `direct`、`stable`、`legacy` 三种 Vulkan AImageReader 后端均能稳定还原色彩。
+- 这条事实显著降低了“Android external-format、AHardwareBuffer 通道顺序、
+  YCbCr sampler/range 或单一 Vulkan 后端”的可能性；三种后端共享的上游
+  `mp_image -> libplacebo` Dolby Vision 表示更值得优先对照。
+- 已核对本地锁定 MPV `cca559b41ceb0bb7731cf6ef2e1f33276cd30c42`、FFmpeg
+  `04482c8d13ac27b2a9fe93f5d388929eef8af5f4`、libplacebo
+  `b694a21bf2dc176c1e98b8a13c6421a0de5f3da5` 及本地 stable override；MPV
+  `raw_dovi` 会保留原始 DV representation 和三分量语义，stable 另用固定
+  输出池/fence 保证 AImage 生命周期。
+- 外部 issue：mpv #10287 记录无 DV license 的 Snapdragon 设备在
+  `mediacodec-copy` 下出现紫绿，而软件/gpu-next 映射正常；mpv #10700 记录
+  P5 的错误颜色与 tone-mapping/backend 输入表示有关。这些支持“必须保留
+  raw DV + RPU GPU mapping”，不支持 P5 直接改标 HDR10/P8.1。
+- 本轮仍为 assessment；未修改生产代码，保护脏文件
+  `app/src/main/cpp/exo_dovi_renderer.cpp`。下一动作：抓取锁定 MPV direct、
+  FFmpeg DOVI 状态更新和 libplacebo frame mapping 的完整源码，逐字段对照
+  Exo 当前实现，形成推荐/否决矩阵。
+- External research confirms same DV5 sample is correct with MPV gpu-next direct, stable, and legacy; prioritize shared FFmpeg/libplacebo RPU representation and preserve existing dirty native file.
+- Fetch locked MPV direct, FFmpeg DOVI state, and libplacebo mapping sources into /tmp and compare exact fields
+
+### Checkpoint 2026-08-28: narrow the remaining fault domain
+
+- Authority remains assessment-only for this batch; no production code has been changed.
+- User-confirmed evidence: the same device and Profile 5 sample produce stable correct color
+  with MPV gpu-next `direct`, `stable`, and `legacy`. This rules against a defect unique to
+  one MPV AHardwareBuffer import backend and makes the shared FFmpeg/libplacebo Dolby Vision
+  frame representation the primary reference contract.
+- Current strongest hypothesis: Exo's hand-built `pl_dovi_metadata` and simplified RPU
+  carry-forward/frame-selection semantics diverge from FFmpeg's stateful `DOVIContext`.
+  Counter-hypothesis: Exo feeds equivalent metadata and the remaining fault is output target
+  or resource lifetime. The next source comparison must distinguish these before any edit.
+- Protected pre-existing dirty path remains
+  `app/src/main/cpp/exo_dovi_renderer.cpp`; do not overwrite or commit it during assessment.
+- Next action: compare the locked FFmpeg DOVI parse/state functions and MPV/libplacebo frame
+  handoff field-by-field with Exo's current RPU parsing and render path, then record a
+  recommendation and acceptance/rollback boundary.
+
+### Checkpoint 2026-08-28: MPV 三后端证据后的有限对照
+
+- 用户确认同一样片在 MPV gpu-next `direct`、`stable`、`legacy` 均稳定正常；因此不再把单一
+  Vulkan/AHardwareBuffer 后端作为首要假设。
+- 锁定源码对照显示 MPV raw DV 路径使用 `pl_map_avdovi_metadata` 的完整 FFmpeg
+  `AVDOVIMetadata`，并读取 AImage dataspace；Exo 当前使用 libdovi 结果手工维护
+  `pl_dovi_metadata`，且固定 RGB identity/full YCbCr 采样。这是当前最强的可证伪差异。
+- 未新增生产代码；受保护脏路径仍为 `app/src/main/cpp/exo_dovi_renderer.cpp`，本文件为任务记录。
+- 下一动作：完成不超过一批的外部主源码/issue核查，并在设备重新在线时仅读取当前 APK 的
+  ExoDv5 私有日志，确认 target/dataspace/RPU 状态后再决定是否编辑代码。
+
+### Checkpoint 2026-08-28: Exo 与 MPV 共享语义的最终收敛
+
+- 用户确认同一样片在 MPV `direct`、`stable`、`legacy` 均为正常色彩，故排除某一种
+  Vulkan/AHardwareBuffer 后端独有缺陷；三条路径共享的 FFmpeg Dolby Vision 状态和
+  libplacebo raw-DV 表示是当前基准。
+- 已确认当前样片前几帧为 Profile 5、`use_prev_vdr_rpu=0`、每帧均有 mapping 与未压缩
+  DM；完整 `vdr_rpu_id`/DM 继承仍是通用缺口，但不能单独解释本样片持续异常。
+- 已确认 libdovi Profile 5 默认 IPT-PQ 矩阵与 Exo 当前常量一致，不能替换为 FFmpeg 的
+  非 Profile-5 默认颜色矩阵。
+- 当前只剩三个有决定力的字段簇：libdovi 到 `pl_dovi_metadata` 的曲线系数映射、
+  AHardwareBuffer 的实际 sample depth/crop、以及 swapchain 返回的真实 target 色彩合同。
+- 保护现有 `app/src/main/cpp/exo_dovi_renderer.cpp` 未提交时间戳匹配改动；本轮不修改
+  播放器路由、MPV 策略或其他模块。
+- 下一动作：逐字段核对上述三个字段簇，选择一个可由源码或设备日志证实的单一根因，
+  再做最小 native 修复并进行一次 arm64 构建和一次目标设备播放验证。
+- Checkpoint: MPV三后端均正常，已排除单一Vulkan后端；当前仅核对曲线映射、sample depth/crop与swapchain target
+- Next action: 逐字段核对三个字段簇并修复一个可证实根因
+
+### E9-3h RPU pivot 差分解码修复
+
+- 直接根因：Dolby Vision `pred_pivot_value` 在 RPU 中是差分编码。FFmpeg
+  `dovi_rpudec.c` 读取时逐项累加后保存绝对 pivot；libdovi C API 则暴露原始编码值。
+  Exo 旧实现直接归一化每个原始值，导致多 pivot 帧的分段边界乱序，libplacebo
+  reshape 选中错误曲线。两 pivot 或特定曲线帧可能偶然接近正确，符合用户观察到的
+  “约第 3 秒只有一瞬间色彩正常”。
+- 交叉证据：libdovi 自带 Profile 8.4 曲线为
+  `63,69,230,256,256,37,16,8,7`，该序列只有作为差分累加才可能形成有序 pivot；
+  FFmpeg 锁定源码明确执行 `pivot += get_bits(...)`。
+- 修复：`mapRpuCurve()` 在按 BL bit depth 归一化前先累加并夹取 pivot，保持系数、
+  Profile 5 矩阵、时间戳匹配、swapchain 输出和播放器路由不变。
+- 构建：`:app:assembleMobileArm64_v8aDebug` 成功，APK SHA-256 为
+  `72fe4c5a391d4543d1473c36c954d52c26b2856d6f5dc2832835b9a88fc41893`；生成的
+  `app/.cxx` 已整体保留到 `/tmp/e9-pivot-cxx.36DbvT/app-cxx`，未进入任务范围。
+- 回滚锚点：`recovery/E9-3-color-input/20260828074016-eb5f7af998d3`。
+- 真机：APK 已覆盖安装到 V2453A，并从本地选集播放 `P5_Dolby_Amaze.mkv`。
+  路径保持 Exo `c2.qti.hevc.decoder`，未切换 MPV；一轮统计为
+  `matchedFrames=2433`、`unmatchedFrames=0`、`expectedQueueDrops=0`、
+  `renderFailures=0`、`malformedRpus=0`。
+- 真机日志证明 RPU/帧配对和 Vulkan 渲染链稳定；最终视觉色彩仍以用户观察为准。
+- 证据：`/tmp/e9-pivot-private.log`、`/tmp/e9-pivot-logcat.log`。

@@ -27,8 +27,9 @@
 namespace {
 
 constexpr int kMaxImages = 4;
-constexpr size_t kMaxExpectedFrames = 16;
+constexpr size_t kMaxExpectedFrames = 256;
 constexpr size_t kMaxPendingRpus = 256;
+constexpr int64_t kTimestampMatchToleranceNs = 2'000'000;
 
 constexpr jint kCapabilityImageReader = 1 << 0;
 constexpr jint kCapabilityVulkan12 = 1 << 1;
@@ -620,10 +621,15 @@ void mapRpuCurve(pl_dovi_metadata::pl_reshape_data *dst,
     const size_t pivotCount = std::min<size_t>(9, src.pivots.len);
     dst->num_pivots = static_cast<uint8_t>(pivotCount);
     uint64_t blBits = std::min<uint64_t>(23, header.bl_bit_depth_minus8 + 8);
-    const float pivotScale = 1.0f /
-            static_cast<float>((uint64_t{1} << blBits) - 1);
+    const uint64_t maxPivot = (uint64_t{1} << blBits) - 1;
+    const float pivotScale = 1.0f / static_cast<float>(maxPivot);
+    uint64_t pivot = 0;
     for (size_t i = 0; i < pivotCount; i++) {
-        dst->pivots[i] = pivotScale * src.pivots.data[i];
+        // RPU pred_pivot_value entries are delta-coded. libdovi exposes the
+        // encoded values, while libplacebo expects absolute normalized pivot
+        // positions, matching FFmpeg's DOVIContext mapping.
+        pivot = std::min(maxPivot, pivot + src.pivots.data[i]);
+        dst->pivots[i] = pivotScale * static_cast<float>(pivot);
     }
     const size_t pieceCount = pivotCount > 0 ? pivotCount - 1 : 0;
     for (size_t i = 0; i < pieceCount && i < 8; i++) {
@@ -894,22 +900,35 @@ bool probeImageReader(JNIEnv *env) {
     return available;
 }
 
-int64_t matchTimestamp(Renderer *renderer, int64_t timestampNs) {
+bool matchTimestamp(Renderer *renderer, int64_t timestampNs,
+                    int64_t *presentationTimeUs) {
     std::lock_guard<std::mutex> lock(renderer->expectedMutex);
-    // AImageReader reports the producer's monotonic timestamp on affected
-    // MediaCodec implementations, not the media presentation timestamp passed
-    // to VideoFrameHandler. Decoded images and queued release instructions are
-    // ordered, so associate them FIFO and retain AImage time for diagnostics.
-    if (!renderer->expectedFrames.empty()) {
-        ExpectedFrame frame = renderer->expectedFrames.front();
-        renderer->expectedFrames.pop_front();
-        renderer->lastPresentationTimeUs.store(
-                frame.presentationTimeUs, std::memory_order_relaxed);
-        renderer->matchedFrames.fetch_add(1, std::memory_order_relaxed);
-        return frame.presentationTimeUs;
+    auto match = renderer->expectedFrames.end();
+    int64_t bestDifferenceNs = kTimestampMatchToleranceNs + 1;
+    for (auto frame = renderer->expectedFrames.begin();
+         frame != renderer->expectedFrames.end(); ++frame) {
+        const int64_t differenceNs = frame->imageTimestampNs >= timestampNs
+                ? frame->imageTimestampNs - timestampNs
+                : timestampNs - frame->imageTimestampNs;
+        if (differenceNs < bestDifferenceNs) {
+            bestDifferenceNs = differenceNs;
+            match = frame;
+            if (differenceNs == 0) break;
+        }
     }
-    renderer->unmatchedFrames.fetch_add(1, std::memory_order_relaxed);
-    return timestampNs / 1000;
+
+    if (match == renderer->expectedFrames.end()) {
+        renderer->unmatchedFrames.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+
+    *presentationTimeUs = match->presentationTimeUs;
+    renderer->lastPresentationTimeUs.store(
+            *presentationTimeUs, std::memory_order_relaxed);
+    renderer->expectedFrames.erase(renderer->expectedFrames.begin(),
+                                   std::next(match));
+    renderer->matchedFrames.fetch_add(1, std::memory_order_relaxed);
+    return true;
 }
 
 void onImageAvailable(void *context, AImageReader *reader) {
@@ -922,14 +941,20 @@ void onImageAvailable(void *context, AImageReader *reader) {
         if (status != AMEDIA_OK || image == nullptr) break;
 
         int64_t timestampNs = 0;
-        int64_t presentationTimeUs = timestampNs / 1000;
+        int64_t presentationTimeUs = 0;
+        bool timestampMatched = false;
         if (AImage_getTimestamp(image, &timestampNs) == AMEDIA_OK) {
             renderer->lastImageTimestampNs.store(
                     timestampNs, std::memory_order_relaxed);
-            presentationTimeUs = matchTimestamp(renderer, timestampNs);
+            timestampMatched = matchTimestamp(
+                    renderer, timestampNs, &presentationTimeUs);
         }
 
         renderer->acquiredFrames.fetch_add(1, std::memory_order_relaxed);
+        if (!timestampMatched) {
+            AImage_delete(image);
+            continue;
+        }
         AHardwareBuffer *buffer = nullptr;
         if (AImage_getHardwareBuffer(image, &buffer) == AMEDIA_OK
                 && buffer != nullptr) {
