@@ -169,9 +169,10 @@ scripts/build_mpv_native.sh --abi arm64-v8a --jobs 8 --work-dir /tmp/webhtv-mpv-
    - `mpv-android-vulkan-smart-backend.patch`
    - `mpv-android-vulkan-legacy-backend.patch`
    - `mpv-aimagereader-stable-flow.patch`
+   - `mpv-p2-generic-uv.patch`
    - `mpv-matroska-segment-end.patch`
 
-   Profile 7 HDR10 回退使用 FFmpeg 官方 `dovi_split` 的 `mode=bl` 在 demux 层移除 EL/RPU，GPU 与电视直出都只接收可独立解码的 HDR10 基础层。MediaCodec 直出允许无 OSD Surface，并按 PTS 调度缓冲帧释放。Vulkan `auto` 优先 direct，然后回退 stable 和通用 conversion；`legacy` 保留早期 compute 路径供兼容性验证。AImageReader 按回调序列领取图像，并在 conversion fence 完成前保持 AImage 生命周期。
+   Profile 7 HDR10 回退使用 FFmpeg 官方 `dovi_split` 的 `mode=bl` 在 demux 层移除 EL/RPU，GPU 与电视直出都只接收可独立解码的 HDR10 基础层。MediaCodec 直出允许无 OSD Surface，并按 PTS 调度缓冲帧释放。Vulkan `auto` 优先 direct，然后回退 stable 和通用 conversion；`legacy` 保留早期 compute 路径供兼容性验证。AImageReader 按回调序列领取图像，并在 conversion fence 完成前保持 AImage 生命周期。P2 generic compute/fragment shader 的 crop 与归一化除法由 CPU 每帧预计算，两个 SPIR-V header 必须由锁定 NDK r29 `glslc` 从补丁后的 shader source 重新生成并通过 `spirv-val`，不能手工修改数组。
 7. 按依赖顺序构建字符集/压缩库、MbedTLS、dav1d、libxml2、FreeType、libaribcaption、FFmpeg、字体栈、shaderc、libplacebo、curl+nghttp2、libbluray、libarchive、DVD 库、rubberband 和 MPV。
 8. 把 FFmpeg 的文件名、ELF `SONAME` 和 `DT_NEEDED` 从 `libav*`/`libsw*` 等长修改为 `libmv*`/`libmw*`。
 9. 使用 NDK `llvm-strip --strip-unneeded` 处理最终库。

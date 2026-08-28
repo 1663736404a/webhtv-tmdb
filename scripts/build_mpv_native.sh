@@ -15,6 +15,7 @@ MPV_VULKAN_CONVERSION_PATCH="$ROOT/third_party/patches/mpv-android-vulkan-conver
 MPV_VULKAN_SMART_PATCH="$ROOT/third_party/patches/mpv-android-vulkan-smart-backend.patch"
 MPV_VULKAN_LEGACY_PATCH="$ROOT/third_party/patches/mpv-android-vulkan-legacy-backend.patch"
 MPV_AIMAGEREADER_STABLE_PATCH="$ROOT/third_party/patches/mpv-aimagereader-stable-flow.patch"
+MPV_P2_GENERIC_UV_PATCH="$ROOT/third_party/patches/mpv-p2-generic-uv.patch"
 MPV_AIMAGEREADER_STABLE_SOURCE="$OVERRIDE_DIR/aimagereader-stable/video/out/hwdec/hwdec_aimagereader_vk_stable.c"
 MPV_AIMAGEREADER_STABLE_SHADER="$OVERRIDE_DIR/aimagereader-stable/video/out/hwdec/hwdec_aimagereader_vk_stable.comp"
 MPV_MATROSKA_PATCH="$ROOT/third_party/patches/mpv-matroska-segment-end.patch"
@@ -393,6 +394,32 @@ cmake_path.write_text(cmake_text, encoding="utf-8")
 PY
 }
 
+generate_mpv_shader_header() {
+  local stage="$1"
+  local source="$2"
+  local header="$3"
+  local symbol="$4"
+  local generated_dir="$WORK_DIR/generated-shaders"
+  local stem="${header##*/}"
+  local spv="$generated_dir/$stem.spv"
+  local initializer="$generated_dir/$stem.inc"
+
+  mkdir -p "$generated_dir"
+  "$GLSLC" -fshader-stage="$stage" --target-env=vulkan1.2 -O \
+    -o "$spv" "$source"
+  "$SPIRV_VAL" --target-env vulkan1.2 "$spv"
+  "$GLSLC" -fshader-stage="$stage" --target-env=vulkan1.2 -O -mfmt=c \
+    -o "$initializer" "$source"
+  {
+    printf '// Generated from %s with:\n' "${source##*/}"
+    printf '// glslc -fshader-stage=%s --target-env=vulkan1.2 -O -mfmt=c\n' \
+      "$stage"
+    printf 'static const uint32_t %s[] = ' "$symbol"
+    cat "$initializer"
+    printf ';\n'
+  } >"$header"
+}
+
 prepare_sources() {
   local deps="$BUILDSCRIPTS/deps"
   mkdir -p "$deps"
@@ -514,6 +541,19 @@ prepare_sources() {
   [ -f "$MPV_AIMAGEREADER_STABLE_PATCH" ] || die "missing MPV stable AImageReader flow patch: $MPV_AIMAGEREADER_STABLE_PATCH"
   git -C "$deps/mpv" apply --check "$MPV_AIMAGEREADER_STABLE_PATCH"
   git -C "$deps/mpv" apply "$MPV_AIMAGEREADER_STABLE_PATCH"
+  [ -f "$MPV_P2_GENERIC_UV_PATCH" ] || die "missing MPV P2 generic UV patch: $MPV_P2_GENERIC_UV_PATCH"
+  git -C "$deps/mpv" apply --check "$MPV_P2_GENERIC_UV_PATCH"
+  git -C "$deps/mpv" apply "$MPV_P2_GENERIC_UV_PATCH"
+  generate_mpv_shader_header compute \
+    "$deps/mpv/video/out/hwdec/hwdec_aimagereader.comp" \
+    "$deps/mpv/video/out/hwdec/hwdec_aimagereader_comp.h" \
+    aimagereader_comp_spv
+  generate_mpv_shader_header fragment \
+    "$deps/mpv/video/out/hwdec/hwdec_aimagereader.frag" \
+    "$deps/mpv/video/out/hwdec/hwdec_aimagereader_frag.h" \
+    aimagereader_frag_spv
+  python3 "$ROOT/scripts/verify_mpv_vulkan_shader_contract.py" \
+    --mpv-source "$deps/mpv"
   [ -f "$MPV_MATROSKA_PATCH" ] || die "missing MPV Matroska segment patch: $MPV_MATROSKA_PATCH"
   git -C "$deps/mpv" apply --check "$MPV_MATROSKA_PATCH"
   git -C "$deps/mpv" apply "$MPV_MATROSKA_PATCH"
@@ -616,6 +656,7 @@ verify_directory() {
   grep -Fq "WebHTV Vulkan auto backend prefers direct AHardwareBuffer sampling" <<<"$version_strings" || die "MPV Android Vulkan smart backend patch missing from $directory/libmpv.so"
   grep -Fq "WebHTV Vulkan auto uses a queue-safe four-output bounded-fence pool" <<<"$version_strings" || die "MPV Android Vulkan queue-safe conversion pool missing from $directory/libmpv.so"
   grep -Fq "CPU-precomputed UV transform" <<<"$version_strings" || die "MPV Android Vulkan low-power coordinate transform missing from $directory/libmpv.so"
+  grep -Fq "Generic Vulkan conversion uses CPU-precomputed UV transform" <<<"$version_strings" || die "MPV Android Vulkan generic coordinate transform missing from $directory/libmpv.so"
   grep -Fq "Stable Vulkan conversion preserves Dolby Vision raw YUV component mapping" <<<"$version_strings" || die "MPV Android Vulkan stable Dolby Vision mapping missing from $directory/libmpv.so"
   grep -Fq "WebHTV Vulkan keeps AImage until the conversion fence completes" <<<"$version_strings" || die "MPV Android Vulkan stable AImage lifetime patch missing from $directory/libmpv.so"
   grep -Fq "WebHTV AImageReader uses stable release/acquire flow" <<<"$version_strings" || die "MPV Android stable AImageReader release/acquire patch missing from $directory/libmpv.so"
