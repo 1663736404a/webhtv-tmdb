@@ -99,3 +99,9 @@ P8.1 仅对 HEVC、Profile 7、存在有效 RPU+BL 配置记录的轨道生效�
 - `bash ./gradlew :app:assembleMobileArm64_v8aDebug :app:assembleLeanbackArm64_v8aDebug --no-daemon` 通过，耗时 3 分 43 秒。产物：`app/build/outputs/apk/mobileArm64_v8a/debug/app-mobile-arm64_v8a-debug.apk`（SHA-256 `2c5b6ef8b0e73d9b79b95f9b655bc5fa619018d2cdd3384ec373037fa97271e6`）和 `app/build/outputs/apk/leanbackArm64_v8a/debug/app-leanback-arm64_v8a-debug.apk`（SHA-256 `3867a8c7fb352815c7bfe4882301aefdd88fe6cc88c648ad9b03353c6ccdd392`）。
 - `bash ./gradlew :app:testMobileArm64_v8aDebugUnitTest --tests com.fongmi.android.tv.player.engine.MpvDolbyVisionFallbackPolicyTest --no-daemon` 通过，耗时 1 分 26 秒；覆盖原生 DV7 优先、P8.1 能力门和 HDR10 回退策略。
 - 尝试 `adb devices -l` 和 `adb connect 192.168.1.9:5555`；当前无在线设备，连接返回 `Connection refused`，因此未宣称本轮实机播放通过。此前首轮黑屏根因及修正已由日志和静态 patch 检查确认，最终包仍需设备在线后验证默认 P8.1/HDR10 实际解码路径。
+
+### 2026-08-29 20:00 CST：提交与恢复锚点
+
+- C2 原子提交：`ae337b81e44657d85050bee3a9f92a780fb418ab`（`mpv: complete DV7 to P8.1 fallback integration`）。
+- 恢复 tag：`recovery/C2-DV7-P81-BSF/20260829200055-ae337b81e446`。
+- 状态：实现、静态验证、native 资产验证、双端 arm64 包构建和策略单测已完成；实机验证因设备离线保留为明确剩余风险。回滚锚点为 `upstream/mpv/c2-dv7-p81-bsf-baseline-20260829`。

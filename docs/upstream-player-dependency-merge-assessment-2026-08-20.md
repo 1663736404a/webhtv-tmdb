@@ -581,7 +581,7 @@ MMT/TLV（`054c8690e16b377eb1c6375c8751a44b8eb1d962`）、HLS discontinuity/live
 - MPV 目前通过 `mpv-dovi-profile7-hdr10-base-layer.patch` 的 demux 选项 `demuxer-dovi-profile7=hdr10` 清理 EL/RPU，再交给 MediaCodec base-layer decoder；FFmpeg bsf 可减少自定义 demux 代码，但还需要把 bsf 接入 MPV 的 load/demux 选项，并与本地 DV7 日志/失败回退保持一致。
 - 该提交只处理 HEVC packet，不自动解决 Android 输出 sink、HDR metadata 宣告、P8.1 硬件能力或 RPU 无效时的用户策略；不能因为“转换功能存在”就删除 Exo/MPV 现有 fallback。
 
-**实施记录：** C2 已按用户批准在 MPV 独立阶段完成窄适配：保留原生 DV7 优先，仅提供默认“升级 P8.1”和“降级 HDR10”两态；P8.1 能力不成立、转换失败或运行时失败时自动回退 HDR10。来源为 FFmpeg `177f090e0503b7e013922ca903bde14b1c375f18`、MPV `cca559b41ceb0bb7731cf6ef2e1f33276cd30c42`、mpv-android `eabfaf9501fc08fb726953a9328da43ae4154d35`，任务记录见 `docs/C2-dv7-p81-bsf.md`。两个 ABI 资产校验、Mobile/Leanback arm64 Debug 构建和策略单测已通过；最终实机回归待设备重新连接后补测。Exo 仍保持独立实现，不切换为共用 FFmpeg BSF。
+**实施记录：** C2 已按用户批准在 MPV 独立阶段完成窄适配：保留原生 DV7 优先，仅提供默认“升级 P8.1”和“降级 HDR10”两态；P8.1 能力不成立、转换失败或运行时失败时自动回退 HDR10。来源为 FFmpeg `177f090e0503b7e013922ca903bde14b1c375f18`、MPV `cca559b41ceb0bb7731cf6ef2e1f33276cd30c42`、mpv-android `eabfaf9501fc08fb726953a9328da43ae4154d35`，任务记录见 `docs/C2-dv7-p81-bsf.md`。两个 ABI 资产校验、Mobile/Leanback arm64 Debug 构建和策略单测已通过；实机回归因设备离线未执行。实现提交为 `ae337b81e44657d85050bee3a9f92a780fb418ab`，恢复 tag 为 `recovery/C2-DV7-P81-BSF/20260829200055-ae337b81e446`。Exo 仍保持独立实现，不切换为共用 FFmpeg BSF。
 
 ### 6.6 FFmpeg 阶段验证矩阵与回滚边界
 
