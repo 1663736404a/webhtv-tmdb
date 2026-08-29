@@ -9,8 +9,8 @@
 - 验收：patch 可按当前锁定 MPV 树应用；Java 编译通过；两 ABI native 产物/ELF/资产校验通过；原生 DV7、P8.1、HDR10、seek/flush/换源和失败回退有证据。
 - 当前状态：原生 P8.1 已由用户在 TCL MT9655 电视确认可正常播放；DV7 FEL 转换后的 P8.1 仍会在该设备无首帧并卡住。窄修复已完成：启动期延后可能阻塞的轨道/章节查询，超时无首帧时只回退一次 HDR10。
 - 已完成：创建 baseline tag；完成 C2 patch、两态 UI、原生 DV7 优先、P8.1 能力门和 HDR10 自动回退；修复 P8.1 packet/CSD 不一致黑屏；两个 ABI native/ELF/资产校验、Mobile/Leanback arm64 Debug 构建和策略单测均通过。
-- 未完成：本阶段提交和恢复 tag；电视实机回归仍受 ADB 离线限制。
-- 下一动作：由 task guard 原子提交并创建恢复 tag；设备重新上线后仅补做一次 DV7 自动模式回退验证。
+- 已完成：章节查询门控修复已原子提交并创建恢复 tag；电视实机回归仍受 ADB 离线限制。
+- 下一动作：设备重新上线后仅补做一次 DV7 自动模式回退验证；若日志仍出现其他启动期同步 MPV 属性阻塞，再以新的证据单独开修复单元。
 
 ## 决策与来源
 
@@ -141,4 +141,10 @@ P8.1 仅对 HEVC、Profile 7、存在有效 RPU+BL 配置记录的轨道生效�
 - 未修改 FFmpeg/MPV native、`dovi_rpu`、Vulkan、解码器、Surface 或默认策略；无新增依赖和包体积变化。
 - 验证：`bash ./gradlew :app:testMobileArm64_v8aDebugUnitTest --tests androidx.media3.mpvplayer.MpvTrackRefreshPolicyTest --tests com.fongmi.android.tv.player.engine.MpvDolbyVisionFallbackPolicyTest :app:compileMobileArm64_v8aDebugJavaWithJavac --no-daemon` 通过（57 秒）；`git diff --check` 通过。
 - 设备限制：本次读取时 `http://192.168.1.5:9978/debug/logs.txt` 暂不可连接，电视 ADB 仍离线；因此只记录日志根因和静态/编译验证，不宣称电视实机回归已通过。
-- 当前状态：代码和文档待 task guard 原子提交及恢复 tag；提交后设备重新上线仅需复测同一 DV7 自动模式，确认不再出现 `chapter-list` 长时间 JNI 阻塞。
+- 当前状态：代码提交 `a83fe86baa245f58c1f5143584c1a5ceaa348530`，恢复 tag `recovery/C2-DV7-P81-BSF/20260830003041-a83fe86baa24`；设备重新上线仅需复测同一 DV7 自动模式，确认不再出现 `chapter-list` 长时间 JNI 阻塞。
+
+### 2026-08-30 00:31 CST：提交收尾
+
+- 原子代码提交：`a83fe86baa245f58c1f5143584c1a5ceaa348530`（`fix(mpv): defer startup chapter metadata for DV7 P8.1`）。
+- 恢复 tag：`recovery/C2-DV7-P81-BSF/20260830003041-a83fe86baa24`。
+- 验证记录：C2 定向单测、Mobile arm64 Java 编译和 `git diff --check` 已在提交前通过；未重复执行构建。电视端仍无 ADB/live 日志连接，实机回归保留为唯一剩余风险。
