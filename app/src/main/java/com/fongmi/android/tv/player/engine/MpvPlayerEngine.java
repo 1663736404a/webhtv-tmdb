@@ -828,6 +828,7 @@ public class MpvPlayerEngine implements PlayerEngine {
                 .automaticHlsVariant(PlaybackPerformanceSetting.isAuto(
                         PlayerSetting.MPV,
                         PlaybackPerformanceCatalog.MPV_HLS_BITRATE))
+                .deferStartupTrackRefresh(DV7_P81.equals(getDv7HandlingOption()))
                 .option("framedrop", MpvPerformanceSetting.getFrameDropOption())
                 .option("video-sync", MpvPerformanceSetting.getSyncOption())
                 .option("interpolation", MpvPerformanceSetting.isInterpolation() ? "yes" : "no")

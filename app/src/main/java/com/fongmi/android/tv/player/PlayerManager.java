@@ -417,6 +417,7 @@ public class PlayerManager implements ParseCallback {
         completeIjkBufferManagedReload(
                 false, "timeout", SystemClock.elapsedRealtime(), true);
         if (retryLutWarmupByRefresh("timeout")) return;
+        if (retryMpvDv7P81FirstFrameTimeout()) return;
         if (retryMpvVulkanBackendTimeout()) return;
         if (retryMpvAutoVulkanToOpenGl("auto-vulkan-first-frame-timeout")) return;
         if (retryExoDv7FirstFrameTimeout()) return;
@@ -4889,6 +4890,21 @@ public class PlayerManager implements ParseCallback {
             return false;
         }
         return rebuildAndRestartMpv(null, "dv7-p81-hdr10-fallback");
+    }
+
+    private boolean retryMpvDv7P81FirstFrameTimeout() {
+        if (!(engine instanceof MpvPlayerEngine mpv)
+                || player == null
+                || !mpv.isDv7P81Active()
+                || playbackTrace.hasStage(PlaybackTrace.Stage.FIRST_FRAME)
+                || !mpv.prepareDv7P81Hdr10Fallback()) {
+            return false;
+        }
+        long position = Math.max(0, player.getCurrentPosition());
+        PlaybackTrace.log("mpv-dv", playbackTrace.current(),
+                "P8.1 produced no first frame before startup timeout; retry HDR10 position=%d",
+                position);
+        return rebuildAndRestartMpv(null, "dv7-p81-first-frame-timeout");
     }
 
     private boolean retryMpvSurfaceDirectFailure(PlaybackException error) {

@@ -7,10 +7,10 @@
 - 基线：`fongmi-sync` @ `5e90c2ed76830f5c45988d8597d14ffd599dba34`；恢复 tag：`upstream/mpv/c2-dv7-p81-bsf-baseline-20260829`。
 - 保护 dirty 路径：无。
 - 验收：patch 可按当前锁定 MPV 树应用；Java 编译通过；两 ABI native 产物/ELF/资产校验通过；原生 DV7、P8.1、HDR10、seek/flush/换源和失败回退有证据。
-- 当前状态：代码、native 资产、双端 arm64 Debug 包和定向单测已完成；实机回归因当前无线 ADB 地址拒绝连接而未执行，待设备重新连接后补测。
+- 当前状态：原生 P8.1 已由用户在 TCL MT9655 电视确认可正常播放；DV7 FEL 转换后的 P8.1 仍会在该设备无首帧并卡住。窄修复已完成：启动期延后可能阻塞的轨道查询，超时无首帧时只回退一次 HDR10。
 - 已完成：创建 baseline tag；完成 C2 patch、两态 UI、原生 DV7 优先、P8.1 能力门和 HDR10 自动回退；修复 P8.1 packet/CSD 不一致黑屏；两个 ABI native/ELF/资产校验、Mobile/Leanback arm64 Debug 构建和策略单测均通过。
-- 未完成：本轮非 DV 设备实机开播/回退回归，以及提交和候选恢复 tag。
-- 下一动作：设备可用后执行一次最小播放回归；若仍不可用，保留已记录的环境风险并完成 task guard 提交/tag。
+- 未完成：本阶段提交和恢复 tag；电视实机回归仍受 ADB 离线限制。
+- 下一动作：由 task guard 原子提交并创建恢复 tag；设备重新上线后仅补做一次 DV7 自动模式回退验证。
 
 ## 决策与来源
 
@@ -115,3 +115,20 @@ P8.1 仅对 HEVC、Profile 7、存在有效 RPU+BL 配置记录的轨道生效�
 - 不修改 `dovi_rpu`、FFmpeg lock、MPV native 资产、解码器/渲染器选择或字幕菜单数据流；因此不增加包体积，不改变正常播放帧路径，回滚为本阶段单个 Java/测试提交。
 - 当前验收状态：策略单测和 Mobile arm64 Java 编译均通过；Leanback arm64 Debug APK 已构建（156,646,041 bytes，SHA-256 `74f3d70d9ccb5ab8edd09ead456706d661020f752d2a267cab23c91b9b6a7d0e`）。电视 ADB（`192.168.1.5:5555`）仍返回 `Connection refused`，所以 P7 FEL 自动模式实机回归尚未宣称通过。
 - 待设备上线后的最小验收：同一 P7 FEL 样片自动模式不再出现主线程 `current-tracks/sub2/id` 长时间阻塞；普通 P5/DV5、字幕 `auto`/已选路径保持可播放；日志无 Java/native crash、ANR 或 decoder fatal error。
+
+### 2026-08-29 22:04 CST：原生 P8.1 能力确认与窄修复实施范围
+
+- 用户确认：同一 TCL MT9655 电视播放原生 P8.1 样片正常，排除“电视不支持 P8.1 硬解”的解释。
+- 结论：当前故障限定为 DV7 FEL 经 FFmpeg `dovi_rpu convert=p81` 后的输出，或该输出在启动期间触发的 native 等待；不能通过删除 P8.1 选项或改变普通 P8.1 解码路径解决。
+- 批准的窄修复：在配置为 `p81` 的 MPV 会话中，文件加载到首次播放重启前不执行同步 `track-list/*` 刷新；若现有播放超时仍没有首帧，调用现有一次性 HDR10 回退并重建播放。已产生首帧的 P8.1、原生 DV7 和直接 HDR10 不触发该回退。
+- 不在本阶段处理：重新设计 `dovi_rpu`、替换 FFmpeg/MPV lock、修改 Exo、改变 Vulkan/Surface 策略、异步重写全部 MPV 属性 API。
+- 验收重点：普通 HDR10/DV5 轨道菜单和音频选择仍在首帧后刷新；P8.1 失败时主线程保持可响应并自动切 HDR10；回退仅发生一次，seek/换源/退出不改变既有生命周期。
+
+### 2026-08-29 22:26 CST：窄修复验证
+
+- 代码结果：`MpvPlayerConfig` 增加 P8.1 启动期轨道刷新门控；`MpvPlayer` 仅对 P8.1 会话延后 `FILE_LOADED`/启动期 `track-list/*` 同步查询，收到 `PLAYBACK_RESTART` 后恢复刷新；`restoreVideoTrackSelection` 同样受门控保护。普通 MPV 会话保持原有立即刷新路径。
+- 回退结果：`PlayerManager.onPlaybackTimeout()` 在无首帧且当前为 MPV P8.1 时调用现有一次性 `prepareDv7P81Hdr10Fallback()`，重建为 HDR10；已出首帧、原生 DV7 或已回退会话不会重复触发。
+- 定向单测：`bash ./gradlew :app:testMobileArm64_v8aDebugUnitTest --tests androidx.media3.mpvplayer.MpvTrackRefreshPolicyTest --tests com.fongmi.android.tv.player.engine.MpvDolbyVisionFallbackPolicyTest --no-daemon` 通过，耗时 3 分 1 秒。
+- Java 编译：`bash ./gradlew :app:compileMobileArm64_v8aDebugJavaWithJavac --no-daemon` 通过，耗时 2 分钟。
+- 电视包：`bash ./gradlew :app:assembleLeanbackArm64_v8aDebug --no-daemon` 通过，产物 `app/build/outputs/apk/leanbackArm64_v8a/debug/app-leanback-arm64_v8a-debug.apk`，大小 156646041 bytes，SHA-256 `e801f04e9e57baa3a537eb542b1b4a5b69f7e1c59993ac89dac4c56c6ff1379e`。
+- 环境限制：`adb devices -l` 当前无在线设备，未宣称电视实机回归通过；原生 P8.1 正常是用户实测事实，转换 P8.1 的设备接受度仍需在设备上线后验证。

@@ -1801,7 +1801,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     }
 
     public void restoreVideoTrackSelection() {
-        if (!initialized) return;
+        if (!initialized || config.deferStartupTrackRefresh() && !playbackRestarted) return;
         int count = Math.max(0, intProperty("track-list/count", 0));
         for (int index = 0; index < count; index++) {
             TrackInfo info = readTrackInfo(index, C.INDEX_UNSET);
@@ -1933,7 +1933,8 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
                 playbackState = Player.STATE_BUFFERING;
                 loading = true;
                 updateVideoSize("event=file-loaded");
-                refreshTracks();
+                if (config.deferStartupTrackRefresh()) scheduleTrackRefresh("event=file-loaded");
+                else refreshTracks();
                 refreshChapters();
                 if (shouldCollectDebugDetails()) PlaybackTrace.log("mpv", playbackTraceId, "event=file-loaded duration=%d size=%dx%d path=%s", cachedDurationMs, videoSize.width, videoSize.height, MpvDiagnosticsPolicy.sourceSummary(currentPlayableUri));
                 addSubtitleConfigurations();
@@ -1959,6 +1960,9 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
             }
             case MPVLib.MpvEvent.MPV_EVENT_PLAYBACK_RESTART -> {
                 playbackRestarted = true;
+                if (config.deferStartupTrackRefresh()) {
+                    scheduleTrackRefresh("event=playback-restart");
+                }
                 if (currentLikelyHls) requestHlsPreload(cachedPositionMs);
                 updateVideoSize("event=playback-restart");
                 if (shouldCollectDebugDetails()) PlaybackTrace.log("mpv", playbackTraceId, "event=playback-restart position=%d duration=%d size=%dx%d", cachedPositionMs, cachedDurationMs, videoSize.width, videoSize.height);
@@ -3744,6 +3748,11 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
                             fileLoadedAtElapsedRealtimeMs,
                             SystemClock.elapsedRealtime()));
         }
+        if (config.deferStartupTrackRefresh() && !playbackRestarted) {
+            if (shouldCollectDebugDetails()) PlaybackTrace.log("mpv", playbackTraceId,
+                    "track refresh deferred until playback restart");
+            return;
+        }
         refreshTracks();
         invalidateState();
     }
@@ -3762,6 +3771,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
 
     private void refreshTracks() {
         if (trackRefreshScheduled) cancelScheduledTrackRefresh();
+        if (config.deferStartupTrackRefresh() && !playbackRestarted) return;
         if (!initialized) {
             currentTracks = Tracks.EMPTY;
             selectedVideoTrackDiagnostics = VideoTrackDiagnostics.empty();
