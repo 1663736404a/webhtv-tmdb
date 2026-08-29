@@ -112,3 +112,12 @@ Acceptance requires both ABI JNI builds, unchanged `libmpv.so`/FFmpeg/libplacebo
 - Logs: `/private/tmp/P4-1-mpv-jni-shutdown-device-20260829.log` and `/private/tmp/P4-1-mpv-jni-shutdown-verbose-20260829.log` (local validation artifacts, not committed).
 - Residual risk: device coverage is one Android 15 arm64 handset; armeabi-v7a is build/ELF verified but not device exercised. Forced process death cannot prove graceful JNI ordering by itself, so the decisive evidence is the separate graceful Back run with the native shutdown event.
 - Acceptance: satisfied for the approved P4-1 stage. Next action: run the final task-guard safety check, commit the task-owned source/binary/document changes atomically, and create the annotated recovery tag immediately.
+
+## Closure
+
+- Status: implemented and verified.
+- Implementation commit: `907bfca982a4b1d4d9ee0eeddd05d02226b8f9bb` (`fix(mpv): serialize JNI shutdown requests`).
+- Recovery tag: `recovery/P4-1-MPV-JNI-SHUTDOWN/20260829103212-907bfca982a4`.
+- Rollback: restore the implementation commit's first parent `052206a133640f209177cc84640931bdcf46926e`, or use the recovery tag to inspect/reapply the verified P4-1 state.
+- Remaining risk: no armeabi-v7a physical-device lifecycle run; both ABI binaries passed the native build and ELF/asset checks, and the arm64 Android 15 runtime matrix passed.
+- Next action: none for P4-1; select the next unfinished task from the master assessment in the required Exo -> MPV -> common order.
