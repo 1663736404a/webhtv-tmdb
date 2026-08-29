@@ -8,8 +8,8 @@
 - Protected dirty path: `AGENTS.md`; it remains outside the task commit.
 - Scope: MPV FFmpeg lock/provenance, both ARM native asset sets, required build documentation, this record, and the master assessment status.
 - Excluded: MPV/libplacebo/mpv-android revisions, Exo AARs, JNI source/API, C2 DV7-to-P8.1 activation, and unrelated App behavior.
-- Status: implementation and planned verification complete. Source lock, dual-ABI native rebuild/install, ELF/assets verification, arm64 APK assembly, and focused MPV device playback/lifecycle checks passed; atomic commit and recovery tag are the only remaining closure actions.
-- Next action: run the one combined final diff/guard check, then finish the task guard so it creates the atomic commit and annotated recovery tag.
+- Status: completed and closed in `9b7cf9cfbbeac00b0e5a342d4c6071c2c2d7a223`; recovery tag `recovery/C0-M-MPV-FFMPEG-9.0.1/20260829122948-9b7cf9cfbbea`.
+- Next action: keep C0-M closed. Handle the pre-existing no-Surface MediaCodec reinitialization during teardown as a separate lifecycle bug with its own task, scope, verification, commit, and rollback tag.
 
 ## 1. User-visible capability
 
@@ -79,6 +79,14 @@ Rollback is the baseline tag above or a revert of the atomic C0-M commit, restor
 - AAC, TrueHD, LPCM, and DTS TS were observed actively advancing. E-AC3 and DTS-HD MA loaded and configured successfully; their paused state came from the existing playback-history position rather than a decoder error.
 - The TS case continued playing after HOME moved the Activity into picture-in-picture. A command-driven fast-forward advanced the position from `81234 ms` to `87220 ms`, including about three seconds of expected playback progress during the observation window.
 - Stop/exit produced MPV `end-file` and `shutdown`. The crash buffer was empty, with no Java crash, SIGSEGV, or SIGABRT.
-- Remaining risk: during picture-in-picture teardown, FFmpeg logged `h264_mediacodec: Both surface and native_window are NULL` twice after the Surface had been destroyed. Normal `end-file`/`shutdown` followed, so this is recorded as a bounded teardown diagnostic rather than expanded into C0-M behavior work.
+- Remaining risk: during picture-in-picture teardown, the BufferQueue was abandoned and FFmpeg then logged `h264_mediacodec: Both surface and native_window are NULL` twice while creating decoder components that were immediately released. Source review shows `ff_mediacodec_surface_ref()` emits this error and returns `NULL` when decoder initialization has neither a Java `Surface` nor an `ANativeWindow`; it is not a normal unref message. The focused run had no port-starvation/decode-failure precursor and proceeded to `end-file`/`shutdown` without crash. The same message exists in pre-C0-M device logs, so it is a pre-existing teardown lifecycle race rather than a regression introduced by FFmpeg 9.0.1. It remains a separate bug because the unnecessary decoder initialization should be suppressed after Surface loss.
 - Existing unrelated warnings `Error parsing option http-allow-redirect` and `mpv_get_property(...demuxer-cache-state...) error` remain unchanged and are outside this dependency-only task.
 - Conclusion: C0-M meets the available-device release gate. MPV now independently uses the same FFmpeg 9.0.1 source revision as Exo while retaining its separate ABI namespace, build graph, renderer/decoder/audio policies, JNI binary, and rollback boundary.
+
+### 2026-08-29 12:34 CST — atomic implementation closure
+
+- Implementation commit: `9b7cf9cfbbeac00b0e5a342d4c6071c2c2d7a223` (`build(mpv): align FFmpeg with 9.0.1`).
+- Recovery tag: `recovery/C0-M-MPV-FFMPEG-9.0.1/20260829122948-9b7cf9cfbbea`; task guard created it immediately after the commit in 0 seconds.
+- Commit scope: the FFmpeg source lock/provenance update, both ARM ABI MPV/FFmpeg asset sets, build and user documentation, this task record, and the master assessment index. Protected pre-existing `AGENTS.md` was not staged or committed.
+- Verification recorded in the commit: prepare-only, one dual-ABI native build/install, ELF/assets validation, Mobile arm64 debug APK build and asset identity, plus V2453A MPV subtitle/audio/video playback, seek, picture-in-picture, stop/shutdown, and crash-buffer checks.
+- Rollback: revert `9b7cf9cfbbeac00b0e5a342d4c6071c2c2d7a223` or reset the complete C0-M-owned paths to the baseline tag `recovery/C0-M-MPV-FFMPEG-9.0.1/baseline-20260829105431-5f865d0dbdcc`; do not partially mix the old FFmpeg component libraries with the new `libmpv.so` graph.
