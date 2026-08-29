@@ -9,7 +9,7 @@
 - Scope: the MPV AudioTrack patch, Java carrier probe and unit tests, two ARM MPV asset directories, native build/verifier contracts, native build documentation, this record, and the assessment index.
 - Excluded: FFmpeg/libplacebo/mpv-android lock revisions, Exo/Media3, JNI source/API and `libplayer.so`, video/rendering/DV policy, unrelated audio formats, and broad passthrough redesign.
 - Rollback: revert the P3 commit or restore the baseline tag; native source patch, Java probe, tests, and both ABI assets must move together.
-- Current status: implementation, focused tests, two-ABI native build/ELF verification, Mobile arm64 APK build/install, and the available phone-speaker PCM fallback matrix passed. The active phone has no HDMI/eARC/USB passthrough route, so receiver bitstream identification and route hotplug remain residual validation rather than claimed results.
+- Current status: complete in implementation commit `d82336bde585b62af43771284075a0a94a3d999e` with recovery tag `recovery/P3/20260829094014-d82336bde585`. Focused tests, two-ABI native build/ELF verification, Mobile arm64 APK build/install, and the available phone-speaker PCM fallback matrix passed. The active phone has no HDMI/eARC/USB passthrough route, so receiver bitstream identification and route hotplug remain residual validation rather than claimed results.
 
 ## 1. User-visible capability
 
@@ -88,4 +88,11 @@ The main residual risk is vendor HAL behavior: a 7.1 IEC61937 mask may be reject
 - Pause/resume retained the DTS-HD MA 5.1 AudioTrack session `17689`; seek on DTS-HD MA 7.1 retained session `17697` and the `0x63f` format. Stable TrueHD session `18137` and E-AC3/Atmos session `18177` each created one AudioTrack for the item rather than entering a rebuild loop.
 - Final AudioFlinger evidence for session `18177` reports one active track at 48 kHz, mask `0x63f`, and `Underruns=0`. Final MediaSession remained `PLAYING`; logcat contained no App crash, ANR, fatal native signal, or AudioTrack initialization failure.
 - Residual matrix: no explicitly identified DTS-HD HRA fixture, no API 29/30 device, and no HDMI/ARC/eARC/USB route or route hotplug were available. The pure Java tests cover the HRA stereo-carrier rule; actual receiver format display and direct-playback failure fallback remain follow-up hardware validation and do not block the conservative phone fallback release.
-- Exactly one next action: close task guard `P3` with the recorded verification, commit the task-owned paths, and create the annotated recovery tag immediately.
+- Exactly one next action: keep P3 code frozen; when an HDMI/eARC/USB receiver route is available, run the remaining passthrough/HRA/hotplug hardware matrix and append only its evidence here.
+
+### Commit and rollback closure: 2026-08-29 09:40 CST
+
+- Atomic implementation commit: `d82336bde585b62af43771284075a0a94a3d999e` (`feat(mpv): support DTS-HD MA AudioTrack carriers`).
+- Annotated recovery tag: `recovery/P3/20260829094014-d82336bde585`; task guard created it immediately after the commit in 0 seconds.
+- The commit contains only the declared P3 Java/native patch/build/verifier/assets/tests/documentation paths. Pre-existing `AGENTS.md` remains uncommitted and protected; generated `app/.cxx/` was moved outside the worktree to `/private/tmp/p3-app-cxx-20260829/`.
+- Rollback is the commit revert or the recovery tag. The App probe, native patch, build markers, tests, and both ABI `libmpv.so` assets must roll back together; `libplayer.so`, dependency locks, Exo, FFmpeg, libplacebo, and mpv-android remain outside the rollback unit.

@@ -40,7 +40,7 @@
 | 15 | `P2-1` | MPV | Vulkan generic UV | **已实施并验证**：`fe4184933fbb3a02bd1ff2ff794a277123c35bdc` / `recovery/P2-1-MPV-VULKAN-GENERIC-UV/20260829003632-fe4184933fbb`；双 ABI、ELF、APK 资产身份及 compute/fragment/legacy/stable/auto 真机路径通过 | [P2-1-mpv-vulkan-generic-uv.md](P2-1-mpv-vulkan-generic-uv.md) |
 | 16 | `P2-5` | MPV | 非原生 DV5 自动选择 Vulkan/gpu-next | **已实施并验证**：V2453A 上自动切换至 `vulkan/gpu-next` + `hevc_mediacodec`，普通 HDR 新媒体项恢复 `opengl/gpu`；用户确认正常 | [P2-5-mpv-dv5-auto-vulkan.md](P2-5-mpv-dv5-auto-vulkan.md) |
 | 17 | `P2-2` | MPV | DV7 metadata/codecpar/error 完整性 | **已实施并验证**：`ba47756d7e463abeb9377088b819a2520e150935` / `recovery/P2-2-MPV-DV7-METADATA-CODECPAR/20260829065811-ba47756d7e46`；仅吸收 metadata-missing、`par_out`、错误传播和 `INT_MAX`，保留本地 packet/Surface/EL 安全契约 | [P2-2-mpv-dv7-metadata-codecpar.md](P2-2-mpv-dv7-metadata-codecpar.md) |
-| 18 | `P3` | MPV | AudioTrack 能力与直通 | **已实施并完成当前设备验证，待 commit/tag 收尾**：双 ABI、ELF、APK、API 35 手机端多声道 PCM fallback、pause/resume/seek 通过；HDMI/eARC/USB 原码直通仍需对应硬件 | [P3-mpv-audiotrack.md](P3-mpv-audiotrack.md) |
+| 18 | `P3` | MPV | AudioTrack 能力与直通 | **已完成**：`d82336bde585b62af43771284075a0a94a3d999e` / `recovery/P3/20260829094014-d82336bde585`；双 ABI、ELF、APK、API 35 手机端多声道 PCM fallback、pause/resume/seek 通过，HDMI/eARC/USB 原码直通留作硬件补验 | [P3-mpv-audiotrack.md](P3-mpv-audiotrack.md) |
 | 19 | `P4-1` | MPV | JNI shutdown/lifecycle | 待处理 | `docs/P4-1-mpv-jni-shutdown.md` |
 | 20 | `C0-M` | 通用/MPV 搭载 | MPV 使用 FFmpeg 9.0.1 同源 revision 独立重建 | E1 验证后随 MPV 候选处理 | `docs/C0-M-mpv-ffmpeg-9.0.1.md` |
 | 21 | `C2` | 通用 | FFmpeg DV7→P8.1 BSF | 暂缓；不自动启用 | `docs/C2-dv7-p81-bsf.md` |
@@ -4881,3 +4881,10 @@ C3 的触发来源主要是 media `990abc2368fd74779f525ee345734470659f3d53`（`
 - 实机证据：vivo `V2453A`、Android 15/API 35 上，DTS-HD MA 5.1/7.1、TrueHD 7.1、E-AC3/Atmos 7.1.4、AC3 5.1 和 LPCM 7.1 均进入播放；pause/resume 和 seek 保持对应 AudioTrack 会话，最终活动轨道 underruns 为 0，App PID 未变化，未出现 crash/ANR/native fatal/AudioTrack init failure。
 - 限制：当前输出设备是手机扬声器，只能证明多声道 PCM fallback 与生命周期稳定；DTS-HD HRA 实机、API 29/30、HDMI/ARC/eARC/USB 原码直通、AVR 格式显示和 route hotplug 仍需对应设备，不能由本轮结果代替。
 - 当前状态：P3 已达到当前可用设备的发布门槛，等待 task guard 原子提交和 annotated recovery tag；详细记录与回滚边界见 [P3-mpv-audiotrack.md](P3-mpv-audiotrack.md)。
+
+## 检查点 50：2026-08-29 P3 commit/tag 收尾完成
+
+- P3 原子实施提交：`d82336bde585b62af43771284075a0a94a3d999e`。
+- 恢复 tag：`recovery/P3/20260829094014-d82336bde585`，由 task guard 在提交成功后立即创建，tag 阶段耗时 0 秒。
+- 提交范围仅包含 P3 的 Java capability probe/单测、MPV AudioTrack patch、双 ABI `libmpv.so`、构建/验证契约和对应文档；`AGENTS.md` 保持为用户既有未提交改动，`libplayer.so`、locks、Exo、FFmpeg、libplacebo、mpv-android revision 均未改变。
+- 当前状态：P3 已完成并关闭。手机扬声器路由上的 PCM fallback 与生命周期验证通过；HDMI/ARC/eARC/USB 接收器上的 DTS-HD HRA/MA、TrueHD 原码显示和 route hotplug 仅作为后续硬件证据补充，不重新打开或扩大 P3 代码范围。
