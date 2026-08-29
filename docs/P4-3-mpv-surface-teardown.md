@@ -7,8 +7,8 @@
 - Baseline: branch `fongmi-sync`, HEAD `ea23c1dc163d29fe256ba623cc803285b3416491`; annotated rollback tag `recovery/P4-3-MPV-SURFACE-TEARDOWN-BASELINE/20260829125003-ea23c1dc163d`.
 - Protected dirty path: `AGENTS.md`; it remains outside this task.
 - Current evidence: C0-M device logcat, pre-C0-M device logs, current WebHTV Java/JNI flow, locked FFmpeg/mpv-android sources, Android SurfaceHolder documentation, and upstream mpv-android history.
-- Status: implementation and required verification passed; atomic commit and recovery tag are pending task-guard closure.
-- Next action: finish task guard `P4-3-MPV-SURFACE-TEARDOWN`, then immediately record its commit and recovery tag.
+- Status: complete. Implementation commit `8250e2204f4054601202a3a3f2fe04f8766744ee` passed the required verification and is anchored by `recovery/P4-3-MPV-SURFACE-TEARDOWN/20260829132806-8250e2204f40`.
+- Next action: no P4-3 work remains; continue the upstream assessment only after a separate user request.
 
 ## 1. User-visible capability
 
@@ -133,3 +133,5 @@ Verification on 2026-08-29:
 - Reopen: after the verified shutdown, a fresh process (`11128`, replacing `9808`) created media session `/1028`, resumed `VideoActivity`, and played the same input. This confirms terminal state is instance-local and does not block the next MPV context.
 
 Performance/compatibility result: no frame-path or native work was added. The only new checks run on Surface/OSD lifecycle and terminal release events; normal PiP/recreation retained playback, while terminal exit performed less decoder work. No observed compatibility, playback, performance, ABI, or package-size regression remains.
+
+Rollback: revert `8250e2204f4054601202a3a3f2fe04f8766744ee`, or restore the annotated tag `recovery/P4-3-MPV-SURFACE-TEARDOWN/20260829132806-8250e2204f40`. The rollback affects only the Java lifecycle policy/wiring, its focused unit test, and this task's documentation; P4-1 JNI and C0-M native assets remain unchanged.
