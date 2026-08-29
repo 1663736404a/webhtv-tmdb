@@ -4580,6 +4580,7 @@ public class PlayerManager implements ParseCallback {
         mpvAutoVulkanDisabledForItem = false;
         mpv.setSurfaceDirectOverride(null);
         mpv.setVulkanRenderOverride(null);
+        mpv.resetDv7HandlingForNewItem();
         rebuildAndRestartMpv(null, "performance-settings-changed");
     }
 
@@ -4646,6 +4647,7 @@ public class PlayerManager implements ParseCallback {
         resetMpvOutputEvaluationState();
         mpvExplicitSubtitlePreference = hasRequestedSubtitle(Track.find(getKey()));
         if (!(engine instanceof MpvPlayerEngine mpv)) return;
+        boolean dv7HandlingChanged = mpv.resetDv7HandlingForNewItem();
         boolean clearAutoVulkanRenderer = mpvAutoVulkanPinnedForItem;
         mpvAutoVulkanPinnedForItem = false;
         mpvAutoVulkanDisabledForItem = false;
@@ -4667,7 +4669,8 @@ public class PlayerManager implements ParseCallback {
         }
         boolean shouldStartDirect = MpvPerformanceSetting.shouldUseSurfaceDirect(
                 autoDirectEligible, Util.isLeanback(), engine.isHard());
-        if (mpv.isSurfaceDirect() == shouldStartDirect && !clearAutoVulkanRenderer) return;
+        if (mpv.isSurfaceDirect() == shouldStartDirect
+                && !clearAutoVulkanRenderer && !dv7HandlingChanged) return;
         if (SpiderDebug.isEnabled()) SpiderDebug.log("mpv-output", "prepare new item rebuild currentDirect=%s desiredDirect=%s clearAutoVulkan=%s mode=%s", mpv.isSurfaceDirect(), shouldStartDirect, clearAutoVulkanRenderer, MpvPerformanceSetting.getOutputModeText());
         mpv.setSurfaceDirectOverride(shouldStartDirect);
         rebuildPlayer();
@@ -4741,18 +4744,29 @@ public class PlayerManager implements ParseCallback {
         boolean subtitleActive = externalSubtitleActive || mpvExplicitSubtitlePreference;
         boolean lutOrFilterActive = videoEffectsActive || videoEffectsDirty || lutAllowed && LutSetting.isEnabled() || MpvPerformanceSetting.isInterpolation();
         boolean customGpuProcessing = MpvConfigStore.hasGpuVideoProcessing();
-        boolean forceNativeDv7 = isDv7NativeAttemptRequested();
         boolean dv7Hdr10FallbackEnabled = dolbyVision
                 && videoDetails.dolbyVisionProfile() == 7
-                && PlaybackPerformanceSetting.isDv7Hdr10FallbackEnabled();
+                && mpv.isDv7Hdr10Active();
         MpvAutoOutputPolicy.DolbyVisionSupport dolbyVisionSupport = dolbyVision
                 ? CodecCapabilityInspector.dolbyVisionSupport(
                 App.get(), videoDetails, format, width, height)
                 : MpvAutoOutputPolicy.DolbyVisionSupport.UNKNOWN;
-        MpvAutoOutputPolicy.Decision decision = forceNativeDv7
-                ? new MpvAutoOutputPolicy.Decision(true,
-                "dv7-native-attempt")
-                : MpvAutoOutputPolicy.evaluate(width, height, engine.isHard(),
+        MpvAutoOutputPolicy.DolbyVisionSupport profile81Support =
+                dolbyVision && videoDetails.dolbyVisionProfile() == 7
+                        && PlaybackPerformanceSetting.getMpvDv7HandlingMode()
+                        == PlaybackPerformanceSetting.DV7_HANDLING_P81
+                        ? CodecCapabilityInspector.dolbyVisionProfileSupport(
+                        App.get(), 8, videoDetails.dolbyVisionLevel(),
+                        videoDetails.sourceCodecs(), format, width, height)
+                        : MpvAutoOutputPolicy.DolbyVisionSupport.UNKNOWN;
+        boolean dv7HandlingChanged = dolbyVision
+                && videoDetails.dolbyVisionProfile() == 7
+                && mpv.updateDv7Handling(dolbyVisionSupport, profile81Support);
+        dv7Hdr10FallbackEnabled = dolbyVision
+                && videoDetails.dolbyVisionProfile() == 7
+                && mpv.isDv7Hdr10Active();
+        MpvAutoOutputPolicy.Decision decision = MpvAutoOutputPolicy.evaluate(
+                width, height, engine.isHard(),
                 Util.isLeanback(), lutOrFilterActive, customGpuProcessing,
                 dolbyVisionSupport,
                 dolbyVision ? videoDetails.dolbyVisionProfile() : C.INDEX_UNSET,
@@ -4780,11 +4794,19 @@ public class PlayerManager implements ParseCallback {
         boolean currentlyDirect = isMpvSurfaceDirect();
         MpvAutoOutputPolicy.Transition transition = MpvAutoOutputPolicy.transition(decision.eligible(), currentlyDirect);
         if (SpiderDebug.isEnabled()) SpiderDebug.log("mpv-output", "auto decision eligible=%s transition=%s reason=%s renderAction=%s renderReason=%s size=%dx%d tracksReady=%s early=%s subtitle=%s lutOrFilter=%s customGpu=%s dvProfile=%d dvSupport=%s direct=%s gpuPinned=%s autoVulkan=%s attempts=%d", decision.eligible(), transition, decision.reason(), renderDecision.action(), renderDecision.reason(), width, height, tracksReady, earlyEvaluation, subtitleActive, lutOrFilterActive, customGpuProcessing, dolbyVisionProfile, dolbyVisionSupport, currentlyDirect, mpvAutoGpuPinnedForSession, mpvAutoVulkanPinnedForItem, mpvAutoOutputProbeAttempts);
-        boolean transitionRequested = enableAutoVulkan
+        boolean transitionRequested = dv7HandlingChanged || enableAutoVulkan
                 || transition == MpvAutoOutputPolicy.Transition.ENTER_SURFACE_DIRECT
                 || transition == MpvAutoOutputPolicy.Transition.LEAVE_SURFACE_DIRECT;
         boolean requestAccepted = true;
-        if (enableAutoVulkan) {
+        if (dv7HandlingChanged) {
+            Boolean outputOverride = enableAutoVulkan
+                    || transition == MpvAutoOutputPolicy.Transition.LEAVE_SURFACE_DIRECT
+                    ? false
+                    : transition == MpvAutoOutputPolicy.Transition.ENTER_SURFACE_DIRECT
+                    ? true : null;
+            requestAccepted = rebuildAndRestartMpv(outputOverride,
+                    "auto-dv7-" + mpv.getDv7HandlingOption());
+        } else if (enableAutoVulkan) {
             requestAccepted = rebuildAndRestartMpv(false,
                     "auto-" + renderDecision.reason());
         } else if (transition == MpvAutoOutputPolicy.Transition.ENTER_SURFACE_DIRECT) {
@@ -4850,6 +4872,23 @@ public class PlayerManager implements ParseCallback {
         mpvAutoOutputEvaluationScheduled = false;
         mpvOutputEvaluationSeq++;
         if (!evaluateMpvAutoOutput()) scheduleMpvAutoOutputEvaluation();
+    }
+
+    private boolean retryMpvDv7P81Failure(PlaybackException error) {
+        if (error == null || !(engine instanceof MpvPlayerEngine mpv)
+                || !mpv.isDv7P81Active()) return false;
+        String message = error.getMessage();
+        boolean conversionOrDecodeFailure = error.errorCode
+                == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED
+                || error.errorCode == PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED
+                || error.errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED
+                || error.errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED
+                || message != null && (message.startsWith(MpvPlayer.ERROR_DECODE_FAILED)
+                || message.startsWith(MpvPlayer.ERROR_INVALID_MEDIA_DATA));
+        if (!conversionOrDecodeFailure || !mpv.prepareDv7P81Hdr10Fallback()) {
+            return false;
+        }
+        return rebuildAndRestartMpv(null, "dv7-p81-hdr10-fallback");
     }
 
     private boolean retryMpvSurfaceDirectFailure(PlaybackException error) {
@@ -4928,9 +4967,8 @@ public class PlayerManager implements ParseCallback {
     }
 
     private boolean isDv7NativeAttemptRequested() {
-        if (!isMpv() || engine == null || !engine.isHard()
-                || PlaybackPerformanceSetting
-                .isDv7Hdr10FallbackEnabled()) return false;
+        if (!isMpv() || !(engine instanceof MpvPlayerEngine mpv)
+                || !engine.isHard() || !mpv.isDv7NativeActive()) return false;
         PlayerEngine.VideoPlaybackDetails details =
                 engine.getVideoPlaybackDetails();
         return details != null && details.dolbyVisionProfile() == 7;
@@ -7417,6 +7455,7 @@ public class PlayerManager implements ParseCallback {
             publishPlaybackTelemetry(
                     PlaybackAutoContext.PlaybackPhase.ERROR, false);
             if (recoverMpvHlsVariantError()) return;
+            if (retryMpvDv7P81Failure(e)) return;
             if (retryMpvSurfaceDirectFailure(e)) return;
             if (retryMpvVulkanBackendFailure(e)) return;
             if (retryMpvAutoVulkanFailure(e)) return;

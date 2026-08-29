@@ -43,7 +43,7 @@
 | 18 | `P3` | MPV | AudioTrack 能力与直通 | **已完成**：`d82336bde585b62af43771284075a0a94a3d999e` / `recovery/P3/20260829094014-d82336bde585`；双 ABI、ELF、APK、API 35 手机端多声道 PCM fallback、pause/resume/seek 通过，HDMI/eARC/USB 原码直通留作硬件补验 | [P3-mpv-audiotrack.md](P3-mpv-audiotrack.md) |
 | 19 | `P4-1` | MPV | JNI shutdown/lifecycle | **已完成**：`907bfca982a4b1d4d9ee0eeddd05d02226b8f9bb` / `recovery/P4-1-MPV-JNI-SHUTDOWN/20260829103212-907bfca982a4` | `docs/P4-1-mpv-jni-shutdown.md` |
 | 20 | `C0-M` | 通用/MPV 搭载 | MPV 使用 FFmpeg 9.0.1 同源 revision 独立重建 | **已完成并关闭**：`9b7cf9cfbbeac00b0e5a342d4c6071c2c2d7a223` / `recovery/C0-M-MPV-FFMPEG-9.0.1/20260829122948-9b7cf9cfbbea`；双 ABI、ELF/资产、arm64 APK、多格式播放、快进、画中画和退出通过；退出期无 Surface 重初始化为升级前已存在的独立生命周期 bug | [C0-M-mpv-ffmpeg-9.0.1.md](C0-M-mpv-ffmpeg-9.0.1.md) |
-| 21 | `C2` | 通用 | FFmpeg DV7→P8.1 BSF | 暂缓；不自动启用 | `docs/C2-dv7-p81-bsf.md` |
+| 21 | `C2` | 通用 | FFmpeg DV7→P8.1 BSF | **实施中（显式 MPV P8.1，默认行为不变）** | [C2-dv7-p81-bsf.md](C2-dv7-p81-bsf.md) |
 | 22 | `C3` | 通用 | ISO multi-extent App resolver | **已随 `E7-2` 联合实施并通过 App 编译**：`5f7d834bfdd00f215609df7b41c2ea7cadc2cd4f` / `recovery/E7-2-C3/20260827193629-5f7d834bfdd0`；真实 split metadata 未验收 | [C3-iso-multi-extent-resolver.md](C3-iso-multi-extent-resolver.md) |
 | 23 | `E9-3` | Exo | DV5 MediaCodec + Vulkan/libplacebo GPU 映射 | **已实现并通过目标设备验收**：DV5 色彩映射稳定，DV5 -> DV7/HDR10 Surface 生命周期切换正常；最终提交 `6a3ddd266a94a6b984099876631cc6260e77b776` | [E9-3-exo-dv5-vulkan-renderer.md](E9-3-exo-dv5-vulkan-renderer.md) |
 | 24 | `P4-3` | MPV | 终止退出时抑制无 Surface 的 MediaCodec 重初始化 | **已实施并通过定向测试/真机验收**：`8250e2204f4054601202a3a3f2fe04f8766744ee` / `recovery/P4-3-MPV-SURFACE-TEARDOWN/20260829132806-8250e2204f40`；终止退出后不再创建一次性 decoder，PiP 返回和快速重开正常，不改 native/FFmpeg | [P4-3-mpv-surface-teardown.md](P4-3-mpv-surface-teardown.md) |
@@ -581,7 +581,7 @@ MMT/TLV（`054c8690e16b377eb1c6375c8751a44b8eb1d962`）、HLS discontinuity/live
 - MPV 目前通过 `mpv-dovi-profile7-hdr10-base-layer.patch` 的 demux 选项 `demuxer-dovi-profile7=hdr10` 清理 EL/RPU，再交给 MediaCodec base-layer decoder；FFmpeg bsf 可减少自定义 demux 代码，但还需要把 bsf 接入 MPV 的 load/demux 选项，并与本地 DV7 日志/失败回退保持一致。
 - 该提交只处理 HEVC packet，不自动解决 Android 输出 sink、HDR metadata 宣告、P8.1 硬件能力或 RPU 无效时的用户策略；不能因为“转换功能存在”就删除 Exo/MPV 现有 fallback。
 
-**建议：** C2 先保留为实验分支候选，不随 C0 默认启用。若后续决定统一 Exo/MPV DV7 转换，优先在 MPV B8 原型中用同一测试片比较“FFmpeg bsf”与现有 WebHTV patch 的输出、seek、错误和 HDR10 metadata，再考虑把 Exo 也切换到共用语义。
+**实施记录：** C2 已按用户批准在 MPV 独立阶段完成窄适配：保留原生 DV7 优先，仅提供默认“升级 P8.1”和“降级 HDR10”两态；P8.1 能力不成立、转换失败或运行时失败时自动回退 HDR10。来源为 FFmpeg `177f090e0503b7e013922ca903bde14b1c375f18`、MPV `cca559b41ceb0bb7731cf6ef2e1f33276cd30c42`、mpv-android `eabfaf9501fc08fb726953a9328da43ae4154d35`，任务记录见 `docs/C2-dv7-p81-bsf.md`。两个 ABI 资产校验、Mobile/Leanback arm64 Debug 构建和策略单测已通过；最终实机回归待设备重新连接后补测。Exo 仍保持独立实现，不切换为共用 FFmpeg BSF。
 
 ### 6.6 FFmpeg 阶段验证矩阵与回滚边界
 

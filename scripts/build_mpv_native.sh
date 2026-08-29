@@ -7,6 +7,7 @@ OVERRIDE_DIR="$ROOT/third_party/mpv-native-overrides"
 MPV_DISC_PATCH="$ROOT/third_party/patches/mpv-stream-cb-disc-controls.patch"
 MPV_DOVI_SURFACE_PATCH="$ROOT/third_party/patches/mpv-android-dovi-el-surface.patch"
 MPV_DOVI_HDR10_BL_PATCH="$ROOT/third_party/patches/mpv-dovi-profile7-hdr10-base-layer.patch"
+MPV_DOVI_P81_PATCH="$ROOT/third_party/patches/mpv-dovi-profile7-p81.patch"
 MPV_AUDIO_TRUEHD_PATCH="$ROOT/third_party/patches/mpv-audiotrack-truehd-channel-mask.patch"
 MPV_OPTIONAL_OSD_PATCH="$ROOT/third_party/patches/mpv-mediacodec-embed-optional-osd.patch"
 MPV_MEDIACODEC_TIMED_RELEASE_PATCH="$ROOT/third_party/patches/mpv-mediacodec-embed-timed-release.patch"
@@ -517,7 +518,16 @@ prepare_sources() {
   [ -f "$MPV_DOVI_HDR10_BL_PATCH" ] || die "missing MPV Dolby Vision Profile 7 HDR10 base-layer patch: $MPV_DOVI_HDR10_BL_PATCH"
   git -C "$deps/mpv" apply --check --recount "$MPV_DOVI_HDR10_BL_PATCH"
   git -C "$deps/mpv" apply --recount "$MPV_DOVI_HDR10_BL_PATCH"
-  grep -Fq '(!bl->codec->dv_el_present && !base_only)' "$deps/mpv/demux/dovi_split.c" || \
+  [ -f "$MPV_DOVI_P81_PATCH" ] || die "missing MPV Dolby Vision Profile 7 P8.1 patch: $MPV_DOVI_P81_PATCH"
+  git -C "$deps/mpv" apply --check --recount "$MPV_DOVI_P81_PATCH"
+  git -C "$deps/mpv" apply --recount "$MPV_DOVI_P81_PATCH"
+  grep -Fq 'av_bsf_get_by_name(filter_name)' "$deps/mpv/demux/dovi_split.c" || \
+    die "MPV Dolby Vision Profile 7 P8.1 BSF selection is absent"
+  grep -Fq 'DV7 P8.1 conversion: using FFmpeg dovi_rpu BSF.' "$deps/mpv/demux/dovi_split.c" || \
+    die "MPV Dolby Vision Profile 7 P8.1 conversion marker is absent"
+  grep -Fq '(!s->base_only && !s->convert_p81)' "$deps/mpv/demux/dovi_split.c" || \
+    die "MPV Dolby Vision Profile 7 P8.1 base-packet filter guard is absent"
+  grep -Fq '(!bl->codec->dv_el_present && !base_only && !convert_p81)' "$deps/mpv/demux/dovi_split.c" || \
     die "MPV Dolby Vision Profile 7 metadata-missing splitter guard is absent"
   grep -Fq 'MPSWAP(AVCodecParameters, *bl->codec->lav_codecpar, *filtered)' "$deps/mpv/demux/dovi_split.c" || \
     die "MPV Dolby Vision Profile 7 filtered codec parameters are not synchronized"
@@ -661,6 +671,7 @@ verify_directory() {
   grep -Fq "DV7 HDR10 fallback: stripping EL/RPU before decoder." <<<"$version_strings" || die "MPV Dolby Vision Profile 7 demux base-layer filter missing from $directory/libmpv.so"
   grep -Fq "DV7 HDR10 fallback: synchronized decoder parameters to the HDR10 base layer." <<<"$version_strings" || die "MPV Dolby Vision Profile 7 filtered codec-parameter sync missing from $directory/libmpv.so"
   grep -Fq "DV7 HDR10 fallback: failed to produce base-layer packet." <<<"$version_strings" || die "MPV Dolby Vision Profile 7 filter failure guard missing from $directory/libmpv.so"
+  grep -Fq "DV7 P8.1 conversion: using FFmpeg dovi_rpu BSF." <<<"$version_strings" || die "MPV Dolby Vision Profile 7 P8.1 conversion missing from $directory/libmpv.so"
   if grep -Fq "Using device native output sample rate for passthrough compatibility" <<<"$version_strings"; then
     die "obsolete MPV AudioTrack passthrough native-rate patch present in $directory/libmpv.so"
   fi
