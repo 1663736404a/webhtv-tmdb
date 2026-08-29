@@ -8,9 +8,9 @@
 - Lane/scope: MPV App adapter only. Allowed files are `MpvPlayer.java`, one package-private pause-intent policy and test, this document, and the master assessment index.
 - Baseline: branch `fongmi-sync`, HEAD `025f15ec4ac905059b468489df7f1ac5b03c683d`; rollback tag `recovery/P4-4-MPV-AUTOPLAY-PAUSE-RACE/baseline-20260829133913-025f15ec4ac9`.
 - Protected pre-existing dirty path: `AGENTS.md`; it is outside task scope and must not be staged or changed.
-- Current status: implementation and required verification complete; ready for atomic commit/tag.
+- Current status: complete. Implementation commit `e8a1582d74844df0292cb27c6c8259a3d5eb5dfa` passed the required verification and is anchored by `recovery/P4-4-MPV-AUTOPLAY-PAUSE-RACE/20260829135715-e8a1582d7484`.
 - Unresolved risk: a custom native mpv script that directly toggles `pause` is outside WebHTV's supported control path. Normal App, MediaSession, audio-focus, noisy-output, and user controls all enter through Media3 `setPlayWhenReady`.
-- Next action: finish the task guard so the verified task-owned changes are committed and tagged.
+- Next action: none for P4-4.
 
 ## Problem and reproduced evidence
 
@@ -125,6 +125,12 @@ Verification on 2026-08-29:
 
 Acceptance is satisfied for the reported defect and its direct state-transition neighbors. The existing user-confirmed click-to-resume behavior before the fix plus the focused delayed-unpause unit test cover preservation of deliberate pause/resume semantics; no broader renderer, codec, audio, network, or native matrix is warranted because those paths and artifacts did not change.
 
+Implementation commit: `e8a1582d74844df0292cb27c6c8259a3d5eb5dfa`.
+
+Recovery tag: `recovery/P4-4-MPV-AUTOPLAY-PAUSE-RACE/20260829135715-e8a1582d7484` (created immediately by task guard in 0 seconds).
+
+Rollback: revert `e8a1582d74844df0292cb27c6c8259a3d5eb5dfa`, or use the recovery tag to restore/inspect the verified P4-4 state. The baseline remains `recovery/P4-4-MPV-AUTOPLAY-PAUSE-RACE/baseline-20260829133913-025f15ec4ac9`.
+
 ## Checkpoint 1: verified candidate before commit
 
 - Completed: research, adapted policy implementation, focused unit test, mobile arm64 APK build, install, cold launch, and two rapid media replacements.
@@ -133,4 +139,4 @@ Acceptance is satisfied for the reported defect and its direct state-transition 
 - Task-owned files: `MpvPlayer.java`, `MpvPauseIntentPolicy.java`, `MpvPauseIntentPolicyTest.java`, this document, and the assessment index.
 - Rollback: baseline tag `recovery/P4-4-MPV-AUTOPLAY-PAUSE-RACE/baseline-20260829133913-025f15ec4ac9` or revert the forthcoming atomic implementation commit.
 - Unresolved: final hardware-specific pause/resume command was not rerun after the sample ended because the user accepted the result and requested closure; pure-policy coverage is conclusive for the changed contract.
-- Next action: run the final scoped safety/format checks, then task-guard finish and immediate annotated recovery tag.
+- Next action: none; P4-4 is committed, tagged, verified, and documented.
