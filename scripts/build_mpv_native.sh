@@ -525,9 +525,15 @@ prepare_sources() {
     die "MPV Dolby Vision Profile 7 enhancement-layer metadata is not cleared"
   grep -Fq 'bl_dp->len > INT_MAX' "$deps/mpv/demux/dovi_split.c" || \
     die "MPV Dolby Vision Profile 7 packet-size guard is absent"
-  [ -f "$MPV_AUDIO_TRUEHD_PATCH" ] || die "missing MPV AudioTrack TrueHD channel-mask patch: $MPV_AUDIO_TRUEHD_PATCH"
+  [ -f "$MPV_AUDIO_TRUEHD_PATCH" ] || die "missing MPV AudioTrack codec-aware channel-mask patch: $MPV_AUDIO_TRUEHD_PATCH"
   git -C "$deps/mpv" apply --check "$MPV_AUDIO_TRUEHD_PATCH"
   git -C "$deps/mpv" apply "$MPV_AUDIO_TRUEHD_PATCH"
+  grep -Fq 'ENTRY(BuildVersion)' "$deps/mpv/audio/out/ao_audiotrack.c" || \
+    die "MPV AudioTrack Android API mapping is absent"
+  grep -Fq 'BuildVersion.SDK_INT >= ANDROID_API_LEVEL_S &&' "$deps/mpv/audio/out/ao_audiotrack.c" || \
+    die "MPV AudioTrack Android 12 carrier gate is absent"
+  grep -Fq 'ao->channels.num == 8' "$deps/mpv/audio/out/ao_audiotrack.c" || \
+    die "MPV AudioTrack 8-channel carrier gate is absent"
   [ -f "$MPV_MEDIACODEC_TIMED_RELEASE_PATCH" ] || die "missing MPV MediaCodec timed-release patch: $MPV_MEDIACODEC_TIMED_RELEASE_PATCH"
   git -C "$deps/mpv" apply --check --recount "$MPV_MEDIACODEC_TIMED_RELEASE_PATCH"
   git -C "$deps/mpv" apply --recount "$MPV_MEDIACODEC_TIMED_RELEASE_PATCH"
@@ -659,6 +665,7 @@ verify_directory() {
     die "obsolete MPV AudioTrack passthrough native-rate patch present in $directory/libmpv.so"
   fi
   grep -Fq "Using 7.1 IEC61937 carrier mask for TrueHD" <<<"$version_strings" || die "MPV AudioTrack TrueHD channel-mask patch missing from $directory/libmpv.so"
+  grep -Fq "Using 7.1 IEC61937 carrier mask for Android 12+ 8-channel stream" <<<"$version_strings" || die "MPV AudioTrack DTS-HD MA channel-mask path missing from $directory/libmpv.so"
   grep -Fq "WebHTV direct output accepts an optional Android OSD Surface" <<<"$version_strings" || die "MPV optional direct-output OSD patch missing from $directory/libmpv.so"
   grep -Fq "WebHTV timestamped MediaCodec output enabled" <<<"$version_strings" || die "MPV MediaCodec timestamped-release patch missing from $directory/libmpv.so"
   grep -Fq "MediaCodec VO drop timing" <<<"$version_strings" || die "MPV MediaCodec output timing diagnostics missing from $directory/libmpv.so"

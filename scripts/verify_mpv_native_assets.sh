@@ -199,6 +199,7 @@ verify_abi() {
   reject_string "$directory/libmpv.so" "DV7 HDR10 fallback: preserving decoder input and stripping Dolby Vision frame metadata."
   reject_string "$directory/libmpv.so" "Using device native output sample rate for passthrough compatibility"
   contains_string "$directory/libmpv.so" "Using 7.1 IEC61937 carrier mask for TrueHD"
+  contains_string "$directory/libmpv.so" "Using 7.1 IEC61937 carrier mask for Android 12+ 8-channel stream"
   contains_string "$directory/libmpv.so" "WebHTV Vulkan auto backend prefers direct AHardwareBuffer sampling"
   contains_string "$directory/libmpv.so" "WebHTV Vulkan auto uses a queue-safe four-output bounded-fence pool"
   contains_string "$directory/libmpv.so" "CPU-precomputed UV transform"

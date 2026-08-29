@@ -25,7 +25,7 @@
 | 1 | `E1` | Exo | nextlib 内置 FFmpeg 升级至 9.0.1 | 已完成 | [E1-exo-ffmpeg-9.0.1.md](E1-exo-ffmpeg-9.0.1.md) |
 | 2 | `E2-2` | Exo | DV7→P8.1 codec/CSD 一致性 | 已实施 | [E2-2-exo-dv7-p81-csd.md](E2-2-exo-dv7-p81-csd.md) |
 | 3 | `E-SP1` | Exo 性能 | 首帧已渲染时立即解除遮罩 | 已完成 | [E-SP1-exo-first-frame-visible.md](E-SP1-exo-first-frame-visible.md) |
-| 4 | `E-SP2` | Exo 性能 | 远程大 MKV 延后 Cues、首次 seek 按需建索引 | 候选已实现，待实机性能/seek 验收 | [E-SP2-exo-remote-mkv-deferred-cues.md](E-SP2-exo-remote-mkv-deferred-cues.md) |
+| 4 | `E-SP2` | Exo 性能 | 远程大 MKV 延后 Cues、首次 seek 按需建索引 | **已完成**：`2156c74749a575b747d2f043419a5d47b485c0cf` / `recovery/E-SP2-CHAINED-SEEKHEAD/20260829004352-2156c74749a5`；双产品 arm64、连续 seek 和实机验证通过 | [E-SP2-exo-remote-mkv-deferred-cues.md](E-SP2-exo-remote-mkv-deferred-cues.md) |
 | 5 | `E-SP3` | Exo 性能/生命周期 | seek 预载隔离、HLS 预缓存崩溃防护和 seek 恢复门槛 | **已合入 `fongmi-sync`**：App `17f1a4cfe2547b8f3ddc61fab34212e77ae719ff`，Media3 `c9d3bd912b90ec0ca440c28455f3e6d9bba019ea` | [E-SP3-exo-seek-preload-isolation.md](E-SP3-exo-seek-preload-isolation.md) |
 | 6 | `E2-1` | Exo | HDR/Dolby Vision parser safety | **已完成** | [E2-1-exo-hdr-parser-safety.md](E2-1-exo-hdr-parser-safety.md) |
 | 6 | `E3-1a` | Exo | Pixel E-AC3 JOC capability guard | 已实施：`cda1ac8cf2f5d4d9c3beec68b0b520d6f7c218ec` / `recovery/E3-1a/20260826175658-cda1ac8cf2f5` | [E3-1a-exo-pixel-eac3-joc-guard.md](E3-1a-exo-pixel-eac3-joc-guard.md) |
@@ -40,7 +40,7 @@
 | 15 | `P2-1` | MPV | Vulkan generic UV | **已实施并验证**：`fe4184933fbb3a02bd1ff2ff794a277123c35bdc` / `recovery/P2-1-MPV-VULKAN-GENERIC-UV/20260829003632-fe4184933fbb`；双 ABI、ELF、APK 资产身份及 compute/fragment/legacy/stable/auto 真机路径通过 | [P2-1-mpv-vulkan-generic-uv.md](P2-1-mpv-vulkan-generic-uv.md) |
 | 16 | `P2-5` | MPV | 非原生 DV5 自动选择 Vulkan/gpu-next | **已实施并验证**：V2453A 上自动切换至 `vulkan/gpu-next` + `hevc_mediacodec`，普通 HDR 新媒体项恢复 `opengl/gpu`；用户确认正常 | [P2-5-mpv-dv5-auto-vulkan.md](P2-5-mpv-dv5-auto-vulkan.md) |
 | 17 | `P2-2` | MPV | DV7 metadata/codecpar/error 完整性 | **已实施并验证**：`ba47756d7e463abeb9377088b819a2520e150935` / `recovery/P2-2-MPV-DV7-METADATA-CODECPAR/20260829065811-ba47756d7e46`；仅吸收 metadata-missing、`par_out`、错误传播和 `INT_MAX`，保留本地 packet/Surface/EL 安全契约 | [P2-2-mpv-dv7-metadata-codecpar.md](P2-2-mpv-dv7-metadata-codecpar.md) |
-| 18 | `P3` | MPV | AudioTrack 能力与直通 | 待处理 | `docs/P3-mpv-audiotrack.md` |
+| 18 | `P3` | MPV | AudioTrack 能力与直通 | **已实施并完成当前设备验证，待 commit/tag 收尾**：双 ABI、ELF、APK、API 35 手机端多声道 PCM fallback、pause/resume/seek 通过；HDMI/eARC/USB 原码直通仍需对应硬件 | [P3-mpv-audiotrack.md](P3-mpv-audiotrack.md) |
 | 19 | `P4-1` | MPV | JNI shutdown/lifecycle | 待处理 | `docs/P4-1-mpv-jni-shutdown.md` |
 | 20 | `C0-M` | 通用/MPV 搭载 | MPV 使用 FFmpeg 9.0.1 同源 revision 独立重建 | E1 验证后随 MPV 候选处理 | `docs/C0-M-mpv-ffmpeg-9.0.1.md` |
 | 21 | `C2` | 通用 | FFmpeg DV7→P8.1 BSF | 暂缓；不自动启用 | `docs/C2-dv7-p81-bsf.md` |
@@ -4872,3 +4872,12 @@ C3 的触发来源主要是 media `990abc2368fd74779f525ee345734470659f3d53`（`
 - 恢复 tag：`recovery/P2-2-MPV-DV7-METADATA-CODECPAR/20260829065811-ba47756d7e46`，在提交成功后立即创建，tag 阶段耗时 0 秒。
 - 通过证据：双 ABI native build/install、`verify_mpv_native_assets.sh --require-elf`、Mobile arm64 Debug APK `8c3f1d569d5b325d1e577a5a77d196c800c167159d76f313adc2c3bb02049a4c`、APK asset identity、USB V2453A 安装/启动，以及用户确认的 DV7 与邻接播放验证。
 - 任务状态：P2-2 已完成并关闭；不改变任何 lock、FFmpeg/libplacebo/mpv-android revision、JNI API、`libplayer.so` 或 Android EL 策略。下一 MPV 阶段为 P3，需单独评估/批准。
+
+## 检查点 49：2026-08-29 P3 AudioTrack 实施与当前设备验收
+
+- P3-2 已按批准的窄适配完成：保留锁定树的 carrier rate、本地全 API TrueHD 7.1 workaround 和 PCM fallback，只为 Android 12+ 的 DTS-HD MA 8-channel carrier 增加 7.1 mask，并让 App probe 与 native 使用一致的 rate/mask 条件。
+- 构建证据：Java 定向单测、完整 patch-stack `--prepare-only`、双 ABI native build/install、`verify_mpv_native_assets.sh --require-elf` 和 Mobile arm64 Debug APK 均通过；APK SHA-256 为 `ad57a1d453281f21921f5898724966aae61aab5c8574537c7729afbc82da39b8`。
+- 资产证据：`libmpv.so` SHA-256 为 `04cfe3ae40118ec77b988323791925b67014b7dda33fdbe54848db8ff219c9a5`（arm64）和 `d13da6308db9c6d1757a8c71928284efd83e9de82a14e5465293fc297ab2cc75`（armv7）；两个 `libplayer.so` Git blob 与基线 HEAD 一致，lock/JNI/Exo/FFmpeg/libplacebo/mpv-android revision 均未改变。
+- 实机证据：vivo `V2453A`、Android 15/API 35 上，DTS-HD MA 5.1/7.1、TrueHD 7.1、E-AC3/Atmos 7.1.4、AC3 5.1 和 LPCM 7.1 均进入播放；pause/resume 和 seek 保持对应 AudioTrack 会话，最终活动轨道 underruns 为 0，App PID 未变化，未出现 crash/ANR/native fatal/AudioTrack init failure。
+- 限制：当前输出设备是手机扬声器，只能证明多声道 PCM fallback 与生命周期稳定；DTS-HD HRA 实机、API 29/30、HDMI/ARC/eARC/USB 原码直通、AVR 格式显示和 route hotplug 仍需对应设备，不能由本轮结果代替。
+- 当前状态：P3 已达到当前可用设备的发布门槛，等待 task guard 原子提交和 annotated recovery tag；详细记录与回滚边界见 [P3-mpv-audiotrack.md](P3-mpv-audiotrack.md)。
