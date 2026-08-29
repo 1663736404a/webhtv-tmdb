@@ -105,3 +105,13 @@ P8.1 仅对 HEVC、Profile 7、存在有效 RPU+BL 配置记录的轨道生效�
 - C2 原子提交：`ae337b81e44657d85050bee3a9f92a780fb418ab`（`mpv: complete DV7 to P8.1 fallback integration`）。
 - 恢复 tag：`recovery/C2-DV7-P81-BSF/20260829200055-ae337b81e446`。
 - 状态：实现、静态验证、native 资产验证、双端 arm64 包构建和策略单测已完成；实机验证因设备离线保留为明确剩余风险。回滚锚点为 `upstream/mpv/c2-dv7-p81-bsf-baseline-20260829`。
+
+### 2026-08-29 20:41 CST：电视端 P8.1 启动卡死证据与修复决策
+
+- TCL Smart TV Pro（Android 14/API 34，MT9655，arm64-v8a）使用 MPV、自动模式、硬解、默认“升级 P8.1”播放 `/storage/emulated/0/Download/P7_FEL_GIJoe_The_Rise_of_Cobra.mkv` 时复现卡死。
+- 直接证据：`/private/tmp/c2-tv-card-freeze-latest.log` 中 `20:41:16.858` 起主线程 watchdog 连续报告 `native=get-string:current-tracks/sub2/id`，耗时增长到 31 秒；栈固定为 `MpvPlayer.refreshTracks -> syncOsdSurfaceRequirementFromMpv -> MPVLib.getPropertyString`。没有 Java/native 崩溃或 MediaCodec fatal error。
+- 结论：`refreshTracks()` 在主线程无条件读取字幕 current-track；本次样片启动期间 MPV core 正忙于 P8.1 demux/BSF 工作，`current-tracks/sub2/id` 的同步读取把内部等待放大成 UI 卡死。该属性不是播放必需状态，且 direct output 默认 `sid=no`、`secondary-sid=no` 时无需读取。
+- 采用窄修复：新增 `MpvOsdSurfacePolicy.needsCurrentTrackQuery()`；两个字幕选择都明确禁用时直接关闭 OSD 请求并跳过 current-track 查询；`auto`、已选字幕和未知选择仍查询真实 current-track。`secondarySubtitleTrackId()` 同步遵循该规则，避免 debug/轨道快照再次触发同一阻塞。
+- 不修改 `dovi_rpu`、FFmpeg lock、MPV native 资产、解码器/渲染器选择或字幕菜单数据流；因此不增加包体积，不改变正常播放帧路径，回滚为本阶段单个 Java/测试提交。
+- 当前验收状态：策略单测和 Mobile arm64 Java 编译均通过；Leanback arm64 Debug APK 已构建（156,646,041 bytes，SHA-256 `74f3d70d9ccb5ab8edd09ead456706d661020f752d2a267cab23c91b9b6a7d0e`）。电视 ADB（`192.168.1.5:5555`）仍返回 `Connection refused`，所以 P7 FEL 自动模式实机回归尚未宣称通过。
+- 待设备上线后的最小验收：同一 P7 FEL 样片自动模式不再出现主线程 `current-tracks/sub2/id` 长时间阻塞；普通 P5/DV5、字幕 `auto`/已选路径保持可播放；日志无 Java/native crash、ANR 或 decoder fatal error。

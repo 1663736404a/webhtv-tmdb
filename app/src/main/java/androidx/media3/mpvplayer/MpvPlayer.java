@@ -2352,13 +2352,22 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
 
     private void syncOsdSurfaceRequirementFromMpv() {
         if (!initialized) return;
+        boolean subtitlesVisible = booleanProperty("sub-visibility", true);
+        String primarySelection = propertyStringOrInt("sid");
+        String secondarySelection = propertyStringOrInt("secondary-sid");
+        if (!MpvOsdSurfacePolicy.needsCurrentTrackQuery(
+                subtitlesVisible, primarySelection, secondarySelection)) {
+            setOsdSurfaceRequested(false);
+            return;
+        }
+        String primaryCurrent = isDisabledTrackChoice(primarySelection)
+                ? "" : currentTrackId(C.TRACK_TYPE_TEXT);
+        String secondaryCurrent = isDisabledTrackChoice(secondarySelection)
+                ? "" : propertyStringOrInt("current-tracks/sub2/id");
         boolean requested = requiresOsdSurface()
                 && MpvOsdSurfacePolicy.requiresSurface(
-                booleanProperty("sub-visibility", true),
-                currentTrackId(C.TRACK_TYPE_TEXT),
-                propertyStringOrInt("sid"),
-                propertyStringOrInt("current-tracks/sub2/id"),
-                propertyStringOrInt("secondary-sid"));
+                subtitlesVisible, primaryCurrent, primarySelection,
+                secondaryCurrent, secondarySelection);
         setOsdSurfaceRequested(requested);
     }
 
@@ -3986,17 +3995,23 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
 
     private void logTrackSnapshot(List<TrackInfo> infos, String selectedVideo, String selectedAudio, String selectedText, Tracks tracks) {
         if (!shouldCollectDebugDetails()) return;
+        String rawVid = propertyStringOrInt("vid");
+        String rawAid = propertyStringOrInt("aid");
+        String rawSid = propertyStringOrInt("sid");
+        String rawSecondarySid = propertyStringOrInt("secondary-sid");
         StringBuilder builder = new StringBuilder();
         builder.append("tracks snapshot ");
         builder.append("vid=").append(selectedVideo).append(" aid=").append(selectedAudio).append(" sid=").append(selectedText);
-        builder.append(" rawVid=").append(propertyStringOrInt("vid"));
-        builder.append(" rawAid=").append(propertyStringOrInt("aid"));
-        builder.append(" rawSid=").append(propertyStringOrInt("sid"));
-        builder.append(" secondarySid=").append(secondarySubtitleTrackId());
+        builder.append(" rawVid=").append(rawVid);
+        builder.append(" rawAid=").append(rawAid);
+        builder.append(" rawSid=").append(rawSid);
+        builder.append(" secondarySid=").append(rawSecondarySid);
         builder.append(" currentVideo=").append(propertyStringOrInt("current-tracks/video/id"));
         builder.append(" currentAudio=").append(propertyStringOrInt("current-tracks/audio/id"));
-        builder.append(" currentSub=").append(propertyStringOrInt("current-tracks/sub/id"));
-        builder.append(" currentSub2=").append(propertyStringOrInt("current-tracks/sub2/id"));
+        builder.append(" currentSub=").append(isDisabledTrackChoice(rawSid)
+                ? rawSid : propertyStringOrInt("current-tracks/sub/id"));
+        builder.append(" currentSub2=").append(isDisabledTrackChoice(rawSecondarySid)
+                ? rawSecondarySid : propertyStringOrInt("current-tracks/sub2/id"));
         builder.append(" size=").append(videoSize.width).append("x").append(videoSize.height);
         builder.append(" width=").append(intProperty("width", C.LENGTH_UNSET));
         builder.append(" height=").append(intProperty("height", C.LENGTH_UNSET));
@@ -4068,10 +4083,12 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     }
 
     private String selectedTrackId(int type) {
-        String currentTrackId = currentTrackId(type);
-        if (!TextUtils.isEmpty(currentTrackId)) return currentTrackId;
         String property = mpvTrackProperty(type);
-        return property == null ? "" : propertyStringOrInt(property);
+        if (property == null) return "";
+        String selected = propertyStringOrInt(property);
+        if (isDisabledTrackChoice(selected)) return selected;
+        String current = currentTrackId(type);
+        return !TextUtils.isEmpty(current) ? current : selected;
     }
 
     private String currentTrackId(int type) {
@@ -4085,9 +4102,11 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     }
 
     private String secondarySubtitleTrackId() {
+        String selected = propertyStringOrInt("secondary-sid");
+        if (isDisabledTrackChoice(selected)) return selected;
         String current = propertyStringOrInt("current-tracks/sub2/id");
         if (!TextUtils.isEmpty(current)) return current;
-        return propertyStringOrInt("secondary-sid");
+        return selected;
     }
 
     private String propertyStringOrInt(String property) {
