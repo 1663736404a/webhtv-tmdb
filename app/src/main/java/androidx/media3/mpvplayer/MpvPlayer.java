@@ -179,6 +179,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     private final File subtitleDiagnosticFile;
     private final File preloadCacheDir;
     private final long preloadCacheCapacityBytes;
+    private final MpvSurfaceTeardownPolicy surfaceTeardownPolicy;
     private MediaItem mediaItem;
     private SurfaceHolder surfaceHolder;
     private SurfaceHolder osdSurfaceHolder;
@@ -346,6 +347,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
                 config.demuxerHysteresisSeconds());
         seekPositionState = new MpvSeekPositionState();
         mediaReplacementCoordinator = new MpvMediaReplacementCoordinator();
+        surfaceTeardownPolicy = new MpvSurfaceTeardownPolicy();
         stateRefreshRunnable = this::refreshPlaybackState;
         mainThreadHeartbeatPending = new AtomicBoolean();
         mainThreadHeartbeatRunnable = () -> {
@@ -562,6 +564,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
 
     @Override
     protected ListenableFuture<?> handleRelease() {
+        prepareTerminalRelease();
         released = true;
         startMainThreadWatchdog();
         videoSizeProbeListener = null;
@@ -650,6 +653,12 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         subtitlePosition = position;
         applySubtitleStyle();
         invalidateState();
+    }
+
+    public void prepareTerminalRelease() {
+        if (surfaceTeardownPolicy.requestTerminalRelease()) {
+            SpiderDebug.log("mpv", "terminal Surface release requested player=%s", identity(this));
+        }
     }
 
     public String getAudioSpdifCodecs() {
@@ -2354,7 +2363,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     }
 
     private void reconcileOsdSurface() {
-        if (!initialized) return;
+        if (!initialized || !surfaceTeardownPolicy.shouldBindSurface()) return;
         if (osdSurfaceRequested) createOsdSurfaceView();
         if (pendingOsdSurfaceRequestId != 0) return;
 
@@ -2430,7 +2439,8 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     }
 
     private void bindVideoOutput() {
-        if (!initialized || surface == null || !surface.isValid()) return;
+        if (!initialized || !surfaceTeardownPolicy.shouldBindSurface()
+                || surface == null || !surface.isValid()) return;
         try {
             boolean sameVideoSurface = surfaceAttached && attachedSurface == surface;
             String targetVo = videoOutputVo();
@@ -2483,6 +2493,10 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         if (!initialized) return;
         if (!surfaceAttached && !osdSurfaceAttached
                 && pendingOsdSurfaceRequestId == 0) return;
+        if (!surfaceTeardownPolicy.shouldDetachSurface()) {
+            clearMpvSurfaceAttachmentState();
+            return;
+        }
         try {
             enqueueMpvCommand("set", "vo", "null");
             enqueueMpvCommand("set", "force-window", "no");
@@ -2492,6 +2506,10 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
             if (surfaceAttached) mpvDetachSurface();
         } catch (Throwable ignored) {
         }
+        clearMpvSurfaceAttachmentState();
+    }
+
+    private void clearMpvSurfaceAttachmentState() {
         surfaceAttached = false;
         osdSurfaceAttached = false;
         pendingOsdSurfaceRequestId = 0;

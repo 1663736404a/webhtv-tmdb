@@ -339,6 +339,7 @@ public class PlayerManager implements ParseCallback {
     public void release() {
         prepareSeq++;
         lutApplySeq++;
+        prepareTerminalRelease();
         resetNetworkProtectionSession("release");
         clearExoDecoderResourceRecovery(true);
         player.removeListener(listener);
@@ -381,6 +382,10 @@ public class PlayerManager implements ParseCallback {
         playbackBufferingTracker.reset();
         playbackTrace.clear();
         lastLoggedRouteTraceId = PlaybackTrace.NONE;
+    }
+
+    public void prepareTerminalRelease() {
+        if (engine instanceof MpvPlayerEngine mpv) mpv.prepareTerminalRelease();
     }
 
     private boolean experimentAllowed(PlaybackExperimentPolicy.Action action) {

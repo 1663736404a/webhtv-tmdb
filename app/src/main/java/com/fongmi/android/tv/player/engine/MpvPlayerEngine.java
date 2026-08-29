@@ -77,6 +77,10 @@ public class MpvPlayerEngine implements PlayerEngine {
         player.release();
     }
 
+    public void prepareTerminalRelease() {
+        player.prepareTerminalRelease();
+    }
+
     @Override
     public Player rebuild(Player.Listener listener) {
         player.release();

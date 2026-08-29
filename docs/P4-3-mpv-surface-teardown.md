@@ -3,12 +3,12 @@
 ## Recovery anchor
 
 - Objective: prevent MPV from starting disposable MediaCodec decoders after the Android video Surface has been destroyed during terminal playback exit, while preserving normal picture-in-picture, background/foreground, configuration change, decoder switch, and Surface recreation behavior.
-- Lane: assessment only. The user requested this bug be fixed separately after C0-M closure on 2026-08-29; runtime implementation still waits for approval of the concrete design below.
-- Baseline: branch `fongmi-sync`, HEAD `8e942a2b868dd2352b5c1e49db078e040a05528e`.
+- Lane: approved `upstream` implementation. The user approved the narrow terminal-release signal on 2026-08-29 with explicit preservation of existing behavior and performance.
+- Baseline: branch `fongmi-sync`, HEAD `ea23c1dc163d29fe256ba623cc803285b3416491`; annotated rollback tag `recovery/P4-3-MPV-SURFACE-TEARDOWN-BASELINE/20260829125003-ea23c1dc163d`.
 - Protected dirty path: `AGENTS.md`; it remains outside this task.
 - Current evidence: C0-M device logcat, pre-C0-M device logs, current WebHTV Java/JNI flow, locked FFmpeg/mpv-android sources, Android SurfaceHolder documentation, and upstream mpv-android history.
-- Status: decision-ready assessment. Recommendation is the narrow WebHTV terminal-release signal in section 6.
-- Next action: obtain explicit implementation approval, then create the baseline recovery tag and start one `upstream` task guard scoped only to the approved Java policy/service/player files, focused test, this document, and the assessment index.
+- Status: implementation and required verification passed; atomic commit and recovery tag are pending task-guard closure.
+- Next action: finish task guard `P4-3-MPV-SURFACE-TEARDOWN`, then immediately record its commit and recovery tag.
 
 ## 1. User-visible capability
 
@@ -111,4 +111,25 @@ Rollback is a revert of the one atomic P4-3 commit and its App-only Java/test/do
 
 Recommendation: **implement** the narrow terminal-release signal. Do not patch FFmpeg, change global `surfaceDestroyed()` semantics, add sleeps, or rebuild native libraries.
 
-User decision: pending explicit approval of this recorded design.
+User decision: **approved for implementation** on 2026-08-29. Scope remains the Java-only terminal-release signal recorded above; native/FFmpeg changes and unrelated lifecycle refactors remain unapproved.
+
+## 10. Implementation and verification
+
+Implemented the approved Java-only design:
+
+- `PlaybackService.shutdown()` and service destruction synchronously prepare terminal release before stopping or releasing the player.
+- `PlayerManager` forwards the signal only to `MpvPlayerEngine`; Exo and IJK behavior is unchanged.
+- `MpvPlayer` uses an instance-local, idempotent `MpvSurfaceTeardownPolicy`. Normal Surface loss keeps attach/detach enabled; terminal release blocks new video/OSD attachment and skips teardown commands that can reconfigure video after Surface destruction.
+- Existing P4-1 native context destruction remains the sole final owner of JNI Surface-reference cleanup. No FFmpeg, mpv, JNI, native asset, renderer, decoder, ABI, or package dependency changed.
+
+Verification on 2026-08-29:
+
+- Focused test and App build passed in one corrected Gradle invocation: `bash ./gradlew :app:testMobileArm64_v8aDebugUnitTest --tests androidx.media3.mpvplayer.MpvSurfaceTeardownPolicyTest :app:assembleMobileArm64_v8aDebug --no-daemon`; `BUILD SUCCESSFUL in 3m 48s`, 112 tasks, 11 executed. The first attempted invocation used the nonexistent flavor spelling `Arm64` rather than `Arm64_v8a` and did not execute tests or compilation.
+- APK: `app/build/outputs/apk/mobileArm64_v8a/debug/app-mobile-arm64_v8a-debug.apk`, 162,651,210 bytes, SHA-256 `42bef6007367653686ca301ad6791519a3efde54d20a025b7bbaa84d07ec2d07`.
+- Install: OEM installer-assist completed successfully on vivo V2453A (`10CF6H1D2L0009S`, Android 15); installed package remained version `5.6.0`, code `560`, `arm64-v8a`.
+- Representative input: `/storage/emulated/0/Download/声道测试/LPCM7.1原盘文件.m2ts`, using MPV (`player=2`) and `c2.qti.avc.decoder`.
+- Transient lifecycle: HOME entered a real pinned task while media remained `PLAYING`; position advanced from 39.294 s to 42.323 s during the observed PiP interval and continued beyond 165 s. A compact rerun restored the same `VideoActivity` to `RESUMED` through its existing media-notification `PendingIntent`; playback remained `PLAYING` at 16.954 s.
+- Terminal lifecycle: normal BACK returned to `HomeActivity`; MPV emitted `end-file` at `13:17:01.614` and `shutdown` at `13:17:02.175`. The only `c2.qti.avc.decoder` creation in that run was initial playback startup at `13:15:01.079`; there was no decoder creation after terminal Surface teardown, no `Both surface and native_window are NULL`, and no Java/native crash, ANR, fatal signal, or destroyed-mutex report.
+- Reopen: after the verified shutdown, a fresh process (`11128`, replacing `9808`) created media session `/1028`, resumed `VideoActivity`, and played the same input. This confirms terminal state is instance-local and does not block the next MPV context.
+
+Performance/compatibility result: no frame-path or native work was added. The only new checks run on Surface/OSD lifecycle and terminal release events; normal PiP/recreation retained playback, while terminal exit performed less decoder work. No observed compatibility, playback, performance, ABI, or package-size regression remains.
