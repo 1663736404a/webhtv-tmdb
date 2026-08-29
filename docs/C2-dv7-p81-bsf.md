@@ -7,7 +7,7 @@
 - 基线：`fongmi-sync` @ `5e90c2ed76830f5c45988d8597d14ffd599dba34`；恢复 tag：`upstream/mpv/c2-dv7-p81-bsf-baseline-20260829`。
 - 保护 dirty 路径：无。
 - 验收：patch 可按当前锁定 MPV 树应用；Java 编译通过；两 ABI native 产物/ELF/资产校验通过；原生 DV7、P8.1、HDR10、seek/flush/换源和失败回退有证据。
-- 当前状态：原生 P8.1 已由用户在 TCL MT9655 电视确认可正常播放；DV7 FEL 转换后的 P8.1 仍会在该设备无首帧并卡住。窄修复已完成：启动期延后可能阻塞的轨道查询，超时无首帧时只回退一次 HDR10。
+- 当前状态：原生 P8.1 已由用户在 TCL MT9655 电视确认可正常播放；DV7 FEL 转换后的 P8.1 仍会在该设备无首帧并卡住。窄修复已完成：启动期延后可能阻塞的轨道/章节查询，超时无首帧时只回退一次 HDR10。
 - 已完成：创建 baseline tag；完成 C2 patch、两态 UI、原生 DV7 优先、P8.1 能力门和 HDR10 自动回退；修复 P8.1 packet/CSD 不一致黑屏；两个 ABI native/ELF/资产校验、Mobile/Leanback arm64 Debug 构建和策略单测均通过。
 - 未完成：本阶段提交和恢复 tag；电视实机回归仍受 ADB 离线限制。
 - 下一动作：由 task guard 原子提交并创建恢复 tag；设备重新上线后仅补做一次 DV7 自动模式回退验证。
@@ -132,3 +132,13 @@ P8.1 仅对 HEVC、Profile 7、存在有效 RPU+BL 配置记录的轨道生效�
 - Java 编译：`bash ./gradlew :app:compileMobileArm64_v8aDebugJavaWithJavac --no-daemon` 通过，耗时 2 分钟。
 - 电视包：`bash ./gradlew :app:assembleLeanbackArm64_v8aDebug --no-daemon` 通过，产物 `app/build/outputs/apk/leanbackArm64_v8a/debug/app-leanback-arm64_v8a-debug.apk`，大小 156646041 bytes，SHA-256 `e801f04e9e57baa3a537eb542b1b4a5b69f7e1c59993ac89dac4c56c6ff1379e`。
 - 环境限制：`adb devices -l` 当前无在线设备，未宣称电视实机回归通过；原生 P8.1 正常是用户实测事实，转换 P8.1 的设备接受度仍需在设备上线后验证。
+
+### 2026-08-30 00:24 CST：电视再次复现与章节查询门控
+
+- 电视日志快照：`/private/tmp/c2-tv-live-full.txt`。TCL MT9655、MPV 自动模式、硬解、默认升级 P8.1 播放同一 P7 FEL 文件时，`FILE_LOADED` 后主线程 watchdog 从 `00:04:09.725` 开始报告 `native=get-string:chapter-list`，随后持续到 `00:04:35.333`，最长 `27113ms`。
+- 调用栈固定为 `MpvPlayer.refreshChapters -> stringProperty("chapter-list") -> MPVLib.getPropertyString`；这证明上一轮只延后 `track-list/*` 仍不足，`FILE_LOADED` 的同步章节读取才是当前卡死触发点。`chapter`/`chapter-list` 属性事件和手动刷新入口也可能在同一启动窗口触发同步读取。
+- 窄修复：P8.1 启动窗口内统一跳过 `refreshChapters()`、`handleChapterListProperty()` 及对应属性事件；首次 `PLAYBACK_RESTART` 后由既有延迟轨道刷新任务补做一次章节刷新。普通 MPV 会话、原生 DV7、直接 HDR10 和字幕/章节在首帧后的路径不变。
+- 未修改 FFmpeg/MPV native、`dovi_rpu`、Vulkan、解码器、Surface 或默认策略；无新增依赖和包体积变化。
+- 验证：`bash ./gradlew :app:testMobileArm64_v8aDebugUnitTest --tests androidx.media3.mpvplayer.MpvTrackRefreshPolicyTest --tests com.fongmi.android.tv.player.engine.MpvDolbyVisionFallbackPolicyTest :app:compileMobileArm64_v8aDebugJavaWithJavac --no-daemon` 通过（57 秒）；`git diff --check` 通过。
+- 设备限制：本次读取时 `http://192.168.1.5:9978/debug/logs.txt` 暂不可连接，电视 ADB 仍离线；因此只记录日志根因和静态/编译验证，不宣称电视实机回归已通过。
+- 当前状态：代码和文档待 task guard 原子提交及恢复 tag；提交后设备重新上线仅需复测同一 DV7 自动模式，确认不再出现 `chapter-list` 长时间 JNI 阻塞。

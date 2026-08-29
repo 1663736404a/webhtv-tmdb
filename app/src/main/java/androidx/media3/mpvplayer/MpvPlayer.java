@@ -1742,9 +1742,11 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
             case "vid", "aid", "sid", "secondary-sid", "sub-visibility", "current-tracks/video/id", "current-tracks/audio/id", "current-tracks/sub/id", "current-tracks/sub2/id" -> scheduleTrackRefresh(property);
             case "chapter" -> {
                 if (value instanceof Number number) currentChapter = number.intValue();
-                refreshChapters();
+                if (!shouldDeferStartupMetadataRefresh()) refreshChapters();
             }
-            case "chapter-list" -> handleChapterListProperty(value);
+            case "chapter-list" -> {
+                if (!shouldDeferStartupMetadataRefresh()) handleChapterListProperty(value);
+            }
             default -> {
             }
         }
@@ -1933,9 +1935,12 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
                 playbackState = Player.STATE_BUFFERING;
                 loading = true;
                 updateVideoSize("event=file-loaded");
-                if (config.deferStartupTrackRefresh()) scheduleTrackRefresh("event=file-loaded");
-                else refreshTracks();
-                refreshChapters();
+                if (config.deferStartupTrackRefresh()) {
+                    scheduleTrackRefresh("event=file-loaded");
+                } else {
+                    refreshTracks();
+                    refreshChapters();
+                }
                 if (shouldCollectDebugDetails()) PlaybackTrace.log("mpv", playbackTraceId, "event=file-loaded duration=%d size=%dx%d path=%s", cachedDurationMs, videoSize.width, videoSize.height, MpvDiagnosticsPolicy.sourceSummary(currentPlayableUri));
                 addSubtitleConfigurations();
                 if (initialSeekPositionMs != C.TIME_UNSET) {
@@ -3754,6 +3759,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
             return;
         }
         refreshTracks();
+        if (config.deferStartupTrackRefresh()) refreshChapters();
         invalidateState();
     }
 
@@ -3936,7 +3942,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     }
 
     private void refreshChapters() {
-        if (released || !initialized) return;
+        if (released || !initialized || shouldDeferStartupMetadataRefresh()) return;
         currentChapter = intProperty("chapter", currentChapter);
         List<MediaEdition> chapters = parseChapters(stringProperty("chapter-list", ""));
         if (chapters.isEmpty()) chapters = readChaptersFromProperties();
@@ -3944,9 +3950,14 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     }
 
     private void handleChapterListProperty(@Nullable Object value) {
+        if (shouldDeferStartupMetadataRefresh()) return;
         List<MediaEdition> chapters = value instanceof String string ? parseChapters(string) : List.of();
         if (chapters.isEmpty()) chapters = readChaptersFromProperties();
         updateCurrentChapters(chapters);
+    }
+
+    private boolean shouldDeferStartupMetadataRefresh() {
+        return config.deferStartupTrackRefresh() && !playbackRestarted;
     }
 
     private void updateCurrentChapters(List<MediaEdition> chapters) {
