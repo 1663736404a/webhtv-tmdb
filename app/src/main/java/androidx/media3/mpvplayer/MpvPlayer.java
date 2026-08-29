@@ -1655,9 +1655,21 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
             case "demuxer-cache-state/bof-cached" -> cachedCacheBof = Boolean.TRUE.equals(value);
             case "demuxer-cache-state/eof-cached" -> cachedCacheEof = Boolean.TRUE.equals(value);
             case "pause" -> {
-                if (value instanceof Boolean paused && playWhenReady == paused) {
-                    playWhenReady = !paused;
-                    stateChanged = true;
+                if (value instanceof Boolean paused) {
+                    boolean activeMedia = fileLoaded
+                            && !stopping
+                            && !eofReached
+                            && playbackState != Player.STATE_IDLE
+                            && playbackState != Player.STATE_ENDED;
+                    MpvPauseIntentPolicy.Action action = MpvPauseIntentPolicy.resolve(
+                            playWhenReady, paused, activeMedia);
+                    if (action == MpvPauseIntentPolicy.Action.REASSERT_REQUESTED_STATE) {
+                        boolean requestedPaused = !playWhenReady;
+                        PlaybackTrace.log("mpv", playbackTraceId,
+                                "pause intent reconcile observed=%s requested=%s state=%d",
+                                paused, requestedPaused, playbackState);
+                        safeSetPropertyBoolean("pause", requestedPaused);
+                    }
                 }
             }
             case "paused-for-cache" -> {
