@@ -7,10 +7,10 @@
 - 基线：`fongmi-sync` @ `5e90c2ed76830f5c45988d8597d14ffd599dba34`；恢复 tag：`upstream/mpv/c2-dv7-p81-bsf-baseline-20260829`。
 - 保护 dirty 路径：无。
 - 验收：patch 可按当前锁定 MPV 树应用；Java 编译通过；两 ABI native 产物/ELF/资产校验通过；原生 DV7、P8.1、HDR10、seek/flush/换源和失败回退有证据。
-- 当前状态：原生 P8.1 已由用户在 TCL MT9655 电视确认可正常播放；DV7 FEL 转换后的 P8.1 仍会在该设备无首帧并卡住。窄修复已完成：启动期延后可能阻塞的轨道/章节查询，超时无首帧时只回退一次 HDR10。
+- 当前状态：原生 P8.1 已由用户在 TCL MT9655 电视确认可正常播放；DV7 FEL 转换后的 P8.1 仍会在该设备无首帧并卡住。日志已确认 MediaCodec 先零输出并进入 released 状态，主线程同步属性查询阻塞是后续放大点；重复 RPU 与 RPU NAL 顺序假设均已由离线 packet 对照否定。
 - 已完成：创建 baseline tag；完成 C2 patch、两态 UI、原生 DV7 优先、P8.1 能力门和 HDR10 自动回退；修复 P8.1 packet/CSD 不一致黑屏；两个 ABI native/ELF/资产校验、Mobile/Leanback arm64 Debug 构建和策略单测均通过。
 - 已完成：章节查询门控修复已原子提交并创建恢复 tag；电视实机回归仍受 ADB 离线限制。
-- 下一动作：设备重新上线后仅补做一次 DV7 自动模式回退验证；若日志仍出现其他启动期同步 MPV 属性阻塞，再以新的证据单独开修复单元。
+- 下一动作：在 C2 P8.1 的 `par_out` 中只删除转换后已失效的 `AV_PKT_DATA_HEVC_CONF`，重建 Leanback arm64 包并用同一 P7 FEL 样片做一次单变量实机验证；若仍无首帧，立即否定该假设并转向 FEL RPU 重写兼容性。
 
 ## 决策与来源
 
@@ -148,3 +148,32 @@ P8.1 仅对 HEVC、Profile 7、存在有效 RPU+BL 配置记录的轨道生效�
 - 原子代码提交：`a83fe86baa245f58c1f5143584c1a5ceaa348530`（`fix(mpv): defer startup chapter metadata for DV7 P8.1`）。
 - 恢复 tag：`recovery/C2-DV7-P81-BSF/20260830003041-a83fe86baa24`。
 - 验证记录：C2 定向单测、Mobile arm64 Java 编译和 `git diff --check` 已在提交前通过；未重复执行构建。电视端仍无 ADB/live 日志连接，实机回归保留为唯一剩余风险。
+
+### 2026-08-30 06:36 CST：native 失败链、离线码流对照与上游复核
+
+- 复现 `p-de6eo9-1` 的顺序已收敛：`dovi_rpu` 转换包持续送入 MediaCodec，但没有视频输出；FFmpeg 的 packet-property 队列达到 256 条后丢弃，随后出现 `Pending dequeue input buffer request cancelled`、`Invalid to call at Released state` 和 `hevc_mediacodec: Failed to dequeue output buffer`。主线程之后才阻塞于 `demuxer-cache-state/reader-pts`，最长超过 145 秒，因此同步属性查询不是码流失败根因，但会阻止 15 秒 HDR10 回退任务执行。
+- 离线样片 `/private/tmp/c2-p7-full.mkv` 的 27--30 秒区间与转换结果 `/private/tmp/c2-p81-27s.mkv` 已逐 packet 解析：原始 72 个 packet 和转换后 62 个 packet 都恰好包含一个 type-62 RPU；转换后 type-63 EL NAL 为 0。重复 RPU 假设被否定。
+- 电视上已验证正常的原生 P8.1 样片 `P81_GlassBlowing2_3840x2160@59_94fps_15200kbps.mkv` 前 57 个 packet 与转换结果都把 RPU 放在 VCL 之后，因此 RPU NAL 顺序假设也被否定。
+- 转换结果的 codec side data 仍含 `AV_PKT_DATA_HEVC_CONF`，而其 DOVI config 已是 `profile=8, el_present=0`；FFmpeg 自带 `dovi_split` 在删除 EL 后会明确移除该 side data。该输出元数据不一致需要后续修正评估，但当前 MediaCodec 初始化代码只直接读取 `AV_PKT_DATA_DOVI_CONF`，所以尚不能把残留 `HEVC_CONF` 宣称为零输出根因。
+- `FongMi/FFmpeg` 当前 `release-9.0-fongmi` 头为 `5e6ba5e987284d8ecb6dc25d2d3fd45d309f3fdd`。其 P7->P8.1 提交 `86b827daa9401f781f8660ea511a2cae0baa2833` 与锁定 `177f090e0503b7e013922ca903bde14b1c375f18` 的 stable patch-id 均为 `c3e9cba49f8bbe3c1d0ea7ab15868198b75d18bd`，`dovi_rpu.c/.h` 最终行为无差异；新头只以 `5e6ba5e987284d8ecb6dc25d2d3fd45d309f3fdd` 公开 RPU parser API，没有修复 BSF 输出或 Android MediaCodec 零输出。
+- `FongMi/mpv` 当前 `fongmi` 头为 `f70b385f57ad930a298f8b54e0199ce17c4f4ad3`，分支已强制重落基。近期相关提交 `c318236b8882af860f16f936225430ad053a2179` 只在独立 enhancement-layer stream 被标记 absent 时解除 BL/EL pairing；`e8673660ab7ee5d4ea8f93e4bf3a6e170ab2a19a` 只保留 GPU peak-detection HDR metadata，均不触及当前 `dovi_rpu` 到 Dolby MediaCodec 的初始化和零输出链。
+- `FongMi/mpv-android` 当前 `fongmi` 头为 `e1a1f75106afefa6fb3ec9aa6c9ca081155486dd`；该唯一新提交只导出 libplacebo/shaderc renderer SDK 与来源清单，没有 JNI、MediaCodec、Surface 或播放行为变更。
+- 最小下一步不是修改 native，而是只在 C2 P8.1 会话把 mpv 的 `ffmpeg` 与 `ffmpeg/video` 日志提升到 info。锁定 FFmpeg 已存在 `Dolby Vision profile %u detected` 与 `MediaCodec started successfully: codec = %s` 两条初始化日志；一次复现即可区分“错误 MIME/profile/codec 选择”和“正确 Dolby codec 收到转换流后拒绝输出”。普通 MPV 会话继续使用 `all=warn`，无播放路径、性能或包体积变化。
+- 诊断包已通过 `:app:assembleLeanbackArm64_v8aDebug`，构建耗时 2 分 16 秒；APK 为 `app/build/outputs/apk/leanbackArm64_v8a/debug/app-leanback-arm64_v8a-debug.apk`，大小 156646041 bytes，SHA-256 `e7bf658078a0ad059373d84c1b20ea274737b16539259908b117838df7436235`。06:44 之后观测到的新播放走的是 Exo 而非 MPV，尚未产生本诊断包的 codec 初始化证据；下一动作保持为安装该包并用 MPV 复现同一 P7 FEL 一次。
+
+### 2026-08-30 07:01 CST：最新 MPV 复现与日志接收门槛
+
+- 完整快照为 `/private/tmp/c2-tv-latest-repro.txt`，最新有效 MPV trace 为 `p-dg4unu-1`。日志记录 `requested=opengl`，但自动模式最终为 `direct=true`、`actual=surface/mediacodec_embed`；因此本次不是 OpenGL GPU renderer 卡死，界面中的请求模式不能代替实际输出路径。
+- `06:49:04` 已收到 `FILE_LOADED`；`06:49:05.106` 起连续出现 `Dropping unmatched MediaCodec packet properties`，`06:49:05.482` 首次出现 `Invalid to call at Uninitialized state`，随后 `hevc_mediacodec: Failed to dequeue output buffer`。全程没有首帧。`reader-pts` 同步读取约 3 秒后才开始阻塞，并从约 46 ms 增长到 40 秒以上，继续证明解码器失败在先、Java 属性阻塞在后。
+- P8.1 会话的 `msg-level=all=warn,ffmpeg=info,ffmpeg/video=info` 已生效到 mpv client 请求链；未看到 `Dolby Vision profile %u detected` 的直接原因是 `MpvPlayer.shouldDebugLogMpvLine()` 没有放行该文本。`MediaCodec started successfully: codec = %s` 本应因包含 `codec` 被现有筛选放行，但本次没有出现，说明 MediaCodec 尚未成功启动，不能再按“已启动后零输出”描述本次状态。
+- 四个遗留轮询曾同时每 1--2 秒下载约 5 MB 完整日志，已停止并改为单个 8 秒轮询，避免调试服务负载干扰复现。该清理不改变 App 或电视播放配置。
+- 已把 `androidx/media3/mpvplayer/MpvPlayer.java` 纳入本诊断单元，只放行 `Dolby Vision profile` 初始化行；`bash ./gradlew :app:assembleLeanbackArm64_v8aDebug --no-daemon` 通过，用时 1 分 54 秒。APK 为 `app/build/outputs/apk/leanbackArm64_v8a/debug/app-leanback-arm64_v8a-debug.apk`，大小 156646041 bytes，SHA-256 `08a48bf18b7a27f284897952191f1a806970a568463a927dbe3f1cd0ae1d78e0`。
+- 唯一下一动作：在电视安装该诊断包并用 MPV 自动模式复现同一 P7 FEL 一次，从单个后台轮询采集最终 profile/codec 证据；在该证据前，仍不修改 BSF、CSD、硬解、Surface、OpenGL/Vulkan、默认策略或上游 lock。
+
+### 2026-08-30 07:32 CST：厂商 Dolby decoder 释放顺序确认
+
+- 本次完整日志已冻结为 `/private/tmp/c2-tv-user-repro-20260830.txt`，有效 MPV trace 为 `p-dhezv2-1`，播放文件为 `/storage/emulated/0/Download/P7_FEL_GIJoe_The_Rise_of_Cobra.mkv`。
+- 自动模式实际为 `direct=true`、`surface/mediacodec_embed`。`07:24:56.408` FFmpeg 识别转换结果为 Dolby Vision profile 8；`07:24:56.421` 厂商 decoder `c2.mtk.dvhe.st.decoder` 启动成功，排除错误 MIME、错误 profile、错误 decoder 和 OpenGL/Vulkan 选择。
+- 全程没有首帧。`07:24:57.716` 起连续出现 `Dropping unmatched MediaCodec packet properties`；`07:24:58.027` 出现 `Pending dequeue input buffer request cancelled`，随后 codec 已处于 `Released`，再出现 `hevc_mediacodec: Failed to dequeue output buffer`。主线程之后才阻塞于 `demuxer-cache-state/reader-pts`，最长超过 130 秒，因此 JNI 查询是卡死放大点，不是 decoder 释放的起因。
+- 诊断日志已完成使命，临时 P8.1 FFmpeg verbose 配置与 Java 文本放行不进入生产修复。当前单变量假设是：`dovi_rpu convert=p81` 删除 EL 并改写 DOVI config 后仍保留表示增强层配置的 `AV_PKT_DATA_HEVC_CONF`；FFmpeg 自带 `dovi_split` 对同类输出明确删除该 side data，并注明输出端已失效。
+- 下一动作：只在 P8.1 转换的 `par_out` 删除 `AV_PKT_DATA_HEVC_CONF`；不改变 RPU 内容、extradata、packet、codec/MIME、Surface、GPU、Java 回退和其他播放模式。验收是同一文件产生首帧且不再进入厂商 decoder `Released`；失败则立即撤销该假设。

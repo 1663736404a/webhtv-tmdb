@@ -4890,3 +4890,18 @@ C3 的触发来源主要是 media `990abc2368fd74779f525ee345734470659f3d53`（`
 - 恢复 tag：`recovery/P3/20260829094014-d82336bde585`，由 task guard 在提交成功后立即创建，tag 阶段耗时 0 秒。
 - 提交范围仅包含 P3 的 Java capability probe/单测、MPV AudioTrack patch、双 ABI `libmpv.so`、构建/验证契约和对应文档；`AGENTS.md` 保持为用户既有未提交改动，`libplayer.so`、locks、Exo、FFmpeg、libplacebo、mpv-android revision 均未改变。
 - 当前状态：P3 已完成并关闭。手机扬声器路由上的 PCM fallback 与生命周期验证通过；HDMI/ARC/eARC/USB 接收器上的 DTS-HD HRA/MA、TrueHD 原码显示和 route hotplug 仅作为后续硬件证据补充，不重新打开或扩大 P3 代码范围。
+
+## 检查点 51：2026-08-30 C2 转换 P8.1 零输出与上游复核
+
+- 当前电视证据表明 C2 的失败顺序是 MediaCodec 零输出/释放在先、Java 主线程同步属性阻塞在后；`reader-pts`、`chapter-list` 和 `current-tracks` 只会放大 native 失败并阻止定时回退，不能作为码流根因。
+- 离线 packet 对照已否定重复 RPU 与 RPU NAL 顺序假设：P7 原始区间和转换 P8.1 每个 packet 均只有一个 RPU，转换输出已删除 EL；正常原生 P8.1 与转换 P8.1 的 RPU 都位于 VCL 之后。详细样片、数量和日志路径见 [C2-dv7-p81-bsf.md](C2-dv7-p81-bsf.md)。
+- `FongMi/FFmpeg` 的重落基提交 `86b827daa9401f781f8660ea511a2cae0baa2833` 与锁定 `177f090e0503b7e013922ca903bde14b1c375f18` patch-id 相同；当前头 `5e6ba5e987284d8ecb6dc25d2d3fd45d309f3fdd` 仅公开 RPU parser，没有本故障修复，处置为“不升级、不移植”。
+- `FongMi/mpv` 的 `c318236b8882af860f16f936225430ad053a2179` 处理缺失独立 EL stream 的 pairing，`e8673660ab7ee5d4ea8f93e4bf3a6e170ab2a19a` 处理 GPU peak-detection metadata；`FongMi/mpv-android` 的 `e1a1f75106afefa6fb3ec9aa6c9ca081155486dd` 只导出 renderer SDK。三项均不覆盖 C2 转换流到 Dolby MediaCodec 的零输出，处置为“本故障忽略，按各自任务另行评估”。
+- 最新 MPV trace `p-dg4unu-1` 显示自动模式实际为 `surface/mediacodec_embed`，不是 OpenGL GPU；`FILE_LOADED` 后 MediaCodec 先进入 `Uninitialized` 并无法 dequeue output，约 3 秒后 `reader-pts` 才开始长时间阻塞。P8.1 info 日志已请求，但 Java 筛选遗漏 `Dolby Vision profile`，而本应放行的 `MediaCodec started successfully` 没有出现。
+- C2 下一步只放行一次 P8.1 Dolby profile 初始化诊断，采集最终 profile 与厂商 codec 结果；在该证据前不修改锁定版本、BSF、CSD、硬解、Surface、Vulkan/OpenGL 或回退策略。
+
+## 检查点 52：2026-08-30 C2 厂商 Dolby decoder 释放顺序确认
+
+- 最新有效 trace `p-dhezv2-1` 已确认转换结果被识别为 Dolby Vision profile 8，且 `c2.mtk.dvhe.st.decoder` 启动成功；厂商 decoder 在无首帧时主动进入 `Released`，随后才出现 output dequeue 失败和主线程 `reader-pts` 长时间阻塞。
+- 因此错误 renderer、错误 MIME/profile/codec 和 Java 同步查询均不再作为码流首因。完整证据与时间线见 [C2-dv7-p81-bsf.md](C2-dv7-p81-bsf.md)。
+- 下一单元只验证转换输出残留的 `AV_PKT_DATA_HEVC_CONF`：该 side data 表示已被删除的增强层配置，FFmpeg 自带 `dovi_split` 在输出端会明确删除。验证不得同时改变 RPU、extradata、packet、Surface、GPU、解码器选择或回退策略；若电视仍无首帧，则否定该假设并转向 FEL RPU 重写兼容性。
