@@ -100,12 +100,17 @@ public class MpvPlayerEngine implements PlayerEngine {
     public void prepareSubtitleSurfaceForNewItem(boolean requested) {
         initialSubtitleSurfaceRequested = requested;
         player.setInitialOsdSurfaceRequested(requested);
+        player.setInitialTrackSelectionGateRequested(requested);
     }
 
     public void retainSubtitleSurfaceForCurrentItem() {
         if (initialSubtitleSurfaceRequested) return;
         initialSubtitleSurfaceRequested = true;
         player.setInitialOsdSurfaceRequested(true);
+    }
+
+    public void completeInitialSubtitleTrackRestore() {
+        player.releaseInitialTrackSelectionGate();
     }
 
     @Override
@@ -784,6 +789,8 @@ public class MpvPlayerEngine implements PlayerEngine {
     private MpvPlayer buildPlayer(Player.Listener listener) {
         MpvPlayer player = new MpvPlayer(App.get(), buildConfig());
         player.setInitialOsdSurfaceRequested(initialSubtitleSurfaceRequested);
+        player.setInitialTrackSelectionGateRequested(
+                initialSubtitleSurfaceRequested);
         if (PlaybackPerformanceSetting.isAuto(
                 PlayerSetting.MPV,
                 PlaybackPerformanceCatalog.PRELOAD)) {

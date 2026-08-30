@@ -7456,6 +7456,9 @@ public class PlayerManager implements ParseCallback {
             if (!tracks.isEmpty() && !initTrack) {
                 playbackTrace.mark(PlaybackTrace.Stage.TRACKS, trackSummary(tracks));
                 restoreTrackSelection(Track.find(getKey()));
+                if (engine instanceof MpvPlayerEngine mpv) {
+                    mpv.completeInitialSubtitleTrackRestore();
+                }
                 callback.onTracksChanged();
                 initTrack = true;
             }
