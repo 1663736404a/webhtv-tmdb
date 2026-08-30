@@ -9,8 +9,8 @@
 - Protected pre-existing dirty paths: `app/.cxx/` and all paths recorded by the task guard.
 - Acceptance: GitHub discovery remains available; download routes are `auto`, `github`, and `oci`; `auto` tries OCI then GitHub; OCI verifies manifest and layer digests, APK identity and signer; progress, cancel, fallback, and mobile/leanback settings work.
 - Rollback anchor: baseline commit above. Published clients can be moved back to GitHub by omitting the `downloads.oci` object from a later update manifest.
-- Current status: implementation and targeted verification complete; pending atomic commit and local recovery tag.
-- Next action: finish task guard with the recorded verification evidence.
+- Current status: implementation committed locally; Docker Hub repository and GitHub Actions configuration complete; remote branch publication remains unauthorized.
+- Next action: after explicit authorization, push the `dev` branch and its OCI recovery tag so GitHub can run the updated release workflow.
 
 ## Product decision
 
@@ -196,3 +196,16 @@ Device checks:
 - Rollback: revert the atomic task commit or omit `downloads.oci` from update JSON. Legacy GitHub fields remain sufficient for older and rolled-back clients.
 - Unresolved: live authenticated OCI publishing and device behavior require repository credentials plus a reachable test device; neither blocks the source-controlled beta-capable implementation.
 - Next action: run the final scoped diff/safety check, then create the atomic commit and annotated local recovery tag.
+
+## Deployment checkpoint 2: 2026-08-31 01:39 CST
+
+- Local implementation: commit `d4508dd30ece874c3595df6a80498c861c06f7b0`; annotated recovery tag `recovery/OCI1-oci-apk-update/20260831012035-d4508dd30ece`.
+- Device evidence: the current mobile ARM64 debug APK was installed on vivo `V2453A`, launched into `HomeActivity`, and reported version `5.6.0` / code `560` with no app crash or ANR in the focused startup log. Live OCI download remains untested because no release artifact has been published yet.
+- Docker Hub: created the dedicated public repository `2011820123/webhtv-apk`. The existing `2011820123/tvbox` repository was deliberately left unchanged because it contains an unrelated TVBox tool image and historical tags.
+- Credential validation: ORAS 1.3.4 successfully authenticated to Docker Hub using a temporary registry config outside the repository. The PAT value was never written to a tracked file or documentation.
+- GitHub Actions configuration: repository secrets `OCI_USERNAME` and `OCI_TOKEN` are configured for `fish2018/webhtv`; Actions variable `OCI_REPOSITORY` is `2011820123/webhtv-apk`. Secret values are not readable through the repository API.
+- Workflow decision: no follow-up YAML change is required. `.github/workflows/android-release.yml` already defaults `publish_oci` to `true`, installs ORAS 1.3.4, pushes every collected release APK, verifies manifest descriptors, and emits OCI metadata only after a successful verified push.
+- Remote state: as observed at this checkpoint, `origin/main` remains `332f8b26c89e69d19f287b1d911a780826149619` and no `origin/dev` branch exists. Therefore GitHub cannot use the OCI workflow until the local implementation branch is explicitly authorized for push.
+- Security follow-up: the Docker Hub PAT was supplied in chat. Rotate it in Docker Hub after this setup, then replace only the `OCI_TOKEN` Actions secret; no code change is required.
+- Rollback: delete the three GitHub Actions settings and optionally delete the still-empty `webhtv-apk` Docker Hub repository. Existing GitHub release publication remains independent.
+- Next action: obtain explicit authorization to push `dev` and the recovery tag; then run the release workflow from that branch.
