@@ -242,6 +242,7 @@ public class PlayerManager implements ParseCallback {
     private boolean hardDecodeSwitchRetryArmed;
     private boolean lutAllowed = true;
     private boolean mpvAutoOutputEvaluated;
+    private boolean mpvAutoOutputFrameReady;
     private boolean mpvAutoOutputEvaluationScheduled;
     private boolean mpvExplicitSubtitlePreference;
     private boolean mpvAutoGpuPinnedForSession;
@@ -810,7 +811,8 @@ public class PlayerManager implements ParseCallback {
     public boolean shouldKeepVideoShutterClosed() {
         return isMpv()
                 && MpvPerformanceSetting.getOutputMode() == MpvPerformanceSetting.OUTPUT_AUTO
-                && !mpvAutoOutputEvaluated;
+                && !mpvAutoOutputEvaluated
+                && !mpvAutoOutputFrameReady;
     }
 
     public boolean isExo() {
@@ -4691,6 +4693,7 @@ public class PlayerManager implements ParseCallback {
 
     private void resetMpvOutputEvaluationState() {
         mpvAutoOutputEvaluated = false;
+        mpvAutoOutputFrameReady = false;
         mpvAutoOutputEvaluationScheduled = false;
         mpvAutoOutputProbeAttempts = 0;
         mpvSurfaceFallbackTried = false;
@@ -7069,11 +7072,32 @@ public class PlayerManager implements ParseCallback {
         boolean hasAudio = tracks.containsType(C.TRACK_TYPE_AUDIO);
         PlaybackStartupPolicy.Completion completion = PlaybackStartupPolicy.resolve(ready, playerType == PlayerSetting.MPV, hasVideo, hasAudio);
         if (completion == PlaybackStartupPolicy.Completion.FIRST_FRAME) {
+            if (playbackTrace.hasStage(PlaybackTrace.Stage.FIRST_FRAME)) return;
             playbackTrace.mark(PlaybackTrace.Stage.FIRST_FRAME, "source=mpv-playback-restart player=" + playerType);
             onIjkRuntimeFirstFrame(SystemClock.elapsedRealtime());
         } else if (completion == PlaybackStartupPolicy.Completion.AUDIO_PLAYABLE) {
             playbackTrace.mark(PlaybackTrace.Stage.AUDIO_PLAYABLE, "source=ready player=" + playerType);
         }
+    }
+
+    private void completeMpvDirectFirstFrame(int state) {
+        if (!MpvAutoOutputPolicy.canRevealDirectFrame(
+                MpvPerformanceSetting.getOutputMode() == MpvPerformanceSetting.OUTPUT_AUTO,
+                mpvAutoOutputEvaluated,
+                state == Player.STATE_READY,
+                isMpvSurfaceDirect(),
+                getVideoWidth(),
+                getVideoHeight())) return;
+        mpvAutoOutputFrameReady = true;
+        callback.onPlayerOutputReady();
+        if (!playbackTrace.hasStage(PlaybackTrace.Stage.FIRST_FRAME)) {
+            playbackTrace.mark(PlaybackTrace.Stage.FIRST_FRAME,
+                    "source=mpv-playback-restart-direct player=" + playerType);
+            onIjkRuntimeFirstFrame(SystemClock.elapsedRealtime());
+        }
+        PlaybackTrace.log("mpv-output", playbackTrace.current(),
+                "auto shutter release reason=direct-playback-restart size=%dx%d evaluated=%s",
+                getVideoWidth(), getVideoHeight(), mpvAutoOutputEvaluated);
     }
 
     private void recordBufferingState(int state) {
@@ -7328,6 +7352,7 @@ public class PlayerManager implements ParseCallback {
             if (SpiderDebug.isEnabled()) SpiderDebug.log("player", "state=%s spec=%s", stateName(state), debugSpec());
             publishPlaybackAutoContext(state != Player.STATE_IDLE);
             if (state == Player.STATE_READY) {
+                completeMpvDirectFirstFrame(state);
                 ijkRuntimeProfileController.onPrepared(playbackAutoSession);
                 onMpvHlsPlaybackReady(SystemClock.elapsedRealtime());
                 if (isIjk()) {

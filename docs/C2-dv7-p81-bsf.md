@@ -229,3 +229,28 @@ P8.1 仅对 HEVC、Profile 7、存在有效 RPU+BL 配置记录的轨道生效�
 - direct MediaCodec 首个输出在加载后约 `759283 us` 提交，启动缓冲约 `988 ms` 后进入 READY；播放期间掉帧从 0 增至 1 后保持不变，`rebufferCount=0`。位置停在 `33033 ms` 是用户手动暂停，已排除为播放停滞。
 - 当前原子单元可以提交并创建恢复 tag。后续“先有声音、后出画面”仍作为 C2 的下一个独立修正单元处理：现有证据已经证明 decoder/VO 在约 0.76 秒提交首输出，而 App 的 `first-frame=7165 ms` 来自延迟轨道刷新后的 `PLAYBACK_RESTART` 推断，不能把两者的差值直接解释为真实黑屏时长，也不能据此增加固定音频延迟。
 - 唯一下一动作：提交并标记当前面板/源身份/诊断单元；随后从本次真实 MediaCodec 输出证据与用户可见首画观察之间建立可证伪的时序，再决定最小代码修复。
+
+### 2026-08-30 10:15 CST：先有声音后出画面的根因与修复设计
+
+- 根因已由同一 trace `p-dn3rgx-4` 的完整时序证实：direct MediaCodec 在 `10:04:09.349` 提交首个视频输出，MPV 于 `10:04:09.370` 发出 `PLAYBACK_RESTART` 并在 `10:04:09.378` 进入 READY；但 App 的自动输出 shutter 仍因 `mpvAutoOutputEvaluated=false` 保持 Surface alpha=0/黑色遮罩，直到延迟轨道刷新完成并于 `10:04:15.607` 得出 `KEEP_SURFACE_DIRECT` 后才调用 output-ready。可见画面被 App 额外遮住约 6.26 秒，期间音频正常播放，因此形成“先有声音、后出画面”。
+- 这不是 decoder、BSF、CSD、RPU、Surface 提交或音频同步变慢。`firstFrameMs=7165` 是 `markStartupCompletion()` 等待非空 tracks 后的延迟推断；它不代表真实视频首输出。此前 P8.1 失败 trace `p-de6eo9-1` 没有 `PLAYBACK_RESTART`，随后直接进入 packet-property 丢弃和 MediaCodec dequeue 失败，因此 READY/restart 可区分本次成功输出与既有失败回退路径。
+- 方案比较：不改会固定保留约 6 秒黑遮罩；增加 `audio-delay` 会破坏全程 A/V sync、seek 和暂停恢复；恢复启动期同步轨道查询会重新引入电视主线程 JNI 卡死；等待完整自动评估仍是当前缺陷。采用窄适配：自动 MPV Surface Direct 在 `PLAYBACK_RESTART/READY`、视频尺寸有效且输出尚未评估时，把该帧作为运行时成功证据，立即打开 shutter并记录真实首帧；完整自动输出评估继续后台运行，若后续确需重建仍走现有 reset/pending 流程。
+- 保留合同：不修改解码器、`vo`/`hwdec`、native binary、BSF/CSD/RPU、音频时序、轨道刷新门控或失败回退。音频-only、GPU 输出、未 READY、无有效视频尺寸和已经评估的会话不得提前打开；失败的 P8.1 因没有 `PLAYBACK_RESTART` 继续保持 shutter 并等待现有 HDR10 fallback。
+- 验收：定向策略单测覆盖允许/拒绝条件；Leanback arm64 构建通过；电视同一样片的 shutter/output-ready 应从约 7 秒提前到 READY 约 1 秒附近，同时保持 `mediacodec_embed`/`mediacodec`、无 GPU transition、无 rebuffer，掉帧不高于当前候选的稳定水平。
+- 回滚：恢复 `3db8252c95ad23096db58d6adb75c094565a33bc` 或 `recovery/C2-DV7-P81-BSF-PANEL/20260830100826-3db8252c95ad`；本单元只修改 App Java、策略单测和本文件。
+
+### 2026-08-30 10:22 CST：shutter 提前释放候选实现与构建
+
+- `PlayerManager` 新增会话级 `mpvAutoOutputFrameReady`：自动 MPV Surface Direct 收到 READY（其来源为 `PLAYBACK_RESTART`）且已有有效视频尺寸时，立即调用 output-ready、打开 shutter，并将该时刻记录为 MPV 首帧。轨道列表稍后刷新时不会重复记录首帧。
+- `MpvAutoOutputPolicy.canRevealDirectFrame()` 集中约束允许条件；未 READY、GPU 输出、无视频尺寸、非自动模式或已经完成输出评估的会话均拒绝提前打开。完整 `evaluateMpvAutoOutput()` 仍继续运行，重建时既有 reset/pending 会重新关闭 shutter。
+- 定向验证通过：`bash ./gradlew :app:testMobileArm64_v8aDebugUnitTest --tests com.fongmi.android.tv.player.mpv.MpvAutoOutputPolicyTest :app:assembleLeanbackArm64_v8aDebug --no-daemon`，耗时 1 分 45 秒。没有修改或重建 native 资产。
+- Leanback arm64 Debug APK：`app/build/outputs/apk/leanbackArm64_v8a/debug/app-leanback-arm64_v8a-debug.apk`，大小 174363865 bytes，SHA-256 `8c2c6bf0394e60619d62df07a68d4be6ef3257680839292007b67e40b5da2c6f`。
+- 当前状态：候选尚未提交/tag。唯一下一动作是用户手动安装该 APK 并播放同一 DV7→P8.1 样片；日志必须先出现 `MediaCodec first output submitted`/READY，紧接 `auto shutter release reason=direct-playback-restart`，后续自动决策仍为 `KEEP_SURFACE_DIRECT`，且无 GPU transition、rebuffer 或异常掉帧。
+
+### 2026-08-30 10:30 CST：电视实机验收与收尾
+
+- DV7→P8.1 有效 trace 为 `p-dnwxvd-4`：direct MediaCodec 在 `10:26:50.953` 提交首个输出，App 在 `10:26:51.051` 记录首帧并于 `10:26:51.055` 打开 shutter，首帧总耗时 `1603 ms`。完整自动输出评估直到 `10:26:56.422` 才结束，但画面已提前约 5.37 秒显示；最终保持 `mpv-surface-direct`、`hwdec=mediacodec`、`vo=mediacodec_embed`，结论为 `dolby-vision-hw-supported`。
+- 该样片继续播放至 EOF，位置推进到 `57099/57140 ms`，`dropped=0`、`rebufferCount=0`、`rebufferTotalMs=0`，`end-file reason=eof error=success`。没有 GPU/软解切换、MediaCodec 释放失败、JNI 长阻塞、Java/native 崩溃或 HDR10 意外回退。
+- 随后一轮 trace `p-dnyatr-6` 同样保持硬解直出：MediaCodec 首输出后约 `56 ms` 打开 shutter，首帧总耗时 `1021 ms`；完整策略评估稍后保持 Surface Direct，播放期间 `dropped=0`、`rebufferCount=0`。这同时覆盖了非首次会话的状态重置与普通自动输出路径。
+- 验收结论：修复已消除 App 自身额外维持 5--6 秒黑遮罩的问题，不改变解码、渲染、音频同步、DV 转换或失败回退路径。回滚仍为 `3db8252c95ad23096db58d6adb75c094565a33bc` 或 `recovery/C2-DV7-P81-BSF-PANEL/20260830100826-3db8252c95ad`。
+- 下一动作：完成本原子单元提交并立即创建恢复 tag；不重复构建，不推送远端。

@@ -63,6 +63,20 @@ public final class MpvAutoOutputPolicy {
         return width > 0 && height > 0;
     }
 
+    public static boolean canRevealDirectFrame(boolean automaticOutput,
+                                               boolean outputEvaluated,
+                                               boolean playbackReady,
+                                               boolean surfaceDirect,
+                                               int width,
+                                               int height) {
+        return automaticOutput
+                && !outputEvaluated
+                && playbackReady
+                && surfaceDirect
+                && width > 0
+                && height > 0;
+    }
+
     public enum Transition {
         KEEP_GPU,
         ENTER_SURFACE_DIRECT,
