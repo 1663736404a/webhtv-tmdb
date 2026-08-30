@@ -253,4 +253,5 @@ P8.1 仅对 HEVC、Profile 7、存在有效 RPU+BL 配置记录的轨道生效�
 - 该样片继续播放至 EOF，位置推进到 `57099/57140 ms`，`dropped=0`、`rebufferCount=0`、`rebufferTotalMs=0`，`end-file reason=eof error=success`。没有 GPU/软解切换、MediaCodec 释放失败、JNI 长阻塞、Java/native 崩溃或 HDR10 意外回退。
 - 随后一轮 trace `p-dnyatr-6` 同样保持硬解直出：MediaCodec 首输出后约 `56 ms` 打开 shutter，首帧总耗时 `1021 ms`；完整策略评估稍后保持 Surface Direct，播放期间 `dropped=0`、`rebufferCount=0`。这同时覆盖了非首次会话的状态重置与普通自动输出路径。
 - 验收结论：修复已消除 App 自身额外维持 5--6 秒黑遮罩的问题，不改变解码、渲染、音频同步、DV 转换或失败回退路径。回滚仍为 `3db8252c95ad23096db58d6adb75c094565a33bc` 或 `recovery/C2-DV7-P81-BSF-PANEL/20260830100826-3db8252c95ad`。
-- 下一动作：完成本原子单元提交并立即创建恢复 tag；不重复构建，不推送远端。
+- 收尾结果：实现、测试和实机证据已提交为 `fa6a9ab2df507f1e223225efbabd2b2978dfafcb`（`fix(mpv): reveal direct video at playback restart`），并在提交后立即创建 annotated recovery tag `recovery/C2-DV7-P81-BSF-FIRST-FRAME/20260830103126-fa6a9ab2df50`；tag 创建耗时 `0s`。
+- 下一动作：本原子单元已完成；不重复构建，不推送远端。后续 C2 工作必须另开独立 guard、提交和恢复 tag。
