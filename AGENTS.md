@@ -6,6 +6,8 @@ This file applies to the whole repository. Keep work correct, narrow, reversible
 
 Before the first edit, state one completion sentence, the allowed paths, protected pre-existing dirty paths, the current local time and timezone, a realistic total-duration estimate with expected finish time, and the cheapest decisive verification. For multi-phase work, give a short estimate for each phase. Treat these estimates as execution targets rather than guard gates; when the estimate is reached or slips materially, stop optional work, state the cause, and continue with the narrowest completion path or a materially different shortest route. Do not let a stale estimate justify repeated checks, open-ended research, or an unfinished handoff. Use the smallest applicable lane:
 
+Estimate elapsed wall-clock time for the current Codex agent in this workspace, not the time a human engineer or team would need. Base the estimate on the actual repository state, available tools, warm caches, ABI/build scope, device availability, and unavoidable network/build/user wait; split those phases when they materially differ and give the expected local finish time. Do not quote person-days or staffing estimates unless the user explicitly asks for them.
+
 ### Governance-maintenance fast path
 
 When the task only edits `AGENTS.md`, `.codex/skills/**`, `.codex/scripts/**`, or their review document:
@@ -81,6 +83,17 @@ The mandatory design-research gate below applies repository-wide to every materi
 ## 8. Upstream and player dependency work
 
 For FFmpeg, media/Media3/nextlib, Exo, mpv, mpv-android, libplacebo, JNI, native binaries, locks, patches, or binary packaging, read and follow `.codex/skills/upstream-integration-governor/SKILL.md` and only the references it marks for the current lane.
+
+`.codex/skills/upstream-integration-governor/` is the runtime canonical copy for this repository. `webhome-devkit/skills/upstream-integration-governor/` is a reference/distribution mirror for other developers and is not an additional instruction authority or loading path. Whenever the canonical Skill changes, update the mirror in the same governance-maintenance task and validate that the mirrored files are byte-identical; never let the two copies evolve independently.
+
+### New-session routing for the upstream merge plan
+
+- The user does not need to paste a bootstrap prompt. Treat short requests such as `下一个任务`, `继续上游播放器依赖合并计划`, `梳理新的上游更新`, or equivalent wording as sufficient invocation of the upstream Skill. The expected branch for this repository plan is `fongmi-sync`; inspect the actual branch/HEAD and preserve every pre-existing dirty path before any mutation.
+- Unless the newest user message explicitly approves implementation, the first response is assessment-only and read-only. Fully read `README.md`, this file, the active `docs/upstream-player-dependency-merge-assessment-*.md`, and only the task documents directly related to the candidate. Use the assessment ledger, Git history, and current code to choose the next genuinely unfinished and unimplemented task in the order `Exo -> MPV -> common`.
+- Before proposing work, determine whether another commit already implemented it, partially covered it, superseded it, or made it irrelevant. Recommend `忽略` directly when it is already covered or has no current product value; do not relabel it as new implementation work.
+- Explain the user-visible playback capability in ordinary language. Include all related repositories and full 40-character commit IDs, cross-repository relationships, benefits, disadvantages and risks, effects on existing behavior, compatibility, performance and package size, best-practice status, required WebHTV adaptation, a clear `实施`/`暂缓`/`忽略` recommendation, and the smallest staged implementation and verification plan.
+- Use this first-response shape and then stop for explicit approval: `任务编号和名称`, `所属分类`, `要实现的实际能力`, `当前项目已有实现`, `涉及仓库及完整 commit ID`, `收益`, `缺点与风险`, `与现有功能的关系`, `建议`, `最小实施步骤`, `预计需要的验证`. Do not modify code, locks, patches, artifacts, or runtime behavior during this selection response.
+- A later explicit `开始实施` authorizes only the unambiguous currently recommended task. Treat all existing behavior, compatibility and material performance as acceptance contracts: the implementation must not knowingly cause direct or indirect regressions or reduce current performance. Adapt or reject the upstream design when needed, use the narrowest risk-proportionate verification, and do not claim completion while a material regression risk remains unresolved.
 
 - Assessment and implementation are separate authorities. Enumerate every in-scope upstream commit with a full 40-character ID and a disposition; never implement an unapproved stage.
 - Group related cross-repository behavior into independently reversible `Exo`, `MPV`, or `common` stages. Preserve the decision/implementation order `Exo -> MPV`.
