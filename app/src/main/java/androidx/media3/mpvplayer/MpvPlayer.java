@@ -247,6 +247,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
     private boolean osdSurfaceUsedForCurrentMedia;
     private boolean initialTrackSelectionGateRequested;
     private boolean initialTrackSelectionGateActive;
+    private String initialSubtitleTrackId;
     private boolean pendingOsdSurfaceAttach;
     private volatile long pendingOsdSurfaceRequestId;
     private long pendingOsdLoadGeneration = C.INDEX_UNSET;
@@ -1336,6 +1337,12 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         if (!mediaReplacementCoordinator.isCurrent(generation) || loadStarted) return;
         try {
             safeSetPropertyBoolean("pause", true);
+            if (!TextUtils.isEmpty(initialSubtitleTrackId)) {
+                safeSetPropertyString("sid", initialSubtitleTrackId);
+                PlaybackTrace.log("mpv", playbackTraceId,
+                        "initial subtitle preselect sid=%s phase=before-load",
+                        initialSubtitleTrackId);
+            }
             loadCurrentUri();
             if (initialTrackSelectionGateActive) {
                 mainHandler.removeCallbacks(initialTrackSelectionGateTimeoutRunnable);
@@ -1844,6 +1851,10 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         initialTrackSelectionGateRequested = requested;
     }
 
+    public void setInitialSubtitleTrackId(@Nullable String trackId) {
+        initialSubtitleTrackId = trackId;
+    }
+
     public void releaseInitialTrackSelectionGate() {
         releaseInitialTrackSelectionGate("tracks-restored");
     }
@@ -1938,6 +1949,14 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         if (!initialized) return;
         String property = mpvTrackProperty(type);
         if (property == null) return;
+        String current = propertyStringOrInt(property);
+        if (MpvInitialTrackSelectionPolicy.isSameTrackSelection(
+                current, mpvId)) {
+            SpiderDebug.log("mpv",
+                    "select track skipped type=%d property=%s id=%s reason=already-selected",
+                    type, property, mpvId);
+            return;
+        }
         try {
             mpvSetPropertyString(property, mpvId);
             if (type == C.TRACK_TYPE_TEXT) syncOsdSurfaceRequirementFromMpv();

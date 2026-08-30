@@ -4655,9 +4655,11 @@ public class PlayerManager implements ParseCallback {
 
     private void prepareMpvOutputForNewItem() {
         resetMpvOutputEvaluationState();
-        mpvExplicitSubtitlePreference = hasRequestedSubtitle(Track.find(getKey()));
+        List<Track> persistedTracks = Track.find(getKey());
+        Track persistedSubtitle = findRequestedSubtitle(persistedTracks);
+        mpvExplicitSubtitlePreference = persistedSubtitle != null;
         if (!(engine instanceof MpvPlayerEngine mpv)) return;
-        mpv.prepareSubtitleSurfaceForNewItem(mpvExplicitSubtitlePreference);
+        mpv.prepareSubtitleForNewItem(persistedSubtitle);
         boolean dv7HandlingChanged = mpv.resetDv7HandlingForNewItem();
         boolean clearAutoVulkanRenderer = mpvAutoVulkanPinnedForItem;
         mpvAutoVulkanPinnedForItem = false;
@@ -4863,11 +4865,16 @@ public class PlayerManager implements ParseCallback {
     }
 
     private boolean hasRequestedSubtitle(List<Track> tracks) {
-        if (tracks == null || tracks.isEmpty()) return false;
+        return findRequestedSubtitle(tracks) != null;
+    }
+
+    private Track findRequestedSubtitle(List<Track> tracks) {
+        if (tracks == null || tracks.isEmpty()) return null;
         for (Track track : tracks) {
-            if (track.getType() == C.TRACK_TYPE_TEXT && track.isSelected() && !track.isDisabled()) return true;
+            if (track.getType() == C.TRACK_TYPE_TEXT
+                    && track.isSelected() && !track.isDisabled()) return track;
         }
-        return false;
+        return null;
     }
 
     private void restoreTrackSelection(List<Track> tracks) {

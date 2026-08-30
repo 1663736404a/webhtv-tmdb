@@ -20,4 +20,12 @@ public class MpvInitialTrackSelectionPolicyTest {
         assertTrue(MpvInitialTrackSelectionPolicy.shouldPauseNativePlayback(
                 false, false));
     }
+
+    @Test
+    public void equivalentTrackIdsDoNotTriggerAnotherSelection() {
+        assertTrue(MpvInitialTrackSelectionPolicy.isSameTrackSelection(
+                "02", "2"));
+        assertFalse(MpvInitialTrackSelectionPolicy.isSameTrackSelection(
+                "1", "2"));
+    }
 }

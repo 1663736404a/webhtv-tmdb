@@ -66,6 +66,7 @@ public class MpvPlayerEngine implements PlayerEngine {
     private String dv7HandlingOption;
     private boolean dv7P81FallbackTried;
     private boolean initialSubtitleSurfaceRequested;
+    private String initialSubtitleTrackId;
     private final BiConsumer<Integer, Integer> videoSizeProbeListener;
     private int decode;
 
@@ -97,10 +98,13 @@ public class MpvPlayerEngine implements PlayerEngine {
         return player = buildPlayer(listener);
     }
 
-    public void prepareSubtitleSurfaceForNewItem(boolean requested) {
+    public void prepareSubtitleForNewItem(@Nullable Track track) {
+        boolean requested = track != null;
         initialSubtitleSurfaceRequested = requested;
+        initialSubtitleTrackId = persistedSubtitleTrackId(track);
         player.setInitialOsdSurfaceRequested(requested);
         player.setInitialTrackSelectionGateRequested(requested);
+        player.setInitialSubtitleTrackId(initialSubtitleTrackId);
     }
 
     public void retainSubtitleSurfaceForCurrentItem() {
@@ -199,11 +203,17 @@ public class MpvPlayerEngine implements PlayerEngine {
     public void setTrack(List<Track> tracks) {
         for (Track track : tracks) {
             if (track.isDisabled() && track.getType() == C.TRACK_TYPE_TEXT) {
+                initialSubtitleTrackId = null;
+                player.setInitialSubtitleTrackId(null);
                 player.setTrackSelection(C.TRACK_TYPE_TEXT, "no");
                 continue;
             }
             String id = resolveMpvTrackId(track);
             if (id != null) {
+                if (track.getType() == C.TRACK_TYPE_TEXT) {
+                    initialSubtitleTrackId = id;
+                    player.setInitialSubtitleTrackId(id);
+                }
                 player.setTrackSelection(track.getType(), id);
             } else {
                 SpiderDebug.log("mpv", "select track failed: no mpv id type=%d name=%s format=%s", track.getType(), track.getName(), track.getFormat());
@@ -709,6 +719,25 @@ public class MpvPlayerEngine implements PlayerEngine {
         return (comma < 0 ? persisted : persisted.substring(0, comma)).trim();
     }
 
+    @Nullable
+    static String persistedSubtitleTrackId(@Nullable Track track) {
+        if (track == null || track.getType() != C.TRACK_TYPE_TEXT
+                || !track.isSelected() || track.isDisabled()
+                || track.getFormat() == null) return null;
+        String token = firstPersistedToken(track.getFormat());
+        int separator = token.indexOf(':');
+        if (separator <= 0 || separator + 1 >= token.length()) return null;
+        try {
+            if (Integer.parseInt(token.substring(0, separator))
+                    != C.TRACK_TYPE_TEXT) return null;
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+        String id = parseMpvTrackId(token.substring(separator + 1));
+        return id == null || id.isBlank() || "auto".equalsIgnoreCase(id)
+                || "no".equalsIgnoreCase(id) ? null : id;
+    }
+
     private static String parseMpvTrackId(String id) {
         if (id == null) return null;
         int index = id.indexOf(':');
@@ -791,6 +820,7 @@ public class MpvPlayerEngine implements PlayerEngine {
         player.setInitialOsdSurfaceRequested(initialSubtitleSurfaceRequested);
         player.setInitialTrackSelectionGateRequested(
                 initialSubtitleSurfaceRequested);
+        player.setInitialSubtitleTrackId(initialSubtitleTrackId);
         if (PlaybackPerformanceSetting.isAuto(
                 PlayerSetting.MPV,
                 PlaybackPerformanceCatalog.PRELOAD)) {
