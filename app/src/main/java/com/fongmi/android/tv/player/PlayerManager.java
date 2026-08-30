@@ -1181,10 +1181,17 @@ public class PlayerManager implements ParseCallback {
 
     public void setTrack(List<Track> tracks) {
         mpvExplicitSubtitlePreference = hasRequestedSubtitle(tracks);
+        if (mpvExplicitSubtitlePreference && engine instanceof MpvPlayerEngine mpv) {
+            mpv.retainSubtitleSurfaceForCurrentItem();
+        }
         if (!tracks.isEmpty()) engine.setTrack(tracks);
     }
 
     public void setSecondarySubtitleTrack(Track track) {
+        if (track != null && !track.isDisabled()
+                && engine instanceof MpvPlayerEngine mpv) {
+            mpv.retainSubtitleSurfaceForCurrentItem();
+        }
         if (engine != null) engine.setSecondarySubtitleTrack(track);
     }
 
@@ -4650,6 +4657,7 @@ public class PlayerManager implements ParseCallback {
         resetMpvOutputEvaluationState();
         mpvExplicitSubtitlePreference = hasRequestedSubtitle(Track.find(getKey()));
         if (!(engine instanceof MpvPlayerEngine mpv)) return;
+        mpv.prepareSubtitleSurfaceForNewItem(mpvExplicitSubtitlePreference);
         boolean dv7HandlingChanged = mpv.resetDv7HandlingForNewItem();
         boolean clearAutoVulkanRenderer = mpvAutoVulkanPinnedForItem;
         mpvAutoVulkanPinnedForItem = false;

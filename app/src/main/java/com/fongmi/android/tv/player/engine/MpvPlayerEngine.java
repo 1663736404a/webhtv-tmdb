@@ -65,6 +65,7 @@ public class MpvPlayerEngine implements PlayerEngine {
     private boolean vulkanRenderer;
     private String dv7HandlingOption;
     private boolean dv7P81FallbackTried;
+    private boolean initialSubtitleSurfaceRequested;
     private final BiConsumer<Integer, Integer> videoSizeProbeListener;
     private int decode;
 
@@ -94,6 +95,17 @@ public class MpvPlayerEngine implements PlayerEngine {
         player.release();
         PlaybackTrace.log("player-engine", getPlaybackTraceId(), "rebuild mpv decode=%d", decode);
         return player = buildPlayer(listener);
+    }
+
+    public void prepareSubtitleSurfaceForNewItem(boolean requested) {
+        initialSubtitleSurfaceRequested = requested;
+        player.setInitialOsdSurfaceRequested(requested);
+    }
+
+    public void retainSubtitleSurfaceForCurrentItem() {
+        if (initialSubtitleSurfaceRequested) return;
+        initialSubtitleSurfaceRequested = true;
+        player.setInitialOsdSurfaceRequested(true);
     }
 
     @Override
@@ -771,6 +783,7 @@ public class MpvPlayerEngine implements PlayerEngine {
 
     private MpvPlayer buildPlayer(Player.Listener listener) {
         MpvPlayer player = new MpvPlayer(App.get(), buildConfig());
+        player.setInitialOsdSurfaceRequested(initialSubtitleSurfaceRequested);
         if (PlaybackPerformanceSetting.isAuto(
                 PlayerSetting.MPV,
                 PlaybackPerformanceCatalog.PRELOAD)) {
