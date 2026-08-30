@@ -520,7 +520,7 @@ public class MpvPlayerEngine implements PlayerEngine {
 
     @Override
     public boolean supportsSubtitleStyle() {
-        return !surfaceDirect;
+        return true;
     }
 
     @Override
