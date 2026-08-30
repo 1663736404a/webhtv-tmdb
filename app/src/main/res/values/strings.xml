@@ -1123,6 +1123,8 @@
     <string name="update_download_incomplete">The update package was not fully downloaded. Please try again.</string>
     <string name="update_download_checksum">The update package failed verification. Please try again.</string>
     <string name="update_download_invalid">The update package is invalid. Please try again.</string>
+    <string name="update_download_identity">The update package identity or signature does not match this app.</string>
+    <string name="update_download_source_unavailable">The selected update source is not available for this release.</string>
     <string name="update_confirm">Update</string>
     <string name="update_confirm_channel">Update %1$s</string>
     <string name="update_cancel">Cancel update</string>
@@ -1137,6 +1139,26 @@
     <string name="update_status_unavailable">Unavailable</string>
     <string name="update_expand">Expand</string>
     <string name="update_collapse">Collapse</string>
+    <string name="update_settings">Update settings</string>
+    <string name="update_settings_title">Update settings</string>
+    <string name="update_settings_channel">Version track</string>
+    <string name="update_settings_source">Download source</string>
+    <string name="update_settings_fallback">Try another source if the download fails</string>
+    <string name="update_source_auto">Auto</string>
+    <string name="update_source_github">GitHub</string>
+    <string name="update_source_oci">OCI</string>
+    <string name="update_github_proxy">GitHub proxy</string>
+    <string name="update_github_proxy_value">GitHub proxy · %1$s</string>
+    <string name="update_oci_mirror">OCI Registry mirror</string>
+    <string name="update_oci_mirror_value">OCI mirror · %1$s</string>
+    <string name="update_custom_url">Custom HTTPS origin</string>
+    <string name="update_proxy_mode_full">Full URL prefix</string>
+    <string name="update_proxy_mode_strip">Remove https://</string>
+    <string name="update_proxy_direct">Direct</string>
+    <string name="update_proxy_custom">Custom</string>
+    <string name="update_proxy_invalid">Enter a valid HTTPS origin without credentials or a path.</string>
+    <string name="update_settings_save">Save</string>
+    <string name="update_settings_saved">Update settings saved</string>
 
     <!-- Crash -->
     <string name="crash_info">An unexpected error occurred.\nSorry for the inconvenience.</string>

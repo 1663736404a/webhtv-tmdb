@@ -1120,6 +1120,8 @@
     <string name="update_download_incomplete">更新包下载不完整，请重试。</string>
     <string name="update_download_checksum">更新包校验失败，请重试。</string>
     <string name="update_download_invalid">更新包无效，请重试。</string>
+    <string name="update_download_identity">更新包的应用身份或签名与当前应用不一致。</string>
+    <string name="update_download_source_unavailable">当前版本不支持所选下载源。</string>
     <string name="update_confirm">更新</string>
     <string name="update_confirm_channel">更新%1$s</string>
     <string name="update_cancel">取消更新</string>
@@ -1134,6 +1136,26 @@
     <string name="update_status_unavailable">暂无</string>
     <string name="update_expand">展开</string>
     <string name="update_collapse">收起</string>
+    <string name="update_settings">更新设置</string>
+    <string name="update_settings_title">更新设置</string>
+    <string name="update_settings_channel">版本通道</string>
+    <string name="update_settings_source">下载源</string>
+    <string name="update_settings_fallback">下载失败后尝试备用源</string>
+    <string name="update_source_auto">自动</string>
+    <string name="update_source_github">GitHub</string>
+    <string name="update_source_oci">OCI</string>
+    <string name="update_github_proxy">GitHub 代理</string>
+    <string name="update_github_proxy_value">GitHub 代理 · %1$s</string>
+    <string name="update_oci_mirror">OCI 镜像代理</string>
+    <string name="update_oci_mirror_value">OCI 镜像 · %1$s</string>
+    <string name="update_custom_url">自定义 HTTPS 地址</string>
+    <string name="update_proxy_mode_full">完整 URL 前缀</string>
+    <string name="update_proxy_mode_strip">移除 https://</string>
+    <string name="update_proxy_direct">直连</string>
+    <string name="update_proxy_custom">自定义</string>
+    <string name="update_proxy_invalid">请输入不含账号、密码和路径的有效 HTTPS 地址。</string>
+    <string name="update_settings_save">保存</string>
+    <string name="update_settings_saved">更新设置已保存</string>
 
     <!-- Crash -->
     <string name="crash_info">发生意外错误\n抱歉给您带来不便</string>
