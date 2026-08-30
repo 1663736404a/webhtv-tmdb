@@ -7,10 +7,10 @@
 - 基线：`fongmi-sync` @ `5e90c2ed76830f5c45988d8597d14ffd599dba34`；恢复 tag：`upstream/mpv/c2-dv7-p81-bsf-baseline-20260829`。
 - 保护 dirty 路径：无。
 - 验收：patch 可按当前锁定 MPV 树应用；Java 编译通过；两 ABI native 产物/ELF/资产校验通过；原生 DV7、P8.1、HDR10、seek/flush/换源和失败回退有证据。
-- 当前状态：原生 P8.1 已由用户在 TCL MT9655 电视确认可正常播放；DV7 FEL 转换后的 P8.1 仍会在该设备无首帧并卡住。已实现单变量候选：仅删除 P8.1 转换后失效的增强层 `HEVC_CONF`，等待 arm64 native 构建和同一电视样片验证。
-- 已完成：创建 baseline tag；完成 C2 patch、两态 UI、原生 DV7 优先、P8.1 能力门和 HDR10 自动回退；修复 P8.1 packet/CSD 不一致黑屏；两个 ABI native/ELF/资产校验、Mobile/Leanback arm64 Debug 构建和策略单测均通过。
+- 当前状态：arm64 已通过删除失效 `HEVC_CONF` 修复 TCL MT9655 卡死；同一本地 DV7 FEL 转换起播仍有约 4--5.5 秒先出声音、后出画的体验问题，MPV 参数面板也因转换后轨道资料变为 Profile 8 而丢失源 DV7 身份。
+- 已完成：创建 baseline tag；完成 C2 patch、两态 UI、原生 DV7 优先、P8.1 能力门和 HDR10 自动回退；修复 P8.1 packet/CSD 不一致黑屏和失效 `HEVC_CONF`；Leanback arm64 实机已确认正常画面、DV8 识别、零丢帧且无 decoder release。
 - 已完成：章节查询门控修复已原子提交并创建恢复 tag；电视实机回归仍受 ADB 离线限制。
-- 下一动作：在 C2 P8.1 的 `par_out` 中只删除转换后已失效的 `AV_PKT_DATA_HEVC_CONF`，重建 Leanback arm64 包并用同一 P7 FEL 样片做一次单变量实机验证；若仍无首帧，立即否定该假设并转向 FEL RPU 重写兼容性。
+- 下一动作：保留转换前源 DV profile/level，并增加 direct MediaCodec 每会话一条的首输出时间；构建 Leanback arm64 后用同一 P7 FEL 样片一次区分 decoder/VO 首帧延迟与面板遥测延迟，再只修复已证实的启动环节。
 
 ## 决策与来源
 
@@ -203,3 +203,29 @@ P8.1 仅对 HEVC、Profile 7、存在有效 RPU+BL 配置记录的轨道生效�
 - 本次没有 `Dropping unmatched MediaCodec packet properties`、pending dequeue 取消、decoder `Released`、output dequeue 失败、`reader-pts` JNI 阻塞或 P8.1->HDR10 自动回退。与旧包同一样片的失败链形成直接对照，支持“删除失效 `AV_PKT_DATA_HEVC_CONF` 修复 MT9655 厂商 Dolby decoder 接受度”的结论。
 - 当前恢复点只声明 Leanback arm64 实机通过；armeabi-v7a 资产尚未补入该 marker，双 ABI 完整校验和 C2 最终收尾仍待后续独立阶段完成。
 - 用户要求先固化当前已验证状态，再单独优化播放参数面板文案为 `DV7（升级P8.1）`，与 `DV7（降级HDR10）` 的显示风格一致。
+
+### 2026-08-30 08:34 CST：起播音画间隔与参数面板修复决策
+
+- 用户确认输入是电视本地文件；网络读取、代理和带宽不足不适用。三次转换 P8.1 复现中，`PLAYBACK_RESTART` 后约 4--6 秒才出现 App 的 `first-frame`，但该事件实际由延迟轨道刷新后的 `onTracksChanged` 推断，不是真实 Surface 帧回调，不能据此修改解码或音频时序。
+- 锁定 FFmpeg 的 `dovi_rpu` 保留首视频包的 key flag；样片首包为 `pts=0`、`K__`，转换 10 秒仅耗时 0.83 秒（host 对照），首帧仍为独立 RPU。历史 `Unknown previous RPU ID` 只出现在停止/重配后的晚期日志，因此“首 RPU 错误引用前态”被否定，不实施强制 key 或禁用全部 RPU 压缩。
+- 参数面板的目标以用户提供的 Exo 实机图为准：`格式 Dolby Vision DV.07`，`codec dvhe.07.06（升级P8.1）`。当前 Java formatter 已符合该文本，但 MPV C2 在 native 中把 `dv_profile` 改为 8 后，`track-list` 只暴露转换后的身份；必须同时保留源 profile/level，不能根据设置项猜测，否则原生 P8.1 文件会被误标为 DV7 转换。
+- 方案比较：不改会保留音画体验问题和错误面板；直接使用上游转换结果无法提供源身份，也没有真实首 Surface 输出证据；WebHTV 窄适配是在 C2 splitter 中保存源 DV profile/level、通过现有 `track-list` 增加只读属性，并在 direct MediaCodec VO 每会话只记录一次首输出提交时间。它不改变 packet、RPU、CSD、解码器、Surface 调度或音频时序，诊断开销为一次日志。
+- 推荐：先实施上述源身份和一次性首输出证据；同一 arm64 包即可同时验证面板和定位起播延迟。若首输出本身晚，修复 decoder/VO 前的已证实阻塞；若首输出及时而屏幕仍黑，只在 P8.1 转换会话设计首画同步门，禁止用固定全程 audio-delay。任何最终时序修复仍不得影响原生 DV7、原生 P8.1、HDR10、GPU 输出或 seek/flush。
+- 验收：MPV 面板与 Exo 图一致；同一本地样片记录 `PLAYBACK_RESTART`、首 direct MediaCodec output 和用户可见首画；无 decoder `Released`、packet-property 丢弃、JNI 长阻塞、HDR10 意外回退或新增掉帧。回滚到 `b1f07cea3d36b8207ac0d518b837e295cb212323` 及 `recovery/C2-DV7-P81-BSF-CSD/20260830081107-b1f07cea3d36`。
+
+### 2026-08-30 09:58 CST：参数面板候选引入 GPU 软解回归及修正
+
+- 用户实测首个面板候选播放严重卡顿。冻结证据 `/private/tmp/c2-tv-stutter-20260830.txt` 显示会话最初保持 `surface/mediacodec_embed` 和 MediaCodec 硬解，但源身份接线错误地把运行时 Profile 8 覆盖为 Profile 7；自动输出策略随后记录 `dvProfile=7`、`dvSupport=UNSUPPORTED`、`transition=LEAVE_SURFACE_DIRECT`，并以 `auto-dolby-vision-hw-unsupported` 重建为 `vo=gpu / hwdec=no`，掉帧增长到 89。该回归不是电视性能波动，而是本候选的数据边界错误。
+- 修正后 `VideoTrackDiagnostics` 同时保留运行时 Profile 8 和源 Profile 7/Level 6；`MpvPlayerEngine` 仅用源 Profile 判断面板的 `（升级P8.1）` 标记，所有播放能力、自动输出和硬解策略继续读取运行时 Profile 8。`DolbyVisionFormatLabel` 从源 codec 生成 `Dolby Vision DV.07`，因此面板显示不再改变渲染决策。
+- 本次修正没有修改 `PlayerManager`、自动输出策略实现、解码器选择、Surface/VO、BSF packet/CSD/RPU、音频或起播时序。现有 native 候选仅增加源 profile/level 的只读轨道属性和一次性首 MediaCodec output 诊断，用于面板与黑屏根因取证。
+- 定向验证通过：`bash ./gradlew :app:testMobileArm64_v8aDebugUnitTest --tests com.fongmi.android.tv.player.DolbyVisionFormatLabelTest :app:assembleLeanbackArm64_v8aDebug --no-daemon`，耗时 1 分 33 秒。Leanback arm64 Debug APK 为 `app/build/outputs/apk/leanbackArm64_v8a/debug/app-leanback-arm64_v8a-debug.apk`，大小 174363865 bytes，SHA-256 `4f98512b119f1da83ef64c462bea0ce652023a42e82104d4b6abdc4b3db041cb`。
+- 当前状态：尚未提交或创建恢复 tag；等待用户手动安装该包复测同一 DV7 自动/P8.1 场景。验收必须保持 `vo=mediacodec_embed`、`hwdec=mediacodec`，不得再次出现 `LEAVE_SURFACE_DIRECT` 或 `auto-dolby-vision-hw-unsupported`，且面板显示源 DV7 与 `（升级P8.1）`。
+- 唯一下一动作：用户安装上述 APK 并播放同一样片后，读取一次电视日志确认硬解直通与掉帧计数，再决定是否进入提交/tag 收尾。
+
+### 2026-08-30 10:08 CST：面板修正版电视实机验收
+
+- 用户手动安装 SHA-256 `4f98512b119f1da83ef64c462bea0ce652023a42e82104d4b6abdc4b3db041cb` 的 Leanback arm64 Debug APK，并以 MPV 自动/P8.1 模式播放同类本地 DV7 样片；冻结日志为 `/private/tmp/c2-tv-live-panel-fixed.txt`，有效 trace 为 `p-dn3rgx-4`。
+- 播放从始至终保持 `vo=mediacodec_embed`、`hwdec=mediacodec` 和 `mpv-surface-direct`；自动策略结论为 `dolby-vision-hw-supported`。统计 `LEAVE_SURFACE_DIRECT=0`、`auto-dolby-vision-hw-unsupported=0`、`vo=gpu=0`、`hwdec=no=0`，确认此前 GPU 软解回归已修复。
+- direct MediaCodec 首个输出在加载后约 `759283 us` 提交，启动缓冲约 `988 ms` 后进入 READY；播放期间掉帧从 0 增至 1 后保持不变，`rebufferCount=0`。位置停在 `33033 ms` 是用户手动暂停，已排除为播放停滞。
+- 当前原子单元可以提交并创建恢复 tag。后续“先有声音、后出画面”仍作为 C2 的下一个独立修正单元处理：现有证据已经证明 decoder/VO 在约 0.76 秒提交首输出，而 App 的 `first-frame=7165 ms` 来自延迟轨道刷新后的 `PLAYBACK_RESTART` 推断，不能把两者的差值直接解释为真实黑屏时长，也不能据此增加固定音频延迟。
+- 唯一下一动作：提交并标记当前面板/源身份/诊断单元；随后从本次真实 MediaCodec 输出证据与用户可见首画观察之间建立可证伪的时序，再决定最小代码修复。

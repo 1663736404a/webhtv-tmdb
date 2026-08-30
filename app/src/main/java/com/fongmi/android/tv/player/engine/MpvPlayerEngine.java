@@ -410,7 +410,7 @@ public class MpvPlayerEngine implements PlayerEngine {
                 details.outputColorInfo(),
                 isDolbyVisionHdr10Fallback(details, currentVo)
                         || fallbackConfigured,
-                details.dolbyVisionProfile() == 7 && isDv7P81Active());
+                details.sourceDolbyVisionProfile() == 7 && isDv7P81Active());
     }
 
     static boolean isConfiguredDv7Hdr10Fallback(

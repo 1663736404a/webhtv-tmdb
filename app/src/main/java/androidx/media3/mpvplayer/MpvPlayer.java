@@ -4189,6 +4189,8 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         String decoder = stringProperty(prefix + "decoder", "");
         int dolbyVisionProfile = intProperty(prefix + "dolby-vision-profile", C.INDEX_UNSET);
         int dolbyVisionLevel = intProperty(prefix + "dolby-vision-level", C.INDEX_UNSET);
+        int sourceDolbyVisionProfile = intProperty(prefix + "source-dolby-vision-profile", C.INDEX_UNSET);
+        int sourceDolbyVisionLevel = intProperty(prefix + "source-dolby-vision-level", C.INDEX_UNSET);
         boolean selected = booleanProperty(prefix + "selected", false);
         int width = intProperty(prefix + "demux-w", C.LENGTH_UNSET);
         int height = intProperty(prefix + "demux-h", C.LENGTH_UNSET);
@@ -4206,6 +4208,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         ColorInfo colorInfo = type == C.TRACK_TYPE_VIDEO ? videoColorInfo() : null;
         return new TrackInfo(type, id, demuxId, srcId, title, lang, codec,
                 decoder, dolbyVisionProfile, dolbyVisionLevel,
+                sourceDolbyVisionProfile, sourceDolbyVisionLevel,
                 selected, width, height, frameRate, sampleRate, channels,
                 bitrate, hlsBitrate, colorInfo);
     }
@@ -5133,6 +5136,8 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         final String decoder;
         final int dolbyVisionProfile;
         final int dolbyVisionLevel;
+        final int sourceDolbyVisionProfile;
+        final int sourceDolbyVisionLevel;
         final boolean selected;
         final int width;
         final int height;
@@ -5146,6 +5151,7 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         TrackInfo(int type, String id, int demuxId, int srcId, String title,
                   String lang, String codec, String decoder,
                   int dolbyVisionProfile, int dolbyVisionLevel,
+                  int sourceDolbyVisionProfile, int sourceDolbyVisionLevel,
                   boolean selected, int width, int height, float frameRate,
                   int sampleRate, int channels, int bitrate, int hlsBitrate,
                   @Nullable ColorInfo colorInfo) {
@@ -5159,6 +5165,8 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
             this.decoder = decoder;
             this.dolbyVisionProfile = dolbyVisionProfile;
             this.dolbyVisionLevel = dolbyVisionLevel;
+            this.sourceDolbyVisionProfile = sourceDolbyVisionProfile;
+            this.sourceDolbyVisionLevel = sourceDolbyVisionLevel;
             this.selected = selected;
             this.width = width;
             this.height = height;
@@ -5189,16 +5197,22 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
         }
 
         VideoTrackDiagnostics toVideoTrackDiagnostics() {
+            int sourceProfile = sourceDolbyVisionProfile > 0
+                    ? sourceDolbyVisionProfile : dolbyVisionProfile;
+            int sourceLevel = sourceDolbyVisionProfile > 0
+                    ? sourceDolbyVisionLevel : dolbyVisionLevel;
             return new VideoTrackDiagnostics(
-                    sourceCodecs(), dolbyVisionProfile, dolbyVisionLevel,
+                    sourceCodecs(sourceProfile, sourceLevel),
+                    dolbyVisionProfile, dolbyVisionLevel,
+                    sourceProfile, sourceLevel,
                     codec, decoder, colorInfo);
         }
 
-        private String sourceCodecs() {
-            if (dolbyVisionProfile <= 0) return codec;
-            String value = String.format(Locale.US, "dvhe.%02d", dolbyVisionProfile);
-            return dolbyVisionLevel >= 0
-                    ? value + String.format(Locale.US, ".%02d", dolbyVisionLevel)
+        private String sourceCodecs(int profile, int level) {
+            if (profile <= 0) return codec;
+            String value = String.format(Locale.US, "dvhe.%02d", profile);
+            return level >= 0
+                    ? value + String.format(Locale.US, ".%02d", level)
                     : value;
         }
 
@@ -5217,6 +5231,8 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
             String sourceCodecs,
             int dolbyVisionProfile,
             int dolbyVisionLevel,
+            int sourceDolbyVisionProfile,
+            int sourceDolbyVisionLevel,
             String decodedCodec,
             String decoderName,
             @Nullable ColorInfo outputColorInfo) {
@@ -5227,13 +5243,25 @@ public final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObs
             decoderName = decoderName == null ? "" : decoderName;
         }
 
+        public VideoTrackDiagnostics(
+                String sourceCodecs,
+                int dolbyVisionProfile,
+                int dolbyVisionLevel,
+                String decodedCodec,
+                String decoderName,
+                @Nullable ColorInfo outputColorInfo) {
+            this(sourceCodecs, dolbyVisionProfile, dolbyVisionLevel,
+                    dolbyVisionProfile, dolbyVisionLevel,
+                    decodedCodec, decoderName, outputColorInfo);
+        }
+
         public boolean hasDolbyVisionSource() {
-            return dolbyVisionProfile > 0;
+            return sourceDolbyVisionProfile > 0;
         }
 
         public static VideoTrackDiagnostics empty() {
             return new VideoTrackDiagnostics("", C.INDEX_UNSET, C.INDEX_UNSET,
-                    "", "", null);
+                    C.INDEX_UNSET, C.INDEX_UNSET, "", "", null);
         }
     }
 

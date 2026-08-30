@@ -145,6 +145,8 @@ index 53d0c8f..bc0bfb1 100644
 -                            "parameters to the HDR10 base layer.\n");
 +        if (s->convert_p81) {
 +            bl->codec->dovi = true;
++            bl->codec->source_dv_profile = bl->codec->dv_profile;
++            bl->codec->source_dv_level = bl->codec->dv_level;
 +            bl->codec->dv_profile = 8;
 +            MP_INFO(demuxer, "DV7 P8.1 conversion: using FFmpeg dovi_rpu BSF.\n");
 +            MP_VERBOSE(demuxer, "DV7 P8.1 conversion: synchronized Profile 8.1 "
@@ -204,3 +206,27 @@ index 55ed81e..4a07eb6 100644
  // The pointer becomes NULL when an access unit contains no base-layer NAL.
  // Returns false only for a filtering error; the caller owns the original
  // packet in that case.
+diff --git a/demux/stheader.h b/demux/stheader.h
+--- a/demux/stheader.h
++++ b/demux/stheader.h
+@@ -174,4 +174,6 @@ struct mp_codec_params {
+     bool dovi;
+     uint8_t dv_profile;
+     uint8_t dv_level;
++    uint8_t source_dv_profile;
++    uint8_t source_dv_level;
+     bool dv_el_present;     // BL and EL interleaved in this stream (Profile 7)
+diff --git a/player/command.c b/player/command.c
+--- a/player/command.c
++++ b/player/command.c
+@@ -2212,6 +2212,10 @@ static int get_track_entry(int item, int action, void *arg, void *ctx)
+                         .unavailable = !p.dovi},
+         {"dolby-vision-level", SUB_PROP_INT(p.dv_level),
+                         .unavailable = !p.dovi},
++        {"source-dolby-vision-profile", SUB_PROP_INT(p.source_dv_profile),
++                        .unavailable = !p.source_dv_profile},
++        {"source-dolby-vision-level", SUB_PROP_INT(p.source_dv_level),
++                        .unavailable = !p.source_dv_profile},
+         {"metadata", SUB_PROP_KEYVALUE_LIST(tag_list),
+                         .unavailable = !tags->num_keys},
+         {0}
