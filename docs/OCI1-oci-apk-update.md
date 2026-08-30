@@ -9,8 +9,8 @@
 - Protected pre-existing dirty paths: `app/.cxx/` and all paths recorded by the task guard.
 - Acceptance: GitHub discovery remains available; download routes are `auto`, `github`, and `oci`; `auto` tries OCI then GitHub; OCI verifies manifest and layer digests, APK identity and signer; progress, cancel, fallback, and mobile/leanback settings work.
 - Rollback anchor: baseline commit above. Published clients can be moved back to GitHub by omitting the `downloads.oci` object from a later update manifest.
-- Current status: `dev` and recovery tags are published; the first Beta Action exposed a `setup-oras` version-resolution defect, and a fixed URL/checksum setup is pending verification.
-- Next action: verify, commit, push, and rerun the Beta Action until OCI publication succeeds.
+- Current status: Beta GitHub/OCI publication is verified end to end on `dev`; four APK artifacts and matching update descriptors are public.
+- Next action: perform the Android client download scenario with the `free.hubfast.cn` OCI mirror, then decide whether to promote `dev` into `main`.
 
 ## Product decision
 
@@ -219,3 +219,18 @@ Device checks:
 - Evidence: the checksum matches the official `oras_1.3.4_checksums.txt`; the archive is a statically linked Linux x86-64 ELF; the same release's macOS CLI reports version `1.3.4` and commit `db9e29505c3059f2b8fde34ae8cae266c5c765e9`.
 - Rollback: revert the fixed setup input to the previous fail-open version lookup; GitHub-only release publication remains available but OCI metadata will be absent.
 - Next action: parse the workflow, finish the atomic fix, push its commit and recovery tag, then rerun a Beta release and verify Docker Hub descriptors.
+
+## Deployment checkpoint 4: 2026-08-31 02:28 CST
+
+- Setup fix: commit `0b27856ac8ed787747072b2ff25e4715f6ef95c5`; recovery tag `recovery/OCI1-oras-setup-fix/20260831020719-0b27856ac8ed`; both pushed to `origin`.
+- Successful run: GitHub Actions `https://github.com/fish2018/webhtv/actions/runs/33327187989` completed in 15m57s. Build, ORAS setup, OCI publishing, manifest generation, GitHub prerelease creation, and workflow artifact upload all passed. The OCI failure-report and CNB sync steps were correctly skipped.
+- Release: `v5.6.0-beta-202608310210`, `https://github.com/fish2018/webhtv/releases/tag/v5.6.0-beta-202608310210`. It contains four signed APKs and four update JSON files; every JSON retains the GitHub URL and includes a verified `downloads.oci` descriptor for `2011820123/webhtv-apk`.
+- Leanback ARM64: size `133773180`, layer `sha256:946eaa5270ba52ad5aaf6c6c9017ab7607da294cc60f83e2466ab1edc3be8bd4`, manifest `sha256:5abdf621143d55961b2287e6f00e56005df421d28cfee3ddac55125e6a2707e1`.
+- Leanback ARMv7: size `112866618`, layer `sha256:7ea8bc27c3df3e6a0e395a313dd30513b4e7ae99a29b9b8f61c0ab81d26913e9`, manifest `sha256:782acccc3aaebdeeaceb97e270abf104ac087f5df1237b3fc504b8fce6840dd6`.
+- Mobile ARM64: size `133629314`, layer `sha256:7f48bdb3169112a8e6dedb975dee5e4eb8a8a4c46d0970f9b1579ea5bc4db322`, manifest `sha256:bd0446240520bb8f4d183bce8433cede1f8fe1cb45139efc63d965eb5b89f5bd`.
+- Mobile ARMv7: size `112722752`, layer `sha256:014cf7057f06c19fa725462eea11172926ed839594ec9798eeea52c694c86d5c`, manifest `sha256:7d1de6ae523a19fda1ced3fc0e0a9534668a47733e12598e4a7f669a579e08eb`.
+- Registry verification: ORAS fetched every public Docker Hub descriptor by tag and every manifest by digest. All four manifest digests, one-layer APK media types, layer digests, and layer sizes exactly matched the release JSON.
+- Mirror verification: `free.hubfast.cn` returned the new manifest by both tag and digest; the raw Mobile ARM64 manifest SHA-256 matched `bd0446240520bb8f4d183bce8433cede1f8fe1cb45139efc63d965eb5b89f5bd`. At the same observation point, `dockerproxy.net` returned HTTP 502 for both forms and `docker.jiaxin.site` returned HTTP 401. Use `free.hubfast.cn` for the first device test; `auto` mode still falls back to GitHub on mirror failure.
+- Non-blocking warnings: GitHub reports Node.js 20 compatibility forcing for several Actions and recommends `actions/setup-java@v5`; these warnings did not affect this release and are outside the OCI functional fix.
+- Rollback: remove `downloads.oci` from a future manifest or disable `publish_oci`; the GitHub release path remains complete. The published OCI objects are content-addressed and can remain as harmless beta history.
+- Next action: on a device with an older version code, select Beta + OCI + `free.hubfast.cn`, verify full APK transfer/cancel/install, then promote the verified implementation to `main` if accepted.
