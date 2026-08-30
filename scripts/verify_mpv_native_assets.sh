@@ -196,6 +196,7 @@ verify_abi() {
   contains_string "$directory/libmpv.so" "DV7 HDR10 fallback: stripping EL/RPU before decoder."
   contains_string "$directory/libmpv.so" "DV7 HDR10 fallback: synchronized decoder parameters to the HDR10 base layer."
   contains_string "$directory/libmpv.so" "DV7 HDR10 fallback: failed to produce base-layer packet."
+  contains_string "$directory/libmpv.so" "DV7 P8.1 conversion: removed stale enhancement-layer configuration."
   reject_string "$directory/libmpv.so" "DV7 HDR10 fallback: preserving decoder input and stripping Dolby Vision frame metadata."
   reject_string "$directory/libmpv.so" "Using device native output sample rate for passthrough compatibility"
   contains_string "$directory/libmpv.so" "Using 7.1 IEC61937 carrier mask for TrueHD"

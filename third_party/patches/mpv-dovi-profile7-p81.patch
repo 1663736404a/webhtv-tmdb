@@ -123,6 +123,14 @@ index 53d0c8f..bc0bfb1 100644
      if (ret < 0)
          goto fail;
  
++    if (s->convert_p81) {
++        // hvcE describes the Profile 7 enhancement layer removed by dovi_rpu.
++        av_packet_side_data_remove(s->bsf->par_out->coded_side_data,
++                                   &s->bsf->par_out->nb_coded_side_data,
++                                   AV_PKT_DATA_HEVC_CONF);
++        MP_VERBOSE(demuxer, "DV7 P8.1 conversion: removed stale enhancement-layer configuration.\n");
++    }
++
 -    if (s->base_only) {
 +    if (s->base_only || s->convert_p81) {
          if (bl->codec->lav_codecpar) {

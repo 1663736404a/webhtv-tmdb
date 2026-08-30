@@ -7,7 +7,7 @@
 - 基线：`fongmi-sync` @ `5e90c2ed76830f5c45988d8597d14ffd599dba34`；恢复 tag：`upstream/mpv/c2-dv7-p81-bsf-baseline-20260829`。
 - 保护 dirty 路径：无。
 - 验收：patch 可按当前锁定 MPV 树应用；Java 编译通过；两 ABI native 产物/ELF/资产校验通过；原生 DV7、P8.1、HDR10、seek/flush/换源和失败回退有证据。
-- 当前状态：原生 P8.1 已由用户在 TCL MT9655 电视确认可正常播放；DV7 FEL 转换后的 P8.1 仍会在该设备无首帧并卡住。日志已确认 MediaCodec 先零输出并进入 released 状态，主线程同步属性查询阻塞是后续放大点；重复 RPU 与 RPU NAL 顺序假设均已由离线 packet 对照否定。
+- 当前状态：原生 P8.1 已由用户在 TCL MT9655 电视确认可正常播放；DV7 FEL 转换后的 P8.1 仍会在该设备无首帧并卡住。已实现单变量候选：仅删除 P8.1 转换后失效的增强层 `HEVC_CONF`，等待 arm64 native 构建和同一电视样片验证。
 - 已完成：创建 baseline tag；完成 C2 patch、两态 UI、原生 DV7 优先、P8.1 能力门和 HDR10 自动回退；修复 P8.1 packet/CSD 不一致黑屏；两个 ABI native/ELF/资产校验、Mobile/Leanback arm64 Debug 构建和策略单测均通过。
 - 已完成：章节查询门控修复已原子提交并创建恢复 tag；电视实机回归仍受 ADB 离线限制。
 - 下一动作：在 C2 P8.1 的 `par_out` 中只删除转换后已失效的 `AV_PKT_DATA_HEVC_CONF`，重建 Leanback arm64 包并用同一 P7 FEL 样片做一次单变量实机验证；若仍无首帧，立即否定该假设并转向 FEL RPU 重写兼容性。
@@ -177,3 +177,29 @@ P8.1 仅对 HEVC、Profile 7、存在有效 RPU+BL 配置记录的轨道生效�
 - 全程没有首帧。`07:24:57.716` 起连续出现 `Dropping unmatched MediaCodec packet properties`；`07:24:58.027` 出现 `Pending dequeue input buffer request cancelled`，随后 codec 已处于 `Released`，再出现 `hevc_mediacodec: Failed to dequeue output buffer`。主线程之后才阻塞于 `demuxer-cache-state/reader-pts`，最长超过 130 秒，因此 JNI 查询是卡死放大点，不是 decoder 释放的起因。
 - 诊断日志已完成使命，临时 P8.1 FFmpeg verbose 配置与 Java 文本放行不进入生产修复。当前单变量假设是：`dovi_rpu convert=p81` 删除 EL 并改写 DOVI config 后仍保留表示增强层配置的 `AV_PKT_DATA_HEVC_CONF`；FFmpeg 自带 `dovi_split` 对同类输出明确删除该 side data，并注明输出端已失效。
 - 下一动作：只在 P8.1 转换的 `par_out` 删除 `AV_PKT_DATA_HEVC_CONF`；不改变 RPU 内容、extradata、packet、codec/MIME、Surface、GPU、Java 回退和其他播放模式。验收是同一文件产生首帧且不再进入厂商 decoder `Released`；失败则立即撤销该假设。
+
+### 2026-08-30 07:38 CST：失效增强层配置单变量候选
+
+- 在 `third_party/patches/mpv-dovi-profile7-p81.patch` 中，`dovi_rpu` 初始化完成后、`par_out` 复制给 MPV decoder 参数前，仅对 `convert_p81` 删除 `AV_PKT_DATA_HEVC_CONF`。该 side data 的公开语义是 Dolby Vision 增强层 HEVC decoder configuration，而当前转换已删除全部 type-63 EL NAL。
+- 没有修改 `AV_PKT_DATA_DOVI_CONF`、主 HEVC extradata、RPU 重写、packet 数据、MIME/profile/codec 选择、Surface/GPU、Java 回退或其他 DV/HDR 模式。新增 verbose marker 仅用于证明构建资产包含该候选，默认 `all=warn` 不输出。
+- 静态验证通过：新 C2 patch 在锁定 MPV `cca559b41ceb0bb7731cf6ef2e1f33276cd30c42` 及既有 HDR10 patch 后通过 `git apply --check --recount`；`bash -n` 两个 native 脚本和 `git diff --check` 通过。
+- 回滚锚点：`e343efd2e544c9957a0fe5d825e2cb81b5972d5d`，恢复 tag `recovery/C2-DV7-P81-BSF/20260830073401-e343efd2e544`。未验证候选不得提交或标记为修复。
+- 下一动作：只重建并安装 Leanback arm64 候选，用同一 P7 FEL 文件验证首帧与 decoder 生命周期；通过后再补 armeabi-v7a 资产。
+
+### 2026-08-30 08:03 CST：arm64 单变量候选完成，等待安装
+
+- `scripts/build_mpv_native.sh --abi arm64-v8a --install --incremental --jobs 8` 已完成；新 arm64 `libmpv.so` 已确认包含 `DV7 P8.1 conversion: removed stale enhancement-layer configuration.`。包装构建同时改写的七个无关 FFmpeg 资产均已恢复到 `e343efd2e544c9957a0fe5d825e2cb81b5972d5d`，候选包只保留 C2 `libmpv.so` 单变量。
+- 全资产 `--require-elf` 校验对 arm64 已通过，随后按阶段设计在尚未重建的 armeabi-v7a marker 处停止；这不是 arm64 候选失败。task guard 在恢复无关资产后通过。
+- `bash ./gradlew :app:assembleLeanbackArm64_v8aDebug --no-daemon` 一次通过，耗时 1 分 17 秒。APK 为 `app/build/outputs/apk/leanbackArm64_v8a/debug/app-leanback-arm64_v8a-debug.apk`，SHA-256 `acc1cc698a556654e969de75b2530bad115ee21179bc522acf10d74554758870`。
+- 用户在候选构建完成前进行的播放仍使用电视旧包；最新日志中的持续播放 trace `p-did5nt-3` 是网络 H.264，最近一次 DV7 trace `p-di77tq-1` 又在启动后约一秒主动销毁，均不能验证本候选。
+- 安装阻塞：`adb connect 192.168.1.5:5555` 返回 `Connection refused`；电视 `9978` 调试服务没有 APK 安装入口，因此候选尚未安装，禁止继续用旧包重复复现并据此判断修复结果。
+- 用户新增后续要求：优化 native 构建脚本，避免 `--incremental` 仍逐个重跑 nghttp2、curl、libarchive 等未变化依赖。该优化应在 C2 播放修复收尾后使用新的稳定任务 ID、独立 guard/提交/恢复 tag 实施；设计采用输入指纹和已验证产物共同决定跳过，lock、patch、override、NDK、ABI 或构建参数变化必须使缓存失效，不能仅按文件存在跳过。
+- 唯一下一动作：电视开启无线 ADB、使 `192.168.1.5:5555` 可连接后，安装上述候选 APK，清空日志并只用 MPV 自动模式播放 `/storage/emulated/0/Download/P7_FEL_GIJoe_The_Rise_of_Cobra.mkv` 一次；验收首帧和厂商 decoder 是否保持运行。
+
+### 2026-08-30 08:08 CST：电视 arm64 实机通过
+
+- 用户手动安装 SHA-256 `acc1cc698a556654e969de75b2530bad115ee21179bc522acf10d74554758870` 的 Leanback arm64 候选，并使用 MPV 自动模式播放 `/storage/emulated/0/Download/P7_FEL_GIJoe_The_Rise_of_Cobra.mkv`；用户确认画面正常且显示为转换后的 DV8。
+- 冻结日志为 `/private/tmp/c2-tv-hevc-conf-candidate-20260830.txt`，有效 trace `p-diwh05-1`。`08:06:37.112` 收到首帧，首帧耗时 7604 ms；随后播放位置推进到 17081 ms，`dropped=0`、`rebufferCount=0`，最终由用户正常停止，`end-file reason=stop error=success`。
+- 本次没有 `Dropping unmatched MediaCodec packet properties`、pending dequeue 取消、decoder `Released`、output dequeue 失败、`reader-pts` JNI 阻塞或 P8.1->HDR10 自动回退。与旧包同一样片的失败链形成直接对照，支持“删除失效 `AV_PKT_DATA_HEVC_CONF` 修复 MT9655 厂商 Dolby decoder 接受度”的结论。
+- 当前恢复点只声明 Leanback arm64 实机通过；armeabi-v7a 资产尚未补入该 marker，双 ABI 完整校验和 C2 最终收尾仍待后续独立阶段完成。
+- 用户要求先固化当前已验证状态，再单独优化播放参数面板文案为 `DV7（升级P8.1）`，与 `DV7（降级HDR10）` 的显示风格一致。

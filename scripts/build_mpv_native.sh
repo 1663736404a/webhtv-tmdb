@@ -525,6 +525,8 @@ prepare_sources() {
     die "MPV Dolby Vision Profile 7 P8.1 BSF selection is absent"
   grep -Fq 'DV7 P8.1 conversion: using FFmpeg dovi_rpu BSF.' "$deps/mpv/demux/dovi_split.c" || \
     die "MPV Dolby Vision Profile 7 P8.1 conversion marker is absent"
+  grep -Fq 'DV7 P8.1 conversion: removed stale enhancement-layer configuration.' "$deps/mpv/demux/dovi_split.c" || \
+    die "MPV Dolby Vision Profile 7 P8.1 stale enhancement-layer configuration guard is absent"
   grep -Fq '(!s->base_only && !s->convert_p81)' "$deps/mpv/demux/dovi_split.c" || \
     die "MPV Dolby Vision Profile 7 P8.1 base-packet filter guard is absent"
   grep -Fq '(!bl->codec->dv_el_present && !base_only && !convert_p81)' "$deps/mpv/demux/dovi_split.c" || \
@@ -672,6 +674,7 @@ verify_directory() {
   grep -Fq "DV7 HDR10 fallback: synchronized decoder parameters to the HDR10 base layer." <<<"$version_strings" || die "MPV Dolby Vision Profile 7 filtered codec-parameter sync missing from $directory/libmpv.so"
   grep -Fq "DV7 HDR10 fallback: failed to produce base-layer packet." <<<"$version_strings" || die "MPV Dolby Vision Profile 7 filter failure guard missing from $directory/libmpv.so"
   grep -Fq "DV7 P8.1 conversion: using FFmpeg dovi_rpu BSF." <<<"$version_strings" || die "MPV Dolby Vision Profile 7 P8.1 conversion missing from $directory/libmpv.so"
+  grep -Fq "DV7 P8.1 conversion: removed stale enhancement-layer configuration." <<<"$version_strings" || die "MPV Dolby Vision Profile 7 P8.1 stale enhancement-layer configuration guard missing from $directory/libmpv.so"
   if grep -Fq "Using device native output sample rate for passthrough compatibility" <<<"$version_strings"; then
     die "obsolete MPV AudioTrack passthrough native-rate patch present in $directory/libmpv.so"
   fi
