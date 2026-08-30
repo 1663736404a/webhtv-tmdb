@@ -803,6 +803,19 @@
     <string name="sync_select_device_first">请先选择设备</string>
     <string name="sync_failed_with_reason">同步失败：%1$s</string>
     <string name="sync_receive_success">已接收同步数据</string>
+    <string name="apk_push_url_busy">已有 APK 链接下载任务正在进行</string>
+    <string name="apk_push_url_schedule_failed">无法启动 APK 链接下载</string>
+    <string name="apk_push_url_downloading">已收到 APK 链接，正在本机下载…</string>
+    <string name="apk_push_url_install_ready">APK 已下载，请确认安装</string>
+    <string name="apk_push_url_download_failed">APK 链接下载失败：%1$s</string>
+    <string name="apk_push_url_progress_title">正在接收 APK</string>
+    <string name="apk_push_url_progress_hint">正在下载局域网设备推送的 APK，完成后仍需在 Android 系统界面确认安装。</string>
+    <string name="apk_push_url_progress_known">正在接收 %1$d%% · %2$s / %3$s</string>
+    <string name="apk_push_url_progress_unknown">已接收 %1$s</string>
+    <string name="apk_push_url_progress_detail_remaining">%1$s/s · 剩余 %2$s · 已用 %3$s</string>
+    <string name="apk_push_url_progress_detail">%1$s/s · 已用 %2$s</string>
+    <string name="apk_push_url_cancel">取消下载</string>
+    <string name="apk_push_url_canceled">已取消 APK 下载</string>
 
     <!-- Player -->
     <string name="player">播放核心</string>
