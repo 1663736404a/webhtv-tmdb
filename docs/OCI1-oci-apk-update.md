@@ -9,8 +9,8 @@
 - Protected pre-existing dirty paths: `app/.cxx/` and all paths recorded by the task guard.
 - Acceptance: GitHub discovery remains available; download routes are `auto`, `github`, and `oci`; `auto` tries OCI then GitHub; OCI verifies manifest and layer digests, APK identity and signer; progress, cancel, fallback, and mobile/leanback settings work.
 - Rollback anchor: baseline commit above. Published clients can be moved back to GitHub by omitting the `downloads.oci` object from a later update manifest.
-- Current status: implementation committed locally; Docker Hub repository and GitHub Actions configuration complete; remote branch publication remains unauthorized.
-- Next action: after explicit authorization, push the `dev` branch and its OCI recovery tag so GitHub can run the updated release workflow.
+- Current status: `dev` and recovery tags are published; the first Beta Action exposed a `setup-oras` version-resolution defect, and a fixed URL/checksum setup is pending verification.
+- Next action: verify, commit, push, and rerun the Beta Action until OCI publication succeeds.
 
 ## Product decision
 
@@ -209,3 +209,13 @@ Device checks:
 - Security follow-up: the Docker Hub PAT was supplied in chat. Rotate it in Docker Hub after this setup, then replace only the `OCI_TOKEN` Actions secret; no code change is required.
 - Rollback: delete the three GitHub Actions settings and optionally delete the still-empty `webhtv-apk` Docker Hub repository. Existing GitHub release publication remains independent.
 - Next action: obtain explicit authorization to push `dev` and the recovery tag; then run the release workflow from that branch.
+
+## Deployment checkpoint 3: 2026-08-31 02:05 CST
+
+- Published state: `dev` and both OCI recovery tags were pushed to `fish2018/webhtv`. Local upstream-tracking writes were blocked by the workspace sandbox, but the remote branch and tags were created successfully.
+- First Beta run: GitHub Actions run `33326309073` completed successfully at the job level and created a GitHub prerelease, but OCI publication was skipped. `setup-oras@v1` reported `official ORAS CLI releases does not contain version 1.3.4`; the fail-open workflow emitted a warning and generated manifests without `downloads.oci`. CNB sync was skipped as requested.
+- Root cause: ORAS `v1.3.4` is an official stable release with Linux AMD64 assets, but the setup Action's version-resolution path did not recognize it. The setup Action documents a supported alternative that accepts a trusted release URL plus SHA-256.
+- Fix: pin `https://github.com/oras-project/oras/releases/download/v1.3.4/oras_1.3.4_linux_amd64.tar.gz` with SHA-256 `f27adb935022d94df8dc77719c322dda592c78a0d57a6f7dcdd8d900b248c454` instead of the failing `version` input.
+- Evidence: the checksum matches the official `oras_1.3.4_checksums.txt`; the archive is a statically linked Linux x86-64 ELF; the same release's macOS CLI reports version `1.3.4` and commit `db9e29505c3059f2b8fde34ae8cae266c5c765e9`.
+- Rollback: revert the fixed setup input to the previous fail-open version lookup; GitHub-only release publication remains available but OCI metadata will be absent.
+- Next action: parse the workflow, finish the atomic fix, push its commit and recovery tag, then rerun a Beta release and verify Docker Hub descriptors.
