@@ -39,8 +39,9 @@
     </androidx.appcompat.widget.LinearLayoutCompat>
 
     <androidx.core.widget.NestedScrollView
+        android:id="@+id/contentScroll"
         android:layout_width="match_parent"
-        android:layout_height="380dp"
+        android:layout_height="300dp"
         android:layout_marginTop="8dp"
         android:fillViewport="true"
         android:overScrollMode="never">
@@ -53,94 +54,30 @@
             <com.google.android.material.textview.MaterialTextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="@string/update_settings_channel"
-                android:textColor="#5F6368"
-                android:textSize="13sp" />
-
-            <com.google.android.material.button.MaterialButtonToggleGroup
-                android:id="@+id/channelGroup"
-                android:layout_width="match_parent"
-                android:layout_height="44dp"
-                android:layout_marginTop="6dp"
-                app:selectionRequired="true"
-                app:singleSelection="true">
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/stable"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
-                    android:layout_width="0dp"
-                    android:layout_height="44dp"
-                    android:layout_weight="1"
-                    android:text="@string/update_channel_stable"
-                    android:textSize="14sp" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/beta"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
-                    android:layout_width="0dp"
-                    android:layout_height="44dp"
-                    android:layout_weight="1"
-                    android:text="@string/update_channel_beta"
-                    android:textSize="14sp" />
-
-            </com.google.android.material.button.MaterialButtonToggleGroup>
-
-            <com.google.android.material.textview.MaterialTextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
                 android:text="@string/update_settings_source"
                 android:textColor="#5F6368"
                 android:textSize="13sp" />
 
-            <com.google.android.material.button.MaterialButtonToggleGroup
-                android:id="@+id/sourceGroup"
-                android:layout_width="match_parent"
-                android:layout_height="44dp"
-                android:layout_marginTop="6dp"
-                app:selectionRequired="true"
-                app:singleSelection="true">
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/sourceAuto"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
-                    android:layout_width="0dp"
-                    android:layout_height="44dp"
-                    android:layout_weight="1"
-                    android:text="@string/update_source_auto"
-                    android:textSize="13sp" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/sourceGithub"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
-                    android:layout_width="0dp"
-                    android:layout_height="44dp"
-                    android:layout_weight="1"
-                    android:text="@string/update_source_github"
-                    android:textSize="13sp" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/sourceOci"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
-                    android:layout_width="0dp"
-                    android:layout_height="44dp"
-                    android:layout_weight="1"
-                    android:text="@string/update_source_oci"
-                    android:textSize="13sp" />
-
-            </com.google.android.material.button.MaterialButtonToggleGroup>
-
-            <com.google.android.material.materialswitch.MaterialSwitch
-                android:id="@+id/fallback"
+            <com.google.android.material.tabs.TabLayout
+                android:id="@+id/sourceTabs"
                 android:layout_width="match_parent"
                 android:layout_height="48dp"
-                android:layout_marginTop="8dp"
-                android:gravity="center_vertical"
-                android:text="@string/update_settings_fallback"
-                android:textColor="#303134"
-                android:textSize="14sp" />
+                android:layout_marginTop="6dp"
+                app:tabGravity="fill"
+                app:tabIndicatorColor="#1A73E8"
+                app:tabMode="fixed"
+                app:tabRippleColor="@android:color/transparent"
+                app:tabSelectedTextColor="#1A73E8"
+                app:tabTextColor="#5F6368" />
 
-            <com.google.android.material.button.MaterialButton
+            <androidx.appcompat.widget.LinearLayoutCompat
+                android:id="@+id/githubPanel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <com.google.android.material.button.MaterialButton
                 android:id="@+id/githubProxy"
                 style="@style/Widget.Material3.Button.OutlinedButton"
                 android:layout_width="match_parent"
@@ -151,7 +88,7 @@
                 android:textSize="14sp"
                 tools:text="GitHub proxy · GitHub" />
 
-            <com.google.android.material.textfield.TextInputLayout
+                <com.google.android.material.textfield.TextInputLayout
                 android:id="@+id/githubCustomLayout"
                 style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
                 android:layout_width="match_parent"
@@ -167,9 +104,9 @@
                     android:inputType="textUri"
                     android:maxLines="1" />
 
-            </com.google.android.material.textfield.TextInputLayout>
+                </com.google.android.material.textfield.TextInputLayout>
 
-            <com.google.android.material.button.MaterialButtonToggleGroup
+                <com.google.android.material.button.MaterialButtonToggleGroup
                 android:id="@+id/githubModeGroup"
                 android:layout_width="match_parent"
                 android:layout_height="44dp"
@@ -196,9 +133,17 @@
                     android:text="@string/update_proxy_mode_strip"
                     android:textSize="12sp" />
 
-            </com.google.android.material.button.MaterialButtonToggleGroup>
+                </com.google.android.material.button.MaterialButtonToggleGroup>
 
-            <com.google.android.material.button.MaterialButton
+            </androidx.appcompat.widget.LinearLayoutCompat>
+
+            <androidx.appcompat.widget.LinearLayoutCompat
+                android:id="@+id/ociPanel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <com.google.android.material.button.MaterialButton
                 android:id="@+id/ociMirror"
                 style="@style/Widget.Material3.Button.OutlinedButton"
                 android:layout_width="match_parent"
@@ -209,7 +154,7 @@
                 android:textSize="14sp"
                 tools:text="OCI mirror · dockerproxy.net" />
 
-            <com.google.android.material.textfield.TextInputLayout
+                <com.google.android.material.textfield.TextInputLayout
                 android:id="@+id/ociCustomLayout"
                 style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
                 android:layout_width="match_parent"
@@ -225,7 +170,9 @@
                     android:inputType="textUri"
                     android:maxLines="1" />
 
-            </com.google.android.material.textfield.TextInputLayout>
+                </com.google.android.material.textfield.TextInputLayout>
+
+            </androidx.appcompat.widget.LinearLayoutCompat>
 
         </androidx.appcompat.widget.LinearLayoutCompat>
 

@@ -655,29 +655,12 @@ public class Setting {
         Prefers.put("update", update);
     }
 
-    public static String getUpdateChannel() {
-        String channel = Prefers.getString("update_channel", Update.CHANNEL_STABLE);
-        return Update.CHANNEL_BETA.equals(channel) ? Update.CHANNEL_BETA : Update.CHANNEL_STABLE;
-    }
-
-    public static void putUpdateChannel(String channel) {
-        Prefers.put("update_channel", Update.CHANNEL_BETA.equals(channel) ? Update.CHANNEL_BETA : Update.CHANNEL_STABLE);
-    }
-
     public static String getUpdateSource() {
-        return UpdateSource.normalize(Prefers.getString("update_source", UpdateSource.AUTO));
+        return UpdateSource.normalize(Prefers.getString("update_source", UpdateSource.OCI));
     }
 
     public static void putUpdateSource(String source) {
         Prefers.put("update_source", UpdateSource.normalize(source));
-    }
-
-    public static boolean isUpdateFallback() {
-        return Prefers.getBoolean("update_fallback", true);
-    }
-
-    public static void putUpdateFallback(boolean fallback) {
-        Prefers.put("update_fallback", fallback);
     }
 
     public static String getUpdateGithubProxy() {

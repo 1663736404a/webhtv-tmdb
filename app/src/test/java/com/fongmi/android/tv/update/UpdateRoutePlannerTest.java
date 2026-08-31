@@ -18,10 +18,9 @@ public class UpdateRoutePlannerTest {
     private final GithubProxy.Config direct = GithubProxy.resolve(GithubProxy.DIRECT, "", GithubProxy.MODE_FULL_URL);
 
     @Test
-    public void autoTriesOciThenGithub() {
+    public void ociTriesOciThenGithub() {
         List<UpdateTarget> routes = UpdateRoutePlanner.plan(
-                UpdateSource.AUTO,
-                true,
+                UpdateSource.OCI,
                 "https://github.com/fish2018/webhtv/releases/download/v1/app.apk",
                 artifact,
                 direct,
@@ -32,36 +31,35 @@ public class UpdateRoutePlannerTest {
     }
 
     @Test
-    public void explicitGithubWithoutFallbackUsesOneRoute() {
+    public void githubFallsBackToOci() {
         List<UpdateTarget> routes = UpdateRoutePlanner.plan(
                 UpdateSource.GITHUB,
-                false,
                 "https://github.com/fish2018/webhtv/releases/download/v1/app.apk",
                 artifact,
                 direct,
                 "https://dockerproxy.net");
-        assertEquals(1, routes.size());
+        assertEquals(2, routes.size());
         assertEquals(UpdateTarget.Kind.GITHUB, routes.get(0).kind);
+        assertEquals(UpdateTarget.Kind.OCI, routes.get(1).kind);
     }
 
     @Test
-    public void autoWithoutFallbackUsesOnlyPreferredAvailableRoute() {
+    public void legacyAutoNormalizesToOci() {
         List<UpdateTarget> routes = UpdateRoutePlanner.plan(
-                UpdateSource.AUTO,
-                false,
+                "auto",
                 "https://github.com/fish2018/webhtv/releases/download/v1/app.apk",
                 artifact,
                 direct,
                 "https://dockerproxy.net");
-        assertEquals(1, routes.size());
+        assertEquals(2, routes.size());
         assertEquals(UpdateTarget.Kind.OCI, routes.get(0).kind);
+        assertEquals(UpdateTarget.Kind.GITHUB, routes.get(1).kind);
     }
 
     @Test
     public void missingOciMetadataFallsBackToGithub() {
         List<UpdateTarget> routes = UpdateRoutePlanner.plan(
                 UpdateSource.OCI,
-                true,
                 "https://github.com/fish2018/webhtv/releases/download/v1/app.apk",
                 null,
                 direct,
@@ -71,14 +69,14 @@ public class UpdateRoutePlannerTest {
     }
 
     @Test
-    public void explicitOciWithoutFallbackDoesNotUseGithubWhenMetadataIsMissing() {
+    public void missingGithubStillUsesOci() {
         List<UpdateTarget> routes = UpdateRoutePlanner.plan(
                 UpdateSource.OCI,
-                false,
-                "https://github.com/fish2018/webhtv/releases/download/v1/app.apk",
-                null,
+                "",
+                artifact,
                 direct,
                 "https://dockerproxy.net");
-        assertEquals(0, routes.size());
+        assertEquals(1, routes.size());
+        assertEquals(UpdateTarget.Kind.OCI, routes.get(0).kind);
     }
 }

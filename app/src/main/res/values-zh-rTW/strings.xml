@@ -1122,10 +1122,7 @@
     <string name="update_collapse">收起</string>
     <string name="update_settings">更新設定</string>
     <string name="update_settings_title">更新設定</string>
-    <string name="update_settings_channel">版本頻道</string>
-    <string name="update_settings_source">下載來源</string>
-    <string name="update_settings_fallback">下載失敗後嘗試備用來源</string>
-    <string name="update_source_auto">自動</string>
+    <string name="update_settings_source">更新方式</string>
     <string name="update_source_github">GitHub</string>
     <string name="update_source_oci">OCI</string>
     <string name="update_github_proxy">GitHub 代理</string>

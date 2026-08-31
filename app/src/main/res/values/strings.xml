@@ -1141,10 +1141,7 @@
     <string name="update_collapse">Collapse</string>
     <string name="update_settings">Update settings</string>
     <string name="update_settings_title">Update settings</string>
-    <string name="update_settings_channel">Version track</string>
-    <string name="update_settings_source">Download source</string>
-    <string name="update_settings_fallback">Try another source if the download fails</string>
-    <string name="update_source_auto">Auto</string>
+    <string name="update_settings_source">Download method</string>
     <string name="update_source_github">GitHub</string>
     <string name="update_source_oci">OCI</string>
     <string name="update_github_proxy">GitHub proxy</string>

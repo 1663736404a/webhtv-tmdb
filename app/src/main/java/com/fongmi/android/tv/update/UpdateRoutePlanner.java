@@ -8,18 +8,15 @@ public final class UpdateRoutePlanner {
     private UpdateRoutePlanner() {
     }
 
-    public static List<UpdateTarget> plan(String source, boolean fallback, String githubUrl, OciArtifact artifact, GithubProxy.Config githubProxy, String ociEndpoint) {
+    public static List<UpdateTarget> plan(String source, String githubUrl, OciArtifact artifact, GithubProxy.Config githubProxy, String ociEndpoint) {
         List<UpdateTarget> routes = new ArrayList<>();
         String normalized = UpdateSource.normalize(source);
         if (UpdateSource.GITHUB.equals(normalized)) {
             addGithub(routes, githubUrl, githubProxy);
-            if (fallback) addOci(routes, artifact, ociEndpoint);
-        } else if (UpdateSource.OCI.equals(normalized)) {
             addOci(routes, artifact, ociEndpoint);
-            if (fallback) addGithub(routes, githubUrl, githubProxy);
         } else {
             addOci(routes, artifact, ociEndpoint);
-            if (fallback || routes.isEmpty()) addGithub(routes, githubUrl, githubProxy);
+            addGithub(routes, githubUrl, githubProxy);
         }
         return routes;
     }

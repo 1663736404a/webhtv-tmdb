@@ -7,7 +7,7 @@
 - Branch / baseline: `dev` / `332f8b26c89e69d19f287b1d911a780826149619`.
 - Lane / scope: `upstream`; task guard `OCI1-oci-apk-update` owns the paths declared at guard start.
 - Protected pre-existing dirty paths: `app/.cxx/` and all paths recorded by the task guard.
-- Acceptance: GitHub discovery remains available; download routes are `auto`, `github`, and `oci`; `auto` tries OCI then GitHub; OCI verifies manifest and layer digests, APK identity and signer; progress, cancel, fallback, and mobile/leanback settings work.
+- Acceptance: GitHub discovery remains available; download methods are `oci` and `github`, defaulting to OCI; the other method is always retained as failure fallback; OCI verifies manifest and layer digests, APK identity and signer; progress, cancel, synchronized settings, and mobile/leanback focus work.
 - Rollback anchor: baseline commit above. Published clients can be moved back to GitHub by omitting the `downloads.oci` object from a later update manifest.
 - Current status: Beta GitHub/OCI publication is verified end to end on `dev`; four APK artifacts and matching update descriptors are public.
 - Next action: perform the Android client download scenario with the `free.hubfast.cn` OCI mirror, then decide whether to promote `dev` into `main`.
@@ -16,13 +16,12 @@
 
 CNB is not part of the new download route because releases are no longer being published there. Existing CNB helpers may remain for unrelated legacy consumers, but update discovery and APK transfer must not depend on CNB.
 
-The version track and transport source are independent:
+Stable and beta releases remain visible in the update dialog, but there is no persistent version-track preference. The update settings dialog owns transport only:
 
-- Track: `stable` or `beta`.
-- Source: `auto`, `github`, or `oci`.
-- `auto`: OCI first when a valid OCI descriptor exists, then GitHub.
-- Explicit `github`: GitHub first, then OCI when fallback is enabled.
-- Explicit `oci`: OCI first, then GitHub when fallback is enabled.
+- Source: `oci` or `github`, defaulting to `oci`; legacy `auto` values normalize to `oci`.
+- `github`: GitHub first, then OCI when available.
+- `oci`: OCI first, then GitHub when available.
+- Cross-source fallback is an invariant and is no longer user-disableable.
 
 The existing update JSON remains the discovery and release-notes control plane. Legacy `apk`, `size`, and `sha256` fields remain so older clients continue to update.
 
@@ -168,7 +167,7 @@ Device checks:
 ## Rollout and rollback
 
 1. Publish OCI metadata for beta releases only.
-2. Ship the client with `auto` defaulting to OCI then GitHub, while explicit GitHub remains available.
+2. Ship the client with OCI selected by default and GitHub retained as the unconditional failure fallback; explicit GitHub remains available and falls back to OCI.
 3. Promote OCI metadata to stable after one beta cycle and device/network evidence.
 4. Operational rollback: omit `downloads.oci` from a later update JSON; all clients use GitHub.
 5. Code rollback: revert the atomic task commit/recovery tag; release artifacts and legacy JSON fields remain compatible.
@@ -230,7 +229,52 @@ Device checks:
 - Mobile ARM64: size `133629314`, layer `sha256:7f48bdb3169112a8e6dedb975dee5e4eb8a8a4c46d0970f9b1579ea5bc4db322`, manifest `sha256:bd0446240520bb8f4d183bce8433cede1f8fe1cb45139efc63d965eb5b89f5bd`.
 - Mobile ARMv7: size `112722752`, layer `sha256:014cf7057f06c19fa725462eea11172926ed839594ec9798eeea52c694c86d5c`, manifest `sha256:7d1de6ae523a19fda1ced3fc0e0a9534668a47733e12598e4a7f669a579e08eb`.
 - Registry verification: ORAS fetched every public Docker Hub descriptor by tag and every manifest by digest. All four manifest digests, one-layer APK media types, layer digests, and layer sizes exactly matched the release JSON.
-- Mirror verification: `free.hubfast.cn` returned the new manifest by both tag and digest; the raw Mobile ARM64 manifest SHA-256 matched `bd0446240520bb8f4d183bce8433cede1f8fe1cb45139efc63d965eb5b89f5bd`. At the same observation point, `dockerproxy.net` returned HTTP 502 for both forms and `docker.jiaxin.site` returned HTTP 401. Use `free.hubfast.cn` for the first device test; `auto` mode still falls back to GitHub on mirror failure.
+- Mirror verification: `free.hubfast.cn` returned the new manifest by both tag and digest; the raw Mobile ARM64 manifest SHA-256 matched `bd0446240520bb8f4d183bce8433cede1f8fe1cb45139efc63d965eb5b89f5bd`. At the same observation point, `dockerproxy.net` returned HTTP 502 for both forms and `docker.jiaxin.site` returned HTTP 401. Use `free.hubfast.cn` for the first device test; OCI mode still falls back to GitHub on mirror failure.
 - Non-blocking warnings: GitHub reports Node.js 20 compatibility forcing for several Actions and recommends `actions/setup-java@v5`; these warnings did not affect this release and are outside the OCI functional fix.
 - Rollback: remove `downloads.oci` from a future manifest or disable `publish_oci`; the GitHub release path remains complete. The published OCI objects are content-addressed and can remain as harmless beta history.
 - Next action: on a device with an older version code, select Beta + OCI + `free.hubfast.cn`, verify full APK transfer/cancel/install, then promote the verified implementation to `main` if accepted.
+
+## Update settings simplification: 2026-08-31 10:15 CST
+
+Decision question: how should the update settings UI expose the two download transports without mixing release selection, transport routing, and fallback policy?
+
+### Evidence and current flow
+
+| Evidence | Source / revision | Grade | Decision impact |
+| --- | --- | --- | --- |
+| Stable and beta manifests are fetched concurrently; the saved channel only chooses the initially expanded update item | `Updater.doInBackground`, `getPreferredUpdate`, `onChannel` at `2de49b6dddfebdb2653d0568df13244993be8731` | A | Remove the channel preference from settings without removing beta discovery or manual beta selection |
+| APK route construction is independent from release discovery | `Updater.getRoutes` and `UpdateRoutePlanner.plan` at the same revision | A | Keep transport selection in update settings and make fallback an invariant |
+| Fixed tabs expose all options concurrently and `OnTabSelectedListener` is the supported selection callback | Material Components `TabLayout.java`, upstream `master`, accessed 2026-08-31 | A | Use one fixed two-tab control and render only the selected transport panel |
+| Directional navigation should be tested with a D-pad and explicit `nextFocus*` targets used when default focus movement is unsuitable | Android Developers, keyboard navigation guide, accessed 2026-08-31 | A | Provide visible focused tab styling and explicit up/down focus paths on leanback |
+| WebHTV already adapts Material tabs for TV by making tab child views focusable and applying `selector_mpv_tab_focus` | `MpvConfigDialog` and `PlaybackPerformanceDialog` at the same revision | A | Reuse the established local focus pattern instead of adding a new widget abstraction |
+| One-key sync includes only keys in `Backup.APP_PREFS`; current update source and proxy keys are absent | `Backup.include` / `APP_PREFS` at the same revision | A | Add the active update transport and proxy keys to the app-settings allowlist and test them |
+
+Exact upstream feature commits, upstream PR/revert history, and academic/benchmark evidence are inapplicable: this stage changes a local settings presentation and preference policy without introducing a dependency, protocol, algorithm, or performance technique. The current application code and the established Material/Android navigation contracts decide the implementation.
+
+### Alternatives
+
+- No change: preserves existing controls but continues to mix a weak version preference with transport settings, exposes a redundant auto mode, and lets users disable the only recovery path.
+- Keep segmented buttons and hide unrelated controls: smaller layout change, but does not provide the requested tab/view relationship.
+- WebHTV-adapted fixed tabs (selected): OCI and GitHub are peer tabs; each tab owns only its proxy controls; source selection persists; the opposite source is always appended as fallback; TV focus uses the project's existing tab focus selector and explicit directional navigation.
+
+### Acceptance and rollback
+
+- No version-channel control or persisted default-channel behavior remains in update settings.
+- OCI is the default for new installs and for legacy `auto` values; GitHub remains explicitly selectable.
+- Only the selected source's proxy/mirror controls are visible.
+- There is no fallback switch; an available opposite transport is always tried after the selected transport fails.
+- About-dialog action order is check update, acknowledge, update settings.
+- Leanback tabs show a visible focus state and all controls are reachable by D-pad; mobile touch behavior remains intact.
+- One-key sync with app settings includes source, GitHub proxy URL/mode, and OCI mirror URL.
+- Rollback: revert this stage commit. Existing stored `update_channel`, `update_fallback`, and `auto` values are harmless; the reverted code can read them again.
+
+### Implementation checkpoint 5: 2026-08-31 10:25 CST
+
+- Implemented: removed the persistent version-track setting, replaced auto/GitHub/OCI controls with fixed OCI/GitHub tabs, defaulted legacy/unknown sources to OCI, made cross-source fallback unconditional, and rendered only the selected transport's proxy controls.
+- About dialog: action order is now check update, acknowledge, update settings; explicit left/right focus links keep the settings icon reachable after the acknowledge button.
+- Leanback focus: tab child views reuse `selector_mpv_tab_focus`; close, selected tab, active proxy control, and save have explicit D-pad transition handlers. Mobile remains touch-selectable through Material `TabLayout`.
+- One-key sync: `Backup.APP_PREFS` now includes `update_source`, GitHub proxy id/URL/mode, and OCI mirror id/URL; retired `update_channel` and `update_fallback` remain excluded.
+- Verification: focused `UpdateRoutePlannerTest` and `BackupPreferenceFilterTest` passed; mobile ARM64 and leanback ARM64 debug Java compilation passed in the same Gradle invocation. XML parsing passed before the build, and Android resource processing plus ViewBinding generation succeeded for both variants.
+- Device limitation: `adb devices -l` returned no connected devices. Real TV D-pad focus appearance and mobile touch screenshots remain unverified device scenarios; no claim of physical-device testing is made.
+- Protected state: the 35 pre-existing `app/.cxx/` paths remain outside task scope.
+- Rollback: revert the atomic stage commit/recovery tag; no manifest, Registry artifact, or remote release needs to change.

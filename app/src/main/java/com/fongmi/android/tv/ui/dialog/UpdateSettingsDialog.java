@@ -4,15 +4,16 @@ import android.app.Dialog;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 
 import androidx.fragment.app.FragmentActivity;
 
 import com.fongmi.android.tv.R;
-import com.fongmi.android.tv.bean.Update;
 import com.fongmi.android.tv.databinding.DialogUpdateSettingsBinding;
 import com.fongmi.android.tv.setting.Setting;
 import com.fongmi.android.tv.update.GithubProxy;
@@ -21,8 +22,13 @@ import com.fongmi.android.tv.update.UpdateSource;
 import com.fongmi.android.tv.update.UpdateUrl;
 import com.fongmi.android.tv.utils.Notify;
 import com.fongmi.android.tv.utils.ResUtil;
+import com.fongmi.android.tv.utils.Util;
+import com.google.android.material.tabs.TabLayout;
 
 public final class UpdateSettingsDialog {
+
+    private static final int TAB_OCI = 0;
+    private static final int TAB_GITHUB = 1;
 
     private UpdateSettingsDialog() {
     }
@@ -31,29 +37,42 @@ public final class UpdateSettingsDialog {
         DialogUpdateSettingsBinding binding = DialogUpdateSettingsBinding.inflate(LayoutInflater.from(activity));
         State state = State.load();
         Dialog dialog = LightDialog.create(activity, null, binding.getRoot());
-        render(activity, binding, state);
+        setupTabs(activity, binding, state);
         bind(activity, dialog, binding, state);
+        render(activity, binding, state);
         dialog.setCanceledOnTouchOutside(false);
         dialog.show();
         configureWindow(activity, dialog);
-        binding.sourceAuto.requestFocus();
+        configureTvFocus(binding, state);
     }
 
     private static void bind(FragmentActivity activity, Dialog dialog, DialogUpdateSettingsBinding binding, State state) {
         binding.close.setOnClickListener(view -> dialog.dismiss());
-        binding.channelGroup.addOnButtonCheckedListener((group, id, checked) -> {
-            if (checked) state.channel = id == R.id.beta ? Update.CHANNEL_BETA : Update.CHANNEL_STABLE;
-        });
-        binding.sourceGroup.addOnButtonCheckedListener((group, id, checked) -> {
-            if (!checked) return;
-            state.source = id == R.id.sourceGithub ? UpdateSource.GITHUB : id == R.id.sourceOci ? UpdateSource.OCI : UpdateSource.AUTO;
-        });
         binding.githubModeGroup.addOnButtonCheckedListener((group, id, checked) -> {
             if (checked) state.githubMode = id == R.id.githubModeStrip ? GithubProxy.MODE_STRIP_SCHEME : GithubProxy.MODE_FULL_URL;
         });
         binding.githubProxy.setOnClickListener(view -> chooseGithub(activity, binding, state));
         binding.ociMirror.setOnClickListener(view -> chooseOci(activity, binding, state));
         binding.save.setOnClickListener(view -> save(activity, dialog, binding, state));
+    }
+
+    private static void setupTabs(FragmentActivity activity, DialogUpdateSettingsBinding binding, State state) {
+        binding.sourceTabs.setTabMode(TabLayout.MODE_FIXED);
+        binding.sourceTabs.setTabGravity(TabLayout.GRAVITY_FILL);
+        binding.sourceTabs.addTab(binding.sourceTabs.newTab().setText(R.string.update_source_oci), false);
+        binding.sourceTabs.addTab(binding.sourceTabs.newTab().setText(R.string.update_source_github), false);
+        binding.sourceTabs.addOnTabSelectedListener(new TabLayout.OnTabSelectedListener() {
+            @Override
+            public void onTabSelected(TabLayout.Tab tab) {
+                state.source = tab.getPosition() == TAB_GITHUB ? UpdateSource.GITHUB : UpdateSource.OCI;
+                renderSource(binding, state);
+            }
+
+            @Override public void onTabUnselected(TabLayout.Tab tab) { }
+            @Override public void onTabReselected(TabLayout.Tab tab) { }
+        });
+        int position = UpdateSource.GITHUB.equals(state.source) ? TAB_GITHUB : TAB_OCI;
+        binding.sourceTabs.selectTab(binding.sourceTabs.getTabAt(position));
     }
 
     private static void chooseGithub(FragmentActivity activity, DialogUpdateSettingsBinding binding, State state) {
@@ -96,20 +115,18 @@ public final class UpdateSettingsDialog {
         binding.githubCustomLayout.setError(null);
         binding.ociCustomLayout.setError(null);
         try {
-            if (GithubProxy.CUSTOM.equals(state.githubProxy)) UpdateUrl.requireHttpsOrigin(state.githubCustom);
+            if (UpdateSource.GITHUB.equals(state.source) && GithubProxy.CUSTOM.equals(state.githubProxy)) UpdateUrl.requireHttpsOrigin(state.githubCustom);
         } catch (Exception e) {
             binding.githubCustomLayout.setError(activity.getString(R.string.update_proxy_invalid));
             return;
         }
         try {
-            if (OciMirror.CUSTOM.equals(state.ociMirror)) UpdateUrl.requireHttpsOrigin(state.ociCustom);
+            if (UpdateSource.OCI.equals(state.source) && OciMirror.CUSTOM.equals(state.ociMirror)) UpdateUrl.requireHttpsOrigin(state.ociCustom);
         } catch (Exception e) {
             binding.ociCustomLayout.setError(activity.getString(R.string.update_proxy_invalid));
             return;
         }
-        Setting.putUpdateChannel(state.channel);
         Setting.putUpdateSource(state.source);
-        Setting.putUpdateFallback(binding.fallback.isChecked());
         Setting.putUpdateGithubProxy(state.githubProxy);
         Setting.putUpdateGithubProxyUrl(state.githubCustom);
         Setting.putUpdateGithubProxyMode(state.githubMode);
@@ -120,14 +137,19 @@ public final class UpdateSettingsDialog {
     }
 
     private static void render(FragmentActivity activity, DialogUpdateSettingsBinding binding, State state) {
-        binding.channelGroup.check(Update.CHANNEL_BETA.equals(state.channel) ? R.id.beta : R.id.stable);
-        binding.sourceGroup.check(UpdateSource.GITHUB.equals(state.source) ? R.id.sourceGithub : UpdateSource.OCI.equals(state.source) ? R.id.sourceOci : R.id.sourceAuto);
-        binding.fallback.setChecked(state.fallback);
         binding.githubCustom.setText(state.githubCustom);
         binding.ociCustom.setText(state.ociCustom);
         binding.githubModeGroup.check(GithubProxy.MODE_STRIP_SCHEME.equals(state.githubMode) ? R.id.githubModeStrip : R.id.githubModeFull);
         renderGithub(activity, binding, state);
         renderOci(activity, binding, state);
+        renderSource(binding, state);
+    }
+
+    private static void renderSource(DialogUpdateSettingsBinding binding, State state) {
+        boolean github = UpdateSource.GITHUB.equals(state.source);
+        binding.githubPanel.setVisibility(github ? View.VISIBLE : View.GONE);
+        binding.ociPanel.setVisibility(github ? View.GONE : View.VISIBLE);
+        if (Util.isLeanback()) binding.sourceTabs.post(() -> configureTvFocus(binding, state));
     }
 
     private static void renderGithub(FragmentActivity activity, DialogUpdateSettingsBinding binding, State state) {
@@ -160,11 +182,73 @@ public final class UpdateSettingsDialog {
         window.setLayout(params.width, WindowManager.LayoutParams.WRAP_CONTENT);
     }
 
+    private static void configureTvFocus(DialogUpdateSettingsBinding binding, State state) {
+        if (!Util.isLeanback()) return;
+        tvFocusable(binding.close);
+        tvFocusable(binding.save);
+        binding.close.setOnKeyListener((view, keyCode, event) -> event.getAction() == KeyEvent.ACTION_DOWN && keyCode == KeyEvent.KEYCODE_DPAD_DOWN && focusSelectedTab(binding));
+        binding.save.setOnKeyListener((view, keyCode, event) -> event.getAction() == KeyEvent.ACTION_DOWN && keyCode == KeyEvent.KEYCODE_DPAD_UP && focusLastControl(binding, state));
+        binding.githubProxy.setOnKeyListener((view, keyCode, event) -> focusFromPrimary(binding, keyCode, event));
+        binding.ociMirror.setOnKeyListener((view, keyCode, event) -> focusFromPrimary(binding, keyCode, event));
+        configureTabFocus(binding, state);
+        focusSelectedTab(binding);
+    }
+
+    private static void configureTabFocus(DialogUpdateSettingsBinding binding, State state) {
+        if (binding.sourceTabs.getChildCount() == 0) return;
+        View strip = binding.sourceTabs.getChildAt(0);
+        if (!(strip instanceof ViewGroup tabs)) return;
+        for (int i = 0; i < tabs.getChildCount(); i++) {
+            View tab = tabs.getChildAt(i);
+            tvFocusable(tab);
+            tab.setBackgroundResource(R.drawable.selector_mpv_tab_focus);
+            tab.setOnKeyListener((view, keyCode, event) -> {
+                if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
+                if (keyCode == KeyEvent.KEYCODE_DPAD_UP) return binding.close.requestFocus();
+                if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) return focusPrimary(binding, state);
+                return false;
+            });
+        }
+    }
+
+    private static boolean focusFromPrimary(DialogUpdateSettingsBinding binding, int keyCode, KeyEvent event) {
+        return event.getAction() == KeyEvent.ACTION_DOWN && keyCode == KeyEvent.KEYCODE_DPAD_UP && focusSelectedTab(binding);
+    }
+
+    private static boolean focusSelectedTab(DialogUpdateSettingsBinding binding) {
+        if (binding.sourceTabs.getChildCount() == 0) return false;
+        View strip = binding.sourceTabs.getChildAt(0);
+        if (!(strip instanceof ViewGroup tabs)) return false;
+        int position = Math.max(TAB_OCI, binding.sourceTabs.getSelectedTabPosition());
+        if (position >= tabs.getChildCount()) position = TAB_OCI;
+        return tabs.getChildAt(position).requestFocus();
+    }
+
+    private static boolean focusPrimary(DialogUpdateSettingsBinding binding, State state) {
+        return (UpdateSource.GITHUB.equals(state.source) ? binding.githubProxy : binding.ociMirror).requestFocus();
+    }
+
+    private static boolean focusLastControl(DialogUpdateSettingsBinding binding, State state) {
+        if (UpdateSource.GITHUB.equals(state.source)) {
+            if (GithubProxy.CUSTOM.equals(state.githubProxy)) {
+                int checked = binding.githubModeGroup.getCheckedButtonId();
+                View mode = checked == View.NO_ID ? binding.githubModeFull : binding.githubModeGroup.findViewById(checked);
+                if (mode != null) return mode.requestFocus();
+            }
+            return binding.githubProxy.requestFocus();
+        }
+        if (OciMirror.CUSTOM.equals(state.ociMirror)) return binding.ociCustom.requestFocus();
+        return binding.ociMirror.requestFocus();
+    }
+
+    private static void tvFocusable(View view) {
+        view.setFocusable(true);
+        view.setFocusableInTouchMode(true);
+    }
+
     private static final class State {
 
-        private String channel;
         private String source;
-        private boolean fallback;
         private String githubProxy;
         private String githubCustom;
         private String githubMode;
@@ -173,9 +257,7 @@ public final class UpdateSettingsDialog {
 
         private static State load() {
             State state = new State();
-            state.channel = Setting.getUpdateChannel();
             state.source = Setting.getUpdateSource();
-            state.fallback = Setting.isUpdateFallback();
             state.githubProxy = Setting.getUpdateGithubProxy();
             state.githubCustom = Setting.getUpdateGithubProxyUrl();
             state.githubMode = Setting.getUpdateGithubProxyMode();

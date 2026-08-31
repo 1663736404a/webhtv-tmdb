@@ -141,8 +141,10 @@ public class Updater implements UpdateTransfer.Callback, UpdateListener {
     }
 
     private Update getPreferredUpdate() {
-        if (Update.CHANNEL_BETA.equals(Setting.getUpdateChannel()) && beta != null && beta.hasManifest()) return beta;
-        return stable;
+        if (stable != null && stable.hasUpdate()) return stable;
+        if (beta != null && beta.hasUpdate()) return beta;
+        if (stable != null && stable.hasManifest()) return stable;
+        return beta;
     }
 
     private Update awaitUpdate(Future<Update> future, String channel, long deadline) {
@@ -356,7 +358,7 @@ public class Updater implements UpdateTransfer.Callback, UpdateListener {
         try {
             GithubProxy.Config github = GithubProxy.resolve(Setting.getUpdateGithubProxy(), Setting.getUpdateGithubProxyUrl(), Setting.getUpdateGithubProxyMode());
             String endpoint = update.oci == null ? "" : OciMirror.resolve(Setting.getUpdateOciMirror(), Setting.getUpdateOciMirrorUrl(), update.oci);
-            return UpdateRoutePlanner.plan(Setting.getUpdateSource(), Setting.isUpdateFallback(), update.githubUrl, update.oci, github, endpoint);
+            return UpdateRoutePlanner.plan(Setting.getUpdateSource(), update.githubUrl, update.oci, github, endpoint);
         } catch (Exception e) {
             return List.of();
         }
@@ -404,7 +406,6 @@ public class Updater implements UpdateTransfer.Callback, UpdateListener {
 
     @Override
     public void onChannel(String channel) {
-        Setting.putUpdateChannel(channel);
         selected = Update.CHANNEL_BETA.equals(channel) ? beta : stable;
     }
 
