@@ -3527,11 +3527,25 @@ public class VideoActivity extends PlaybackActivity implements CustomKeyDownVod.
         boolean empty = item.getFlags().isEmpty();
         mBinding.flag.setVisibility(empty ? View.GONE : View.VISIBLE);
         if (empty) {
-            startFlow();
-        } else {
+            if (PlayerSetting.isAutoPlay()) startFlow();
+        } else if (PlayerSetting.isAutoPlay()) {
             onItemClick(mHistory.getFlag());
             if (mHistory.isRevSort()) reverseEpisode(true);
+        } else {
+            restoreSelectionWithoutPlayback();
         }
+    }
+
+    /** Updates the initial route/episode UI without requesting playerContent or starting a player. */
+    private void restoreSelectionWithoutPlayback() {
+        mFlagAdapter.setSelected(mHistory.getFlag());
+        Flag flag = getFlag();
+        if (flag == null) return;
+        Episode episode = getMark().isEmpty() ? flag.find(mHistory.getEpisode(), true) : flag.find(mHistory.getVodRemarks(), false);
+        if (episode != null) mFlagAdapter.toggle(episode);
+        setEpisodeAdapter(flag.getEpisodes());
+        setQualityVisible(false);
+        if (mHistory.isRevSort()) reverseEpisode(true);
     }
 
     private void checkHistory(Vod item) {

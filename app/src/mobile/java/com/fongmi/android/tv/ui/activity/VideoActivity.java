@@ -4195,12 +4195,14 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         mBinding.flag.setVisibility(empty ? View.GONE : View.VISIBLE);
         boolean preservePlayback = mRestoringConfigurationPlayback && service() != null && !player().isEmpty();
         if (empty) {
-            if (!preservePlayback) startFlow();
+            if (!preservePlayback && PlayerSetting.isAutoPlay()) startFlow();
         } else if (preservePlayback) {
             restoreFlagSelectionWithoutPlayback();
-        } else {
+        } else if (PlayerSetting.isAutoPlay()) {
             onItemClick(mHistory.getFlag());
             if (mHistory.isRevSort()) reverseEpisode(true);
+        } else {
+            restoreFlagSelectionWithoutPlayback();
         }
         if (preservePlayback) SpiderDebug.log("karaoke-result", "configuration restore preserved playback key=%s episode=%s", player().getKey(), mHistory.getVodRemarks());
         mRestoringConfigurationPlayback = false;
@@ -4210,7 +4212,8 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         mFlagAdapter.setSelected(mHistory.getFlag());
         Flag flag = getFlag();
         if (flag == null) return;
-        syncSelectedEpisode(flag);
+        Episode episode = getMark().isEmpty() ? flag.find(mHistory.getEpisode(), true) : flag.find(mHistory.getVodRemarks(), false);
+        if (episode != null) mFlagAdapter.toggle(episode);
         setEpisodeAdapter(flag.getEpisodes());
         scrollEpisodeToSelected();
         setQualityVisible(false);
