@@ -454,99 +454,124 @@
                     </FrameLayout>
 
                     <androidx.appcompat.widget.LinearLayoutCompat
+                        android:id="@+id/detailHero"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginStart="16dp"
+                        android:layout_marginTop="4dp"
                         android:layout_marginEnd="16dp"
-                        android:gravity="center_vertical"
+                        android:gravity="top"
                         android:orientation="horizontal">
 
-                        <com.google.android.material.textview.MaterialTextView
-                            android:id="@+id/name"
-                            style="@style/Video.ContextText"
+                        <androidx.appcompat.widget.AppCompatImageView
+                            android:id="@+id/poster"
+                            android:layout_width="104dp"
+                            android:layout_height="156dp"
+                            android:background="@drawable/shape_video_episode_grid"
+                            android:contentDescription="@string/detail_title"
+                            android:scaleType="centerCrop"
+                            android:src="@drawable/artwork" />
+
+                        <androidx.appcompat.widget.LinearLayoutCompat
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
+                            android:layout_marginStart="14dp"
                             android:layout_weight="1"
-                            android:ellipsize="end"
-                            android:maxLines="1"
-                            android:textColor="@color/white"
-                            android:textSize="19sp"
-                            tools:text="慶餘年第二季" />
+                            android:orientation="vertical">
 
-                        <com.google.android.material.textview.MaterialTextView
-                            android:id="@+id/remark"
-                            style="@style/Video.ContextText"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="10dp"
-                            android:ellipsize="end"
-                            android:maxWidth="112dp"
-                            android:singleLine="true"
-                            android:textColor="@color/white_80"
-                            android:textSize="13sp"
-                            tools:text="更新至第30集" />
+                            <androidx.appcompat.widget.LinearLayoutCompat
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal">
+
+                                <com.google.android.material.textview.MaterialTextView
+                                    android:id="@+id/name"
+                                    style="@style/Video.ContextText"
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:ellipsize="end"
+                                    android:maxLines="2"
+                                    android:textColor="@color/white"
+                                    android:textSize="20sp"
+                                    android:textStyle="bold"
+                                    tools:text="慶餘年第二季" />
+
+                                <com.google.android.material.textview.MaterialTextView
+                                    android:id="@+id/remark"
+                                    style="@style/Video.ContextText"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="8dp"
+                                    android:background="@drawable/shape_video_item"
+                                    android:ellipsize="end"
+                                    android:maxWidth="108dp"
+                                    android:singleLine="true"
+                                    android:textColor="@color/white_90"
+                                    android:textSize="11sp"
+                                    tools:text="更新至第30集" />
+
+                            </androidx.appcompat.widget.LinearLayoutCompat>
+
+                            <com.google.android.material.textview.MaterialTextView
+                                android:id="@+id/other"
+                                style="@style/Video.ContextText"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="8dp"
+                                android:ellipsize="end"
+                                android:maxLines="2"
+                                android:textColor="@color/white_90"
+                                android:textSize="13sp"
+                                tools:text="年份：2022 地區：台灣 類型：科幻" />
+
+                            <com.google.android.material.textview.MaterialTextView
+                                android:id="@+id/site"
+                                style="@style/Video.ContextText"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="6dp"
+                                android:ellipsize="end"
+                                android:singleLine="true"
+                                android:textColor="@color/white_70"
+                                android:textSize="12sp"
+                                tools:text="站源：泥巴" />
+
+                            <com.google.android.material.textview.MaterialTextView
+                                android:id="@+id/director"
+                                style="@style/Video.ContextText"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="6dp"
+                                android:ellipsize="end"
+                                android:maxLines="2"
+                                android:textColor="@color/white_80"
+                                android:textSize="12sp"
+                                tools:text="導演：FongMi" />
+
+                            <com.google.android.material.textview.MaterialTextView
+                                android:id="@+id/actor"
+                                style="@style/Video.ContextText"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="6dp"
+                                android:ellipsize="end"
+                                android:maxLines="2"
+                                android:textColor="@color/white_80"
+                                android:textSize="12sp"
+                                tools:text="演員：FongMi" />
+
+                        </androidx.appcompat.widget.LinearLayoutCompat>
 
                     </androidx.appcompat.widget.LinearLayoutCompat>
-
-                    <com.google.android.material.textview.MaterialTextView
-                        android:id="@+id/site"
-                        style="@style/Video.ContextText"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="16dp"
-                        android:layout_marginTop="6dp"
-                        android:layout_marginEnd="16dp"
-                        android:singleLine="true"
-                        android:textColor="@color/white_80"
-                        android:textSize="13sp"
-                        tools:text="站源：泥巴" />
-
-                    <com.google.android.material.textview.MaterialTextView
-                        android:id="@+id/other"
-                        style="@style/Video.ContextText"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="16dp"
-                        android:layout_marginTop="6dp"
-                        android:layout_marginEnd="16dp"
-                        android:singleLine="true"
-                        android:textColor="@color/white_90"
-                        android:textSize="13sp"
-                        tools:text="年份：2022 地區：台灣 類型：科幻" />
-
-                    <com.google.android.material.textview.MaterialTextView
-                        android:id="@+id/director"
-                        style="@style/Video.ContextText"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="16dp"
-                        android:layout_marginTop="6dp"
-                        android:layout_marginEnd="16dp"
-                        android:singleLine="true"
-                        android:textColor="@color/white_80"
-                        android:textSize="13sp"
-                        tools:text="導演：FongMi" />
-
-                    <com.google.android.material.textview.MaterialTextView
-                        android:id="@+id/actor"
-                        style="@style/Video.ContextText"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="16dp"
-                        android:layout_marginTop="6dp"
-                        android:layout_marginEnd="16dp"
-                        android:ellipsize="end"
-                        android:maxLines="1"
-                        android:textColor="@color/white_80"
-                        android:textSize="13sp"
-                        tools:text="演員：FongMi" />
 
                     <androidx.appcompat.widget.LinearLayoutCompat
                         android:id="@+id/content_layout"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginStart="16dp"
-                        android:layout_marginTop="7dp"
+                        android:layout_marginTop="14dp"
                         android:layout_marginEnd="16dp"
                         android:gravity="top"
                         android:orientation="horizontal">
@@ -568,7 +593,7 @@
                             android:layout_weight="1"
                             android:ellipsize="end"
                             android:lineSpacingExtra="3dp"
-                            android:maxLines="2"
+                            android:maxLines="3"
                             android:textColor="@color/white_90"
                             android:textSize="13sp"
                             tools:text="一個身世神秘的少年范閒，因對自身身世的好奇而離開故鄉澹州，前赴南慶京都。" />
@@ -591,6 +616,13 @@
                             android:layout_marginEnd="8dp"
                             android:text="@string/play_short_display"
                             app:drawableTopCompat="@drawable/ic_action_short_display_shadow" />
+
+                        <com.google.android.material.textview.MaterialTextView
+                            android:id="@+id/detailKeepAction"
+                            style="@style/VideoActionButton"
+                            android:layout_marginEnd="8dp"
+                            android:text="@string/keep"
+                            app:drawableTopCompat="@drawable/ic_action_keep" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:id="@+id/search"

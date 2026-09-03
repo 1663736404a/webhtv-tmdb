@@ -749,6 +749,7 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         mBinding.name.setOnClickListener(view -> onName());
         mBinding.more.setOnClickListener(view -> onMore());
         mBinding.shortDisplay.setOnClickListener(view -> onShortDisplay());
+        mBinding.detailKeepAction.setOnClickListener(view -> onKeep());
         mBinding.search.setOnClickListener(view -> onSearch());
         mBinding.castAction.setOnClickListener(view -> onCast());
         mBinding.settingAction.setOnClickListener(view -> onSetting());
@@ -1136,6 +1137,7 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         checkFlag(item);
         checkKeepImg();
         setText(item);
+        setDetailPoster(item);
         updateKeep();
     }
 
@@ -1149,6 +1151,10 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         setOther(mBinding.other, item);
         updateAudioStageText();
         if (mAudioStageVisible) applyAudioPageMode(true);
+    }
+
+    private void setDetailPoster(Vod item) {
+        ImgUtil.load(item.getName(), item.getPic(), mBinding.poster);
     }
 
     private void setText(TextView view, int resId, String text) {
@@ -4330,6 +4336,7 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         boolean kept = Keep.find(getHistoryKey()) != null;
         mBinding.control.keep.setImageResource(kept ? R.drawable.ic_control_keep_on : R.drawable.ic_control_keep_off);
         mBinding.audioKeepAction.setSelected(kept);
+        mBinding.detailKeepAction.setSelected(kept);
     }
 
     private void checkLockImg() {
@@ -4516,6 +4523,7 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
     private void applyAudioPageMode(boolean visible) {
         if (mBinding.videoShadow != null) mBinding.videoShadow.setVisibility(visible ? View.GONE : View.VISIBLE);
         mBinding.name.setVisibility(visible ? View.GONE : View.VISIBLE);
+        mBinding.detailHero.setVisibility(visible ? View.GONE : View.VISIBLE);
         mBinding.remark.setVisibility(visible ? View.GONE : View.VISIBLE);
         mBinding.site.setVisibility(visible ? View.GONE : mBinding.site.getText().length() == 0 ? View.GONE : View.VISIBLE);
         mBinding.other.setVisibility(visible ? View.GONE : mBinding.other.getText().length() == 0 ? View.GONE : View.VISIBLE);
