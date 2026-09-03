@@ -1,0 +1,78 @@
+name: Android Debug Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: "Which debug APKs to build"
+        required: true
+        default: mobile-arm64
+        type: choice
+        options:
+          - mobile-arm64
+          - leanback-arm64
+          - both-arm64
+
+permissions:
+  contents: read
+
+env:
+  TZ: Asia/Shanghai
+
+jobs:
+  build:
+    name: Build debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android packages
+        run: sdkmanager "platform-tools" "platforms;android-37.0" "build-tools;37.0.0"
+
+      - name: Resolve Gradle tasks
+        id: tasks
+        run: |
+          case "${{ inputs.variant }}" in
+            mobile-arm64)   TASKS=":app:assembleMobileArm64_v8aDebug" ;;
+            leanback-arm64) TASKS=":app:assembleLeanbackArm64_v8aDebug" ;;
+            both-arm64)     TASKS=":app:assembleMobileArm64_v8aDebug :app:assembleLeanbackArm64_v8aDebug" ;;
+            *) echo "::error title=Unknown variant::${{ inputs.variant }}"; exit 1 ;;
+          esac
+          echo "tasks=$TASKS" >> "$GITHUB_OUTPUT"
+
+      - name: Build debug APK
+        run: |
+          chmod +x ./gradlew
+          ./gradlew ${{ steps.tasks.outputs.tasks }} --no-daemon
+
+      - name: Collect APKs
+        run: |
+          rm -rf dist
+          mkdir -p dist
+          find app/build/outputs/apk -name '*.apk' -exec cp {} dist/ \;
+          ls -lh dist/
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: webhtv-tmdb-debug-${{ inputs.variant }}
+          path: dist/*.apk
+          if-no-files-found: error
