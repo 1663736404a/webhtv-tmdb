@@ -4,7 +4,8 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:tag="port">
+    android:tag="port"
+    android:background="#01191A">
 
     <com.fongmi.android.tv.ui.custom.ContextWallImageView
         android:id="@+id/contextWall"
@@ -127,7 +128,8 @@
                     android:clipToPadding="false"
                     android:orientation="vertical"
                     android:paddingTop="0dp"
-                    android:paddingBottom="8dp">
+                    android:paddingBottom="22dp"
+                    android:background="#01191A">
 
                     <FrameLayout
                         android:id="@+id/audioStage"
@@ -466,9 +468,9 @@
                         android:id="@+id/detailHero"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="16dp"
-                        android:layout_marginTop="280dp"
-                        android:layout_marginEnd="16dp"
+                        android:layout_marginStart="20dp"
+                        android:layout_marginTop="276dp"
+                        android:layout_marginEnd="20dp"
                         android:orientation="vertical">
 
                         <com.google.android.material.imageview.ShapeableImageView
@@ -499,7 +501,8 @@
                                     android:ellipsize="end"
                                     android:maxLines="2"
                                     android:textColor="@color/white"
-                                    android:textSize="30sp"
+                                    android:textSize="26sp"
+                                    android:letterSpacing="0.01"
                                     android:textStyle="bold"
                                     tools:text="幸运女神" />
 
@@ -604,19 +607,21 @@
                         android:id="@+id/resumeAction"
                         android:layout_width="match_parent"
                         android:layout_height="56dp"
-                        android:layout_marginStart="16dp"
-                        android:layout_marginTop="18dp"
-                        android:layout_marginEnd="16dp"
-                        android:backgroundTint="@color/white"
+                        android:layout_marginStart="20dp"
+                        android:layout_marginTop="20dp"
+                        android:layout_marginEnd="20dp"
+                        android:backgroundTint="#043833"
                         android:gravity="center"
                         android:minHeight="0dp"
                         android:paddingStart="20dp"
                         android:paddingEnd="20dp"
                         android:text="▶ 继续播放"
-                        android:textColor="@color/black"
-                        android:textSize="16sp"
+                        android:textColor="#D8F4EE"
+                        android:textSize="15sp"
                         android:textStyle="bold"
-                        app:cornerRadius="18dp" />
+                        app:cornerRadius="12dp"
+                        app:strokeColor="#0B9A82"
+                        app:strokeWidth="1dp" />
 
                     <androidx.appcompat.widget.LinearLayoutCompat
                         android:id="@+id/actionRow"
@@ -686,9 +691,9 @@
                     <androidx.appcompat.widget.LinearLayoutCompat
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="16dp"
-                        android:layout_marginTop="16dp"
-                        android:layout_marginEnd="12dp"
+                        android:layout_marginStart="20dp"
+                        android:layout_marginTop="22dp"
+                        android:layout_marginEnd="20dp"
                         android:gravity="center_vertical">
 
                         <com.google.android.material.textview.MaterialTextView
@@ -696,8 +701,9 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text="@string/detail_episode"
-                            android:textColor="@color/white"
-                            android:textSize="16sp" />
+                            android:textColor="#E7FFFA"
+                            android:textSize="17sp"
+                            android:textStyle="bold" />
 
                         <androidx.appcompat.widget.AppCompatImageView
                             android:id="@+id/reverse"

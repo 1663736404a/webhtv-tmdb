@@ -3,9 +3,10 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/root"
-    android:layout_width="168dp"
+    android:layout_width="164dp"
     android:layout_height="wrap_content"
     android:background="@drawable/shape_episode_card"
+    android:elevation="2dp"
     android:clickable="true"
     android:focusable="true"
     android:orientation="vertical"
@@ -16,7 +17,7 @@
 
     <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="92dp">
+        android:layout_height="96dp">
 
         <com.google.android.material.imageview.ShapeableImageView
             android:id="@+id/still"
@@ -68,8 +69,9 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="3dp"
         android:singleLine="true"
-        android:textColor="@color/white_80"
+        android:textColor="#C3E6DE"
         android:textSize="11sp"
+        android:textStyle="bold"
         tools:text="第 1 集 · 48 分钟" />
 
     <com.google.android.material.textview.MaterialTextView
