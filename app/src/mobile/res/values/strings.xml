@@ -51,9 +51,12 @@
     <string name="vod_home">Home</string>
 
     <!-- Detail -->
-    <string name="detail_flag">Flag</string>
+    <string name="detail_flag">Source</string>
     <string name="detail_episode">Episode</string>
     <string name="detail_quality">Quality</string>
+    <string name="detail_episode_index">EP <xliff:g name="number">%1$d</xliff:g></string>
+    <string name="detail_episode_runtime"><xliff:g name="minute">%1$d</xliff:g> min</string>
+    <string name="detail_season"><xliff:g name="number">%1$d</xliff:g></string>
     <string name="detail_content">Summary</string>
     <string name="detail_search">Searching <xliff:g name="name">%s</xliff:g></string>
 

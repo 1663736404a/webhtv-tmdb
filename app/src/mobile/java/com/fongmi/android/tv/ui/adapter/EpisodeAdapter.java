@@ -7,22 +7,29 @@ import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.fongmi.android.tv.bean.Episode;
+import com.fongmi.android.tv.bean.Meta;
+import com.fongmi.android.tv.databinding.AdapterEpisodeCardBinding;
 import com.fongmi.android.tv.databinding.AdapterEpisodeGridBinding;
 import com.fongmi.android.tv.databinding.AdapterEpisodeHoriBinding;
 import com.fongmi.android.tv.ui.base.BaseEpisodeHolder;
 import com.fongmi.android.tv.ui.base.ViewType;
+import com.fongmi.android.tv.ui.holder.EpisodeCardHolder;
 import com.fongmi.android.tv.ui.holder.EpisodeGridHolder;
 import com.fongmi.android.tv.ui.holder.EpisodeHoriHolder;
 import com.fongmi.android.tv.utils.EpisodeTitleCompact;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class EpisodeAdapter extends RecyclerView.Adapter<BaseEpisodeHolder> {
 
     private final OnClickListener listener;
     private final List<Episode> mItems;
-    private final int viewType;
+    private final Map<Integer, Meta.Chapter> mChapters = new HashMap<>();
+    private String fallbackImage = "";
+    private int viewType;
 
     public EpisodeAdapter(OnClickListener listener, int viewType) {
         this(listener, viewType, new ArrayList<>());
@@ -76,6 +83,46 @@ public class EpisodeAdapter extends RecyclerView.Adapter<BaseEpisodeHolder> {
         return mItems;
     }
 
+    /**
+     * TMDB chapters are matched by episode number so a missing or partial
+     * season simply falls back to the site supplied title.
+     */
+    public void setChapters(List<Meta.Chapter> chapters) {
+        mChapters.clear();
+        if (chapters != null) for (Meta.Chapter chapter : chapters) mChapters.put(chapter.getNumber(), chapter);
+        notifyItemRangeChanged(0, getItemCount());
+    }
+
+    public void setFallbackImage(String url) {
+        this.fallbackImage = url == null ? "" : url;
+    }
+
+    public String getFallbackImage() {
+        return fallbackImage;
+    }
+
+    public boolean hasChapters() {
+        return !mChapters.isEmpty();
+    }
+
+    public int getViewType() {
+        return viewType;
+    }
+
+    public void setViewType(int viewType) {
+        if (this.viewType == viewType) return;
+        this.viewType = viewType;
+        notifyDataSetChanged();
+    }
+
+    public Meta.Chapter getChapter(Episode item) {
+        if (mChapters.isEmpty() || item == null) return null;
+        Meta.Chapter chapter = mChapters.get(item.getNumber());
+        if (chapter != null) return chapter;
+        int index = mItems.indexOf(item);
+        return index < 0 ? null : mChapters.get(index + 1);
+    }
+
     public boolean isEmpty() {
         return getItemCount() == 0;
     }
@@ -98,7 +145,9 @@ public class EpisodeAdapter extends RecyclerView.Adapter<BaseEpisodeHolder> {
     @NonNull
     @Override
     public BaseEpisodeHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-        if (viewType == ViewType.HORI) {
+        if (viewType == ViewType.CARD) {
+            return new EpisodeCardHolder(AdapterEpisodeCardBinding.inflate(LayoutInflater.from(parent.getContext()), parent, false), this, listener);
+        } else if (viewType == ViewType.HORI) {
             return new EpisodeHoriHolder(AdapterEpisodeHoriBinding.inflate(LayoutInflater.from(parent.getContext()), parent, false), listener);
         } else {
             return new EpisodeGridHolder(AdapterEpisodeGridBinding.inflate(LayoutInflater.from(parent.getContext()), parent, false), listener);

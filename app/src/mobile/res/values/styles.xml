@@ -84,6 +84,16 @@
         <item name="cornerSize">50%</item>
     </style>
 
+    <style name="ShapeAppearance.WebHTV.EpisodeStill" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">10dp</item>
+    </style>
+
+    <style name="ShapeAppearance.WebHTV.DetailPoster" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">14dp</item>
+    </style>
+
     <style name="ToolbarTextAppearance" parent="TextAppearance.Material3.TitleLarge">
         <item name="android:textSize">20sp</item>
         <item name="android:textColor">@color/white</item>

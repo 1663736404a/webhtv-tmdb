@@ -70,6 +70,7 @@ import com.fongmi.android.tv.App;
 import com.fongmi.android.tv.Constant;
 import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.api.DanmakuApi;
+import com.fongmi.android.tv.api.MetaApi;
 import com.fongmi.android.tv.api.SiteApi;
 import com.fongmi.android.tv.api.config.VodConfig;
 import com.fongmi.android.tv.bean.CastVideo;
@@ -78,6 +79,7 @@ import com.fongmi.android.tv.bean.Episode;
 import com.fongmi.android.tv.bean.Flag;
 import com.fongmi.android.tv.bean.History;
 import com.fongmi.android.tv.bean.Keep;
+import com.fongmi.android.tv.bean.Meta;
 import com.fongmi.android.tv.bean.Parse;
 import com.fongmi.android.tv.bean.Result;
 import com.fongmi.android.tv.bean.Site;
@@ -289,6 +291,9 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
     private boolean decodeSwitchRefreshing;
     private int deferredFullscreenOrientation = Configuration.ORIENTATION_UNDEFINED;
     private int mEpisodeSpanCount;
+    private boolean mEpisodeCardMode;
+    private String mMetaName;
+    private Meta mMeta;
     private int mStatusBarInset;
     private int mEpisodeBottomInset;
     private int mNavigationRightInset;
@@ -1138,6 +1143,7 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         checkKeepImg();
         setText(item);
         setDetailPoster(item);
+        requestMeta(item);
         updateKeep();
     }
 
@@ -1155,6 +1161,146 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
 
     private void setDetailPoster(Vod item) {
         ImgUtil.load(item.getName(), item.getPic(), mBinding.poster);
+    }
+
+    /**
+     * TMDB lookup is presentation only. It never changes flags, episode urls or
+     * the playback call chain, so any failure just leaves the site data visible.
+     */
+    private void requestMeta(Vod item) {
+        String name = item.getName();
+        if (TextUtils.isEmpty(name) || TextUtils.equals(mMetaName, name)) return;
+        mMetaName = name;
+        mMeta = null;
+        mBinding.metaLine.setText("");
+        mBinding.metaLine.setVisibility(View.GONE);
+        if (mEpisodeAdapter != null) {
+            mEpisodeAdapter.setFallbackImage("");
+            mEpisodeAdapter.setChapters(null);
+            applyEpisodeViewType();
+        }
+        MetaApi.search(name, item.getYear(), meta -> {
+            if (isFinishing() || isDestroyed()) return;
+            if (!TextUtils.equals(mMetaName, name)) return;
+            applyMeta(meta);
+        });
+    }
+
+    private void applyMeta(Meta meta) {
+        mMeta = meta;
+        setMetaLine(meta);
+        setMetaPoster(meta);
+        setMetaContent(meta);
+        setMetaGradient(meta);
+        requestMetaEpisodes(meta);
+    }
+
+    private void setMetaLine(Meta meta) {
+        StringBuilder sb = new StringBuilder();
+        if (!meta.getDate().isEmpty()) sb.append(meta.getDate());
+        if (!meta.getGenreText().isEmpty()) sb.append(sb.length() == 0 ? "" : " · ").append(meta.getGenreText());
+        if (meta.getVote() > 0) sb.append(sb.length() == 0 ? "" : " · ").append(String.format(Locale.getDefault(), "TMDB %.1f", meta.getVote()));
+        mBinding.metaLine.setText(sb.toString());
+        mBinding.metaLine.setVisibility(sb.length() == 0 || mAudioStageVisible ? View.GONE : View.VISIBLE);
+    }
+
+    private void setMetaPoster(Meta meta) {
+        String poster = MetaApi.image(meta.getPoster(), false);
+        if (TextUtils.isEmpty(poster)) return;
+        ImgUtil.load(meta.getTitle(), poster, mBinding.poster);
+    }
+
+    private void setMetaContent(Meta meta) {
+        if (meta.getOverview().isEmpty()) return;
+        if (mBinding.content.getText().length() > 0) return;
+        setText(mBinding.content, 0, meta.getOverview());
+    }
+
+    private void setMetaGradient(Meta meta) {
+        String backdrop = MetaApi.image(meta.getBackdrop().isEmpty() ? meta.getPoster() : meta.getBackdrop(), true);
+        if (TextUtils.isEmpty(backdrop)) return;
+        ImgUtil.load(this, backdrop, new CustomTarget<>() {
+            @Override
+            public void onResourceReady(@NonNull Drawable resource, @Nullable Transition<? super Drawable> transition) {
+                if (isFinishing() || isDestroyed()) return;
+                applyGradient(resource);
+            }
+
+            @Override
+            public void onLoadFailed(@Nullable Drawable errorDrawable) {
+            }
+        });
+    }
+
+    /**
+     * Builds the poster driven vertical gradient behind the detail content.
+     */
+    private void applyGradient(Drawable resource) {
+        Bitmap bitmap = drawableToBitmap(resource);
+        if (bitmap == null) return;
+        Palette palette = Palette.from(bitmap).clearFilters().generate();
+        int base = palette.getDarkVibrantColor(palette.getDarkMutedColor(palette.getDominantColor(Color.BLACK)));
+        int top = withAlpha(base, 0xE6);
+        int mid = withAlpha(darken(base, 0.55f), 0xF2);
+        GradientDrawable gradient = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{top, mid, Color.BLACK});
+        mBinding.detailGradient.setBackground(gradient);
+        mBinding.detailGradient.setVisibility(mAudioStageVisible ? View.GONE : View.VISIBLE);
+    }
+
+    private Bitmap drawableToBitmap(Drawable drawable) {
+        int width = Math.max(1, Math.min(drawable.getIntrinsicWidth(), 160));
+        int height = Math.max(1, Math.min(drawable.getIntrinsicHeight(), 160));
+        try {
+            Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(bitmap);
+            drawable.setBounds(0, 0, width, height);
+            drawable.draw(canvas);
+            return bitmap;
+        } catch (Throwable e) {
+            return null;
+        }
+    }
+
+    private int withAlpha(int color, int alpha) {
+        return Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color));
+    }
+
+    private int darken(int color, float factor) {
+        return Color.rgb((int) (Color.red(color) * factor), (int) (Color.green(color) * factor), (int) (Color.blue(color) * factor));
+    }
+
+    private void requestMetaEpisodes(Meta meta) {
+        if (meta.getId() <= 0) return;
+        if (!"tv".equals(meta.getMediaType()) && meta.getSeasons().isEmpty()) return;
+        MetaApi.season(meta.getId(), 1, chapters -> {
+            if (isFinishing() || isDestroyed()) return;
+            if (mMeta == null || mMeta.getId() != meta.getId()) return;
+            mEpisodeAdapter.setFallbackImage(MetaApi.image(meta.getBackdrop(), false));
+            mEpisodeAdapter.setChapters(chapters);
+            applyEpisodeViewType();
+        });
+    }
+
+    /**
+     * TMDB chapters switch the episode list to the horizontal card rail; without
+     * them the original grid stays so text-only sites are unaffected.
+     */
+    private void applyEpisodeViewType() {
+        boolean card = mEpisodeAdapter != null && mEpisodeAdapter.hasChapters();
+        if (card == mEpisodeCardMode) return;
+        mEpisodeCardMode = card;
+        if (card) {
+            mEpisodeAdapter.setViewType(ViewType.CARD);
+            if (mEpisodeDecoration != null) mBinding.episode.removeItemDecoration(mEpisodeDecoration);
+            mBinding.episode.setLayoutManager(new LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false));
+            mBinding.episode.addItemDecoration(mEpisodeDecoration = new SpaceItemDecoration(10));
+        } else {
+            mEpisodeAdapter.setViewType(ViewType.GRID);
+            if (mEpisodeDecoration != null) mBinding.episode.removeItemDecoration(mEpisodeDecoration);
+            mBinding.episode.setLayoutManager(new GridLayoutManager(this, mEpisodeSpanCount));
+            mBinding.episode.addItemDecoration(mEpisodeDecoration = new SpaceItemDecoration(mEpisodeSpanCount, 8));
+        }
+        mBinding.episode.post(this::scrollEpisodeToSelected);
     }
 
     private void setText(TextView view, int resId, String text) {
@@ -1358,10 +1504,15 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
 
     private void syncEpisodeGroupByScroll() {
         RecyclerView.LayoutManager manager = mBinding.episode.getLayoutManager();
-        if (!(manager instanceof GridLayoutManager)) return;
-        int position = getEpisodeGroupSyncPosition((GridLayoutManager) manager);
-        if (position == RecyclerView.NO_POSITION) return;
-        selectEpisodeGroupByPosition(position);
+        if (manager instanceof GridLayoutManager grid) {
+            int position = getEpisodeGroupSyncPosition(grid);
+            if (position == RecyclerView.NO_POSITION) return;
+            selectEpisodeGroupByPosition(position);
+        } else if (manager instanceof LinearLayoutManager linear) {
+            int position = linear.findFirstVisibleItemPosition();
+            if (position == RecyclerView.NO_POSITION) return;
+            selectEpisodeGroupByPosition(position);
+        }
     }
 
     private int getEpisodeGroupSyncPosition(GridLayoutManager manager) {
@@ -1388,12 +1539,15 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
 
     private void scrollEpisodeToPosition(int position) {
         RecyclerView.LayoutManager manager = mBinding.episode.getLayoutManager();
-        if (manager instanceof GridLayoutManager) {
-            int rowStart = getEpisodeRowStart((GridLayoutManager) manager, position);
-            int offset = rowStart >= ((GridLayoutManager) manager).getSpanCount() ? -ResUtil.dp2px(4) : 0;
-            ((GridLayoutManager) manager).scrollToPositionWithOffset(rowStart, offset);
+        if (manager instanceof GridLayoutManager grid && !mEpisodeCardMode) {
+            int rowStart = getEpisodeRowStart(grid, position);
+            int offset = rowStart >= grid.getSpanCount() ? -ResUtil.dp2px(4) : 0;
+            grid.scrollToPositionWithOffset(rowStart, offset);
+        } else if (manager instanceof LinearLayoutManager linear) {
+            linear.scrollToPositionWithOffset(position, ResUtil.dp2px(16));
+        } else {
+            mBinding.episode.scrollToPosition(position);
         }
-        else mBinding.episode.scrollToPosition(position);
     }
 
     private void scrollEpisodeToSelected() {
@@ -1407,6 +1561,10 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
 
     private void updateEpisodeSpan(List<Episode> items) {
         int span = getEpisodeSpan(items);
+        if (mEpisodeCardMode) {
+            mEpisodeSpanCount = span;
+            return;
+        }
         if (span == mEpisodeSpanCount) return;
         mEpisodeSpanCount = span;
         mBinding.episode.setLayoutManager(new GridLayoutManager(this, mEpisodeSpanCount));
@@ -4524,6 +4682,8 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         if (mBinding.videoShadow != null) mBinding.videoShadow.setVisibility(visible ? View.GONE : View.VISIBLE);
         mBinding.name.setVisibility(visible ? View.GONE : View.VISIBLE);
         mBinding.detailHero.setVisibility(visible ? View.GONE : View.VISIBLE);
+        mBinding.metaLine.setVisibility(visible || mBinding.metaLine.getText().length() == 0 ? View.GONE : View.VISIBLE);
+        mBinding.detailGradient.setVisibility(visible || mBinding.detailGradient.getBackground() == null ? View.GONE : View.VISIBLE);
         mBinding.remark.setVisibility(visible ? View.GONE : View.VISIBLE);
         mBinding.site.setVisibility(visible ? View.GONE : mBinding.site.getText().length() == 0 ? View.GONE : View.VISIBLE);
         mBinding.other.setVisibility(visible ? View.GONE : mBinding.other.getText().length() == 0 ? View.GONE : View.VISIBLE);
