@@ -754,6 +754,7 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
     @SuppressLint("ClickableViewAccessibility")
     protected void initEvent() {
         mBinding.name.setOnClickListener(view -> onName());
+        mBinding.resumeAction.setOnClickListener(view -> onResumeAction());
         mBinding.more.setOnClickListener(view -> onMore());
         mBinding.shortDisplay.setOnClickListener(view -> onShortDisplay());
         mBinding.detailKeepAction.setOnClickListener(view -> onKeep());
@@ -1158,8 +1159,21 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         setDetailLyrics(item.getContent());
         setText(mBinding.remark, 0, item.getRemarks());
         setOther(mBinding.other, item);
+        applyPortraitDetailVisibility();
         updateAudioStageText();
         if (mAudioStageVisible) applyAudioPageMode(true);
+    }
+
+    private void applyPortraitDetailVisibility() {
+        if (!isPort() || isFullscreen() || mBinding == null) return;
+        mBinding.metaLine.setVisibility(View.GONE);
+        mBinding.remark.setVisibility(View.GONE);
+        mBinding.other.setVisibility(View.GONE);
+        mBinding.site.setVisibility(View.GONE);
+        mBinding.director.setVisibility(View.GONE);
+        mBinding.actor.setVisibility(View.GONE);
+        mBinding.contentLayout.setVisibility(View.GONE);
+        mBinding.actionRow.setVisibility(View.GONE);
     }
 
     private void setDetailPoster(Vod item) {
@@ -1231,6 +1245,7 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         setMetaContent(meta);
         setMetaGradient(meta);
         setDetailBackdrop(MetaApi.image(meta.getBackdrop().isEmpty() ? meta.getPoster() : meta.getBackdrop(), true));
+        applyPortraitDetailVisibility();
         requestMetaEpisodes(meta);
     }
 
@@ -3882,6 +3897,12 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         else player().setMediaItem();
     }
 
+    private void onResumeAction() {
+        if (mEpisodeAdapter == null || mEpisodeAdapter.isEmpty()) return;
+        Episode episode = getEpisode();
+        if (episode != null) onItemClick(episode);
+    }
+
     private void onRefresh() {
         saveHistory();
         player().stop();
@@ -4749,7 +4770,8 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         mBinding.director.setVisibility(visible ? View.GONE : mBinding.director.getText().length() == 0 ? View.GONE : View.VISIBLE);
         mBinding.actor.setVisibility(visible ? View.GONE : mBinding.actor.getText().length() == 0 ? View.GONE : View.VISIBLE);
         mBinding.contentLayout.setVisibility(visible ? View.GONE : mBinding.content.getText().length() == 0 ? View.GONE : View.VISIBLE);
-        mBinding.actionRow.setVisibility(visible ? View.GONE : View.VISIBLE);
+        mBinding.resumeAction.setVisibility(!visible && isPort() ? View.VISIBLE : View.GONE);
+        mBinding.actionRow.setVisibility(visible || isPort() ? View.GONE : View.VISIBLE);
         mBinding.flag.setVisibility(visible || mFlagAdapter == null || mFlagAdapter.isEmpty() ? View.GONE : View.VISIBLE);
         boolean qualityVisible = mQualityAdapter != null && mQualityAdapter.getItemCount() > 1;
         boolean episodeGroupVisible = mEpisodeGroupAdapter != null && mEpisodeGroupAdapter.getItemCount() > 1;
@@ -4760,6 +4782,7 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         mBinding.episodeGroup.setVisibility(visible || !episodeGroupVisible ? View.GONE : View.VISIBLE);
         mBinding.episode.setVisibility(visible || !episodeVisible ? View.GONE : View.VISIBLE);
         mBinding.quick.setVisibility(visible || !quickVisible ? View.GONE : View.VISIBLE);
+        if (!visible) applyPortraitDetailVisibility();
     }
 
     private void updateAudioStageText() {

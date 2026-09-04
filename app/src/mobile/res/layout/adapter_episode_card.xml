@@ -3,7 +3,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/root"
-    android:layout_width="220dp"
+    android:layout_width="300dp"
     android:layout_height="wrap_content"
     android:background="@drawable/shape_episode_card"
     android:clickable="true"

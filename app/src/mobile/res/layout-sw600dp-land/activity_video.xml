@@ -674,6 +674,12 @@
 
                     </androidx.appcompat.widget.LinearLayoutCompat>
 
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/resumeAction"
+                        android:layout_width="1dp"
+                        android:layout_height="1dp"
+                        android:visibility="gone" />
+
                     <androidx.appcompat.widget.LinearLayoutCompat
                         android:id="@+id/actionRow"
                         android:layout_width="match_parent"

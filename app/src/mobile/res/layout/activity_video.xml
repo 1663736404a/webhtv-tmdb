@@ -516,7 +516,22 @@
                                     android:singleLine="true"
                                     android:textColor="@color/white_90"
                                     android:textSize="12sp"
+                                    android:visibility="gone"
                                     tools:text="更新至第7集" />
+
+                                <com.google.android.material.textview.MaterialTextView
+                                    android:id="@+id/settingAction"
+                                    style="@style/VideoActionButton"
+                                    android:layout_width="48dp"
+                                    android:layout_height="48dp"
+                                    android:layout_weight="0"
+                                    android:layout_marginStart="8dp"
+                                    android:drawablePadding="0dp"
+                                    android:gravity="center"
+                                    android:padding="4dp"
+                                    android:text=""
+                                    android:textColor="@color/white"
+                                    app:drawableTopCompat="@drawable/ic_control_setting_shadow" />
 
                             </androidx.appcompat.widget.LinearLayoutCompat>
 
@@ -586,8 +601,27 @@
 
                     </androidx.appcompat.widget.LinearLayoutCompat>
 
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/resumeAction"
+                        android:layout_width="match_parent"
+                        android:layout_height="56dp"
+                        android:layout_marginStart="16dp"
+                        android:layout_marginTop="18dp"
+                        android:layout_marginEnd="16dp"
+                        android:backgroundTint="@color/white"
+                        android:gravity="center"
+                        android:minHeight="0dp"
+                        android:paddingStart="20dp"
+                        android:paddingEnd="20dp"
+                        android:text="▶ 继续播放"
+                        android:textColor="@color/black"
+                        android:textSize="16sp"
+                        android:textStyle="bold"
+                        app:cornerRadius="18dp" />
+
                     <androidx.appcompat.widget.LinearLayoutCompat
                         android:id="@+id/actionRow"
+                        android:visibility="gone"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginStart="16dp"
@@ -599,6 +633,7 @@
                         <com.google.android.material.textview.MaterialTextView
                             android:id="@+id/shortDisplay"
                             style="@style/VideoActionButton"
+                            android:visibility="gone"
                             android:layout_marginEnd="8dp"
                             android:text="@string/play_short_display"
                             app:drawableTopCompat="@drawable/ic_action_short_display_shadow" />
@@ -623,12 +658,6 @@
                             android:layout_marginEnd="8dp"
                             android:text="@string/play_cast"
                             app:drawableTopCompat="@drawable/ic_control_cast_shadow" />
-
-                        <com.google.android.material.textview.MaterialTextView
-                            android:id="@+id/settingAction"
-                            style="@style/VideoActionButton"
-                            android:text="@string/nav_setting"
-                            app:drawableTopCompat="@drawable/ic_control_setting_shadow" />
 
                     </androidx.appcompat.widget.LinearLayoutCompat>
 
