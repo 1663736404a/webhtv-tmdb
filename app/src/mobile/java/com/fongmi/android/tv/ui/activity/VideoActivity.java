@@ -1190,26 +1190,30 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         String backdrop = Objects.toString(url, "");
         mDetailBackdropUrl = backdrop;
         if (TextUtils.isEmpty(backdrop) || !isPort()) {
-            if (TextUtils.isEmpty(backdrop) && !isFullscreen()) hideContextWall();
+            if (TextUtils.isEmpty(backdrop) && !isFullscreen()) {
+                mBinding.detailBackdrop.setImageDrawable(null);
+                mBinding.detailBackdrop.setVisibility(View.GONE);
+            }
             return;
         }
-        mBinding.contextWall.setBackgroundColor(Color.BLACK);
-        mBinding.contextWall.setVisibility(View.VISIBLE);
+        mBinding.detailBackdrop.setBackgroundColor(Color.BLACK);
+        mBinding.detailBackdrop.setVisibility(View.VISIBLE);
         ImgUtil.load(this, backdrop, new CustomTarget<>() {
             @Override
             public void onResourceReady(@NonNull Drawable resource, @Nullable Transition<? super Drawable> transition) {
                 if (!TextUtils.equals(mDetailBackdropUrl, backdrop) || isFinishing() || isDestroyed()) return;
                 if (isFullscreen()) return;
-                mBinding.contextWall.setBackgroundColor(Color.TRANSPARENT);
-                mBinding.contextWall.setImageDrawable(resource);
+                mBinding.detailBackdrop.setBackgroundColor(Color.TRANSPARENT);
+                mBinding.detailBackdrop.setImageDrawable(resource);
                 applyGradient(resource);
-                mBinding.contextWall.setVisibility(View.VISIBLE);
+                mBinding.detailBackdrop.setVisibility(View.VISIBLE);
             }
 
             @Override
             public void onLoadFailed(@Nullable Drawable errorDrawable) {
                 if (!TextUtils.equals(mDetailBackdropUrl, backdrop)) return;
-                hideContextWall();
+                mBinding.detailBackdrop.setImageDrawable(null);
+                mBinding.detailBackdrop.setVisibility(View.GONE);
             }
         });
     }
@@ -4122,9 +4126,9 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         mBinding.video.setVisibility(visible ? View.VISIBLE : View.GONE);
         mBinding.videoShadow.setVisibility(visible ? View.VISIBLE : View.GONE);
         if (visible) {
-            mBinding.contextWall.setVisibility(View.GONE);
+            mBinding.detailBackdrop.setVisibility(View.GONE);
         } else if (!TextUtils.isEmpty(mDetailBackdropUrl)) {
-            mBinding.contextWall.setVisibility(View.VISIBLE);
+            mBinding.detailBackdrop.setVisibility(View.VISIBLE);
         }
     }
 
