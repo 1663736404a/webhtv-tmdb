@@ -310,6 +310,7 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
     private PiP mPiP;
     private String mContextWallUrl;
     private String mContextWallLockedUrl;
+    private String mDetailBackdropUrl;
     private String playHealthKey;
     private long detailStartTime;
     private long playerStartTime;
@@ -608,6 +609,7 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         mKeyDown = CustomKeyDown.create(this, mBinding.exo);
         mFrameParams = mBinding.video.getLayoutParams();
         mFrameHeight = mFrameParams.height;
+        setDetailSurfaceVisible(false);
         mBinding.swipeLayout.setEnabled(false);
         setupAudioStageOverlay();
         configureAudioLandscapeActions();
@@ -1016,6 +1018,7 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
 
     private void setVideoView(boolean isInPictureInPictureMode) {
         if (isInPictureInPictureMode) {
+            mBinding.video.setVisibility(View.VISIBLE);
             mBinding.video.setLayoutParams(new RelativeLayout.LayoutParams(RelativeLayout.LayoutParams.MATCH_PARENT, RelativeLayout.LayoutParams.MATCH_PARENT));
         } else {
             applyAudioStageLayout(mAudioStageVisible);
@@ -1161,6 +1164,40 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
 
     private void setDetailPoster(Vod item) {
         ImgUtil.load(item.getName(), item.getPic(), mBinding.poster);
+        setDetailBackdrop(item.getPic());
+    }
+
+    /**
+     * The portrait detail page uses the shared full-screen image layer as its
+     * backdrop. It is deliberately independent from the playback-wall setting:
+     * TMDB artwork is part of the detail presentation, not a player preference.
+     */
+    private void setDetailBackdrop(String url) {
+        String backdrop = Objects.toString(url, "");
+        mDetailBackdropUrl = backdrop;
+        if (TextUtils.isEmpty(backdrop) || !isPort()) {
+            if (TextUtils.isEmpty(backdrop) && !isFullscreen()) hideContextWall();
+            return;
+        }
+        mBinding.contextWall.setBackgroundColor(Color.BLACK);
+        mBinding.contextWall.setVisibility(View.VISIBLE);
+        ImgUtil.load(this, backdrop, new CustomTarget<>() {
+            @Override
+            public void onResourceReady(@NonNull Drawable resource, @Nullable Transition<? super Drawable> transition) {
+                if (!TextUtils.equals(mDetailBackdropUrl, backdrop) || isFinishing() || isDestroyed()) return;
+                if (isFullscreen()) return;
+                mBinding.contextWall.setBackgroundColor(Color.TRANSPARENT);
+                mBinding.contextWall.setImageDrawable(resource);
+                applyGradient(resource);
+                mBinding.contextWall.setVisibility(View.VISIBLE);
+            }
+
+            @Override
+            public void onLoadFailed(@Nullable Drawable errorDrawable) {
+                if (!TextUtils.equals(mDetailBackdropUrl, backdrop)) return;
+                hideContextWall();
+            }
+        });
     }
 
     /**
@@ -1172,6 +1209,7 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         if (TextUtils.isEmpty(name) || TextUtils.equals(mMetaName, name)) return;
         mMetaName = name;
         mMeta = null;
+        setDetailBackdrop(item.getPic());
         mBinding.metaLine.setText("");
         mBinding.metaLine.setVisibility(View.GONE);
         if (mEpisodeAdapter != null) {
@@ -1192,6 +1230,7 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         setMetaPoster(meta);
         setMetaContent(meta);
         setMetaGradient(meta);
+        setDetailBackdrop(MetaApi.image(meta.getBackdrop().isEmpty() ? meta.getPoster() : meta.getBackdrop(), true));
         requestMetaEpisodes(meta);
     }
 
@@ -4057,6 +4096,17 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         return enter;
     }
 
+    private void setDetailSurfaceVisible(boolean visible) {
+        if (mBinding == null || !isPort() || isInPictureInPictureMode()) return;
+        mBinding.video.setVisibility(visible ? View.VISIBLE : View.GONE);
+        mBinding.videoShadow.setVisibility(visible ? View.VISIBLE : View.GONE);
+        if (visible) {
+            mBinding.contextWall.setVisibility(View.GONE);
+        } else if (!TextUtils.isEmpty(mDetailBackdropUrl)) {
+            mBinding.contextWall.setVisibility(View.VISIBLE);
+        }
+    }
+
     private void enterFullscreen() {
         if (isFullscreen()) return;
         if (service() == null) {
@@ -4065,8 +4115,10 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         }
         logVideoFrame("enterFullscreen before");
         setFullscreen(true);
+        setDetailSurfaceVisible(true);
         if (isLand() && !player().isPortrait()) setTransition();
         mBinding.video.setLayoutParams(new RelativeLayout.LayoutParams(RelativeLayout.LayoutParams.MATCH_PARENT, RelativeLayout.LayoutParams.MATCH_PARENT));
+        mBinding.video.setVisibility(View.VISIBLE);
         setRequestedOrientation(PlaybackOrientation.getEnterFullscreenOrientation(player().isPortrait()));
         mBinding.control.title.setVisibility(View.VISIBLE);
         setSizeText();
@@ -4087,6 +4139,7 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         setFullscreen(false);
         if (isLand() && !player().isPortrait()) setTransition();
         setRequestedOrientation(PlaybackOrientation.getExitFullscreenOrientation(isPort()));
+        setDetailSurfaceVisible(false);
         mBinding.episodeGroup.postDelayed(() -> mBinding.episodeGroup.scrollToPosition(mEpisodeGroupAdapter.getPosition()), 100);
         mBinding.episode.postDelayed(this::scrollEpisodeToSelected, 100);
         mBinding.control.title.setVisibility(View.INVISIBLE);
@@ -4228,7 +4281,8 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
     private void setArtwork(String url) {
         if (mHistory != null) mHistory.setVodPic(url);
         loadArtwork(url, mPlaybackEpisodeKey);
-        setContextWall(getContextWall());
+        if (isPort() && !isFullscreen()) setDetailBackdrop(url);
+        else setContextWall(getContextWall());
     }
 
     private void setArtwork() {
@@ -4290,6 +4344,9 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
     }
 
     private void setContextWall(String url) {
+        // During portrait detail, the same image layer is temporarily owned by
+        // the TMDB backdrop. Do not let playback-wall restoration overwrite it.
+        if (isPort() && !isFullscreen() && !TextUtils.isEmpty(mDetailBackdropUrl)) return;
         if (!Setting.isPlaybackArtworkWall()) {
             mContextWallUrl = "";
             hideContextWall();
@@ -4333,6 +4390,7 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
     }
 
     private void restoreContextWall() {
+        if (isPort() && !isFullscreen() && !TextUtils.isEmpty(mDetailBackdropUrl)) return;
         if (!Setting.isPlaybackArtworkWall()) return;
         String wall = getContextWall();
         if (TextUtils.isEmpty(wall)) {
