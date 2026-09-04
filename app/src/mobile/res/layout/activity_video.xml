@@ -7,13 +7,6 @@
     android:tag="port">
 
     <com.fongmi.android.tv.ui.custom.ContextWallImageView
-        android:id="@+id/detailBackdrop"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:importantForAccessibility="no"
-        android:visibility="gone" />
-
-    <com.fongmi.android.tv.ui.custom.ContextWallImageView
         android:id="@+id/contextWall"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
@@ -21,21 +14,6 @@
         android:layout_alignParentBottom="true"
         android:importantForAccessibility="no"
         android:visibility="gone" />
-
-    <View
-        android:id="@+id/detailGradient"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:layout_alignParentTop="true"
-        android:layout_alignParentBottom="true"
-        android:importantForAccessibility="no"
-        android:visibility="gone" />
-
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="320dp"
-        android:layout_alignParentTop="true"
-        android:background="@drawable/shape_video_context_scrim_top" />
 
     <View
         android:id="@+id/statusBar"
@@ -121,6 +99,20 @@
             android:id="@+id/progressLayout"
             android:layout_width="match_parent"
             android:layout_height="match_parent">
+
+            <com.fongmi.android.tv.ui.custom.ContextWallImageView
+                android:id="@+id/detailBackdrop"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:importantForAccessibility="no"
+                android:visibility="gone" />
+
+            <View
+                android:id="@+id/detailGradient"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:importantForAccessibility="no"
+                android:visibility="gone" />
 
             <com.fongmi.android.tv.ui.custom.FixedNestedScrollView
                 android:id="@+id/scroll"

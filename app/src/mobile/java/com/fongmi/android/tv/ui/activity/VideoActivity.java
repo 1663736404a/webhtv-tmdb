@@ -1298,9 +1298,10 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         if (bitmap == null) return;
         Palette palette = Palette.from(bitmap).clearFilters().generate();
         int base = palette.getDarkVibrantColor(palette.getDarkMutedColor(palette.getDominantColor(Color.BLACK)));
-        int top = withAlpha(base, 0xE6);
-        int mid = withAlpha(darken(base, 0.55f), 0xF2);
-        GradientDrawable gradient = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{top, mid, Color.BLACK});
+        int top = withAlpha(base, 0x08);
+        int mid = withAlpha(darken(base, 0.45f), 0x68);
+        int bottom = withAlpha(Color.BLACK, 0xF2);
+        GradientDrawable gradient = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{top, mid, bottom});
         mBinding.detailGradient.setBackground(gradient);
         mBinding.detailGradient.setVisibility(mAudioStageVisible ? View.GONE : View.VISIBLE);
     }
