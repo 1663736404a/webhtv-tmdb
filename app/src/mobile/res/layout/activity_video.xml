@@ -554,7 +554,7 @@
                                 android:layout_marginTop="6dp"
                                 android:ellipsize="end"
                                 android:singleLine="true"
-                                android:textColor="@color/white_75"
+                                android:textColor="@color/white_70"
                                 android:textSize="13sp"
                                 tools:text="站源：btbtla.py" />
 
